@@ -17,9 +17,9 @@ npm run build
 
 ## Trabajo en equipo
 
-Las instrucciones completas de colaboración, ramas y Pull Requests están en [CONTRIBUTING.md](./CONTRIBUTING.md).
+Las instrucciones completas de colaboración, ramas, revisión y merges están en [CONTRIBUTING.md](./CONTRIBUTING.md).
 
-El flujo oficial es `feature/* → develop → master`. No se deben realizar cambios directamente en `develop` ni `master`.
+El flujo oficial es `origin/develop → feature/* → revisión → merge directo a develop → master`. No se utilizan Pull Requests, `main` ni cambios directos sobre `develop` o `master`.
 
 ## Alcance actual
 

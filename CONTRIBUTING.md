@@ -1,34 +1,24 @@
 # Guía de trabajo de NEXO COMMERCE
 
-Este documento define cómo debe colaborar el equipo en el repositorio:
+Este documento define el trabajo colaborativo del equipo en:
 
 <https://github.com/marce711/nexo-e-commerce>
 
-La persona responsable de priorizar, revisar y coordinar la integración es el Scrum Master del proyecto.
+El Scrum Master coordina tickets, revisiones, merges e integración del producto.
 
-## Estrategia de ramas
+## Flujo oficial
 
 ```text
-feature/*  →  develop  →  master
+origin/develop → rama personal → pruebas → commit → push → revisión → merge directo a develop → push de develop
 ```
 
-- `master`: versión estable y lista para producción.
-- `develop`: rama principal de integración del equipo.
-- `feature/*`: rama individual para una funcionalidad, mejora o corrección.
+- `master`: versión estable. No se utiliza para el trabajo diario.
+- `develop`: rama principal de integración.
+- `feature/*`: rama personal de cada compañero para un ticket o funcionalidad.
 
-No se debe trabajar directamente sobre `master` ni `develop`.
+No se trabajará con Pull Requests en este proyecto. La integración se realizará mediante revisión y merge directo de la rama personal hacia `develop`.
 
-Ejemplos de nombres:
-
-- `feature/frontend-foundation`
-- `feature/auth-client-admin`
-- `feature/public-store`
-- `feature/admin-dashboard`
-- `feature/products`
-- `feature/inventory`
-- `feature/orders`
-- `feature/payments`
-- `feature/mobile-expo`
+No se debe modificar directamente `develop` ni `master`. Tampoco se utilizará una rama `main`.
 
 ## Preparar el entorno
 
@@ -39,7 +29,7 @@ npm install
 npm run dev
 ```
 
-Antes de trabajar, revisar siempre la rama y el estado:
+Antes de modificar cualquier archivo:
 
 ```bash
 git branch --show-current
@@ -47,11 +37,11 @@ git status
 git fetch origin
 ```
 
-Si existen cambios locales que no son tuyos, detente y consulta al Scrum Master. No uses `reset --hard` ni sobrescribas archivos sin autorización.
+Confirma que el worktree esté limpio y que el ticket corresponda a la rama en la que vas a trabajar. Si hay cambios locales que no son tuyos, detente y consulta al Scrum Master. No uses `reset --hard` ni sobrescribas cambios existentes.
 
-## Crear una rama de trabajo
+## Crear una rama personal
 
-Todas las ramas feature deben crearse desde la versión actualizada de `develop`:
+Cada ticket debe tener su propia rama creada desde `origin/develop` actualizado:
 
 ```bash
 git switch develop
@@ -59,11 +49,31 @@ git pull origin develop
 git switch -c feature/nombre-descriptivo
 ```
 
-Una rama debe concentrarse en una sola funcionalidad. Mantén los cambios pequeños y evita mezclar refactorizaciones no relacionadas.
+Ejemplos:
 
-## Commits
+- `feature/auth-client-admin`
+- `feature/public-store`
+- `feature/products`
+- `feature/inventory`
+- `feature/orders`
+- `feature/payments`
+- `feature/mobile-expo`
 
-Usar mensajes claros y descriptivos, preferiblemente con esta convención:
+No mezcles tickets, refactors ni mejoras preventivas en una misma rama.
+
+## Alcance estricto
+
+Antes de implementar, analiza el ticket y define qué archivos y capas están involucrados. Implementa únicamente lo solicitado.
+
+No agregues cambios de seguridad, autenticación, CSRF, red, proxy, configuración global, dependencias o infraestructura salvo que el ticket lo solicite explícitamente.
+
+Conserva los cambios locales existentes. No modifiques archivos generados, `dist`, lockfiles o configuraciones si no es estrictamente necesario.
+
+Si la solución requiere salir del alcance del ticket, detente y consulta al Scrum Master.
+
+## Commits y push
+
+Usa commits pequeños y descriptivos:
 
 ```text
 feat: agrega filtro por categoría
@@ -74,36 +84,48 @@ test: valida acceso administrativo
 chore: actualiza dependencias
 ```
 
-Antes de confirmar:
+Antes de hacer push:
 
 ```bash
 npm run build
 git diff --check
+git diff
 git status
 ```
 
-## Pull Requests
-
-El flujo obligatorio es:
-
-1. Actualizar la rama feature con `develop`.
-2. Ejecutar compilación y pruebas.
-3. Hacer push de la rama feature.
-4. Abrir un Pull Request desde `feature/*` hacia `develop`.
-5. Esperar la revisión y aprobación del Scrum Master.
-6. Resolver observaciones y actualizar el mismo Pull Request.
-7. Integrar a `develop` únicamente cuando la revisión esté completa.
-8. Promover `develop` a `master` mediante otro Pull Request cuando la versión esté validada.
+Si todo está correcto:
 
 ```bash
-git add .
+git add archivos-relacionados
 git commit -m "feat: descripción breve del cambio"
 git push -u origin feature/nombre-descriptivo
 ```
 
-El Pull Request debe explicar qué cambió, cómo probarlo, qué rutas o módulos fueron afectados y adjuntar capturas cuando el cambio sea visual.
+No hagas commits, resets ni reversiones destructivas sin que el Scrum Master lo solicite o autorice.
 
-Para actualizar una feature antes de solicitar revisión:
+## Revisión y merge directo a develop
+
+Después del push, informa al Scrum Master:
+
+- Nombre de la rama.
+- Ticket atendido.
+- Archivos modificados y motivo.
+- Pruebas y validaciones ejecutadas.
+- Riesgos, decisiones o conflictos pendientes.
+
+El Scrum Master revisará la rama y, desde una copia local controlada, integrará los cambios:
+
+```bash
+git fetch origin
+git switch develop
+git pull origin develop
+git merge origin/feature/nombre-descriptivo
+git push origin develop
+```
+
+La rama personal no debe mergearse si hay conflictos sin resolver, pruebas fallidas o cambios fuera del ticket.
+
+Para actualizar una rama personal antes de la revisión:
 
 ```bash
 git fetch origin
@@ -113,33 +135,30 @@ npm run build
 git push
 ```
 
-Si el merge presenta conflictos, resuélvelos con cuidado y solicita apoyo al Scrum Master si el conflicto afecta otra funcionalidad.
+## Resumen del ticket
 
-## Configuración recomendada para el Scrum Master
+Cada ticket debe quedar documentado con:
 
-En GitHub, configura reglas para `develop` y `master` que:
-
-- Requieran Pull Request antes de integrar.
-- Requieran al menos una revisión aprobada.
-- Requieran que los checks de compilación pasen.
-- Bloqueen push directo, force push y eliminación de la rama.
-- Exijan resolver conversaciones antes de fusionar.
-
-El Scrum Master revisa alcance, calidad, pruebas, conflictos y cumplimiento de la arquitectura antes de aprobar.
+1. Qué se solicitó.
+2. Qué archivos y capas se modificaron.
+3. Por qué se modificaron.
+4. Cómo se probó.
+5. Resultado de `npm run build` y validaciones relevantes.
+6. Riesgos o pendientes.
 
 ## Criterios antes de integrar
 
-- La rama parte de `develop` actualizado.
-- La compilación `npm run build` termina correctamente.
-- Las rutas nuevas y existentes funcionan.
-- Se probaron estados de carga, error, vacío y éxito cuando corresponda.
-- La interfaz funciona en escritorio y móvil.
-- No hay credenciales, tarjetas, CVV, tokens reales ni datos personales reales.
-- No se agregan dependencias o archivos generados innecesarios.
-- La funcionalidad está documentada si introduce una decisión técnica nueva.
-- El Pull Request tiene revisión aprobada.
+- La rama se creó desde `origin/develop` actualizado.
+- El cambio está limitado al ticket.
+- La compilación termina correctamente.
+- Se revisó el diff completo y no hay cambios no relacionados.
+- Se probaron las rutas, estados de error, estados vacíos y formularios afectados.
+- Se verificó responsive en escritorio y móvil cuando aplique.
+- No hay credenciales, tarjetas, CVV, tokens ni datos reales.
+- La documentación se actualizó si el ticket introdujo una decisión técnica.
+- El Scrum Master realizó la revisión.
 
-## Orden de desarrollo por fases
+## Fases del proyecto
 
 1. Frontend web con React, Vite, TypeScript, Tailwind CSS, React Router y lucide-react.
 2. Acceso dividido entre Cliente y Administrador.
@@ -152,13 +171,13 @@ El Scrum Master revisa alcance, calidad, pruebas, conflictos y cumplimiento de l
 9. Backend con Spring Boot y Spring Security.
 10. Integración con APIs y base de datos.
 
-Cada fase debe desarrollarse en una o más ramas feature, validarse y luego integrarse mediante Pull Request.
+Cada fase debe desarrollarse en tickets separados, usando ramas `feature/*` y el flujo de integración directo a `develop` definido arriba.
 
-## Reglas técnicas del proyecto
+## Reglas técnicas
 
 - El frontend usa datos ficticios, servicios simulados y estado temporal en memoria mientras no exista backend.
-- Los servicios deben conservar contratos tipados que puedan conectarse posteriormente con Spring Boot.
-- La autorización debe implementarse visualmente en el frontend y volver a validarse en la API futura.
+- Los servicios conservan contratos tipados para conectarse posteriormente con Spring Boot.
+- La autorización debe validarse visualmente en el frontend y nuevamente en la API futura.
 - No se implementan pagos reales en esta etapa.
-- El idioma de la interfaz es español y los precios usan quetzales con formato `Q 0.00`.
-- Las referencias visuales y prototipos son guías; no se deben copiar dependencias ni código innecesario.
+- La interfaz está en español y usa quetzales con formato `Q 0.00`.
+- Las referencias visuales son guías; no se deben copiar dependencias ni código innecesario.

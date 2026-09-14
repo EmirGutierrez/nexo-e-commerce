@@ -1,4 +1,4 @@
-import type { Activity, Order, Product, User } from '../types';
+import type { Activity, Order, Product, RoleDefinition, User } from '../types';
 
 export const products: Product[] = [
   { id: 'p1', name: 'Auriculares Wave Pro', category: 'Tecnología', price: 649, compareAt: 799, stock: 24, status: 'Activo', sku: 'TEC-WAV-001', featured: true, image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=85', description: 'Sonido envolvente, cancelación activa de ruido y hasta 36 horas de batería para acompañarte en todo momento.' },
@@ -19,6 +19,60 @@ export const users: User[] = [
   { id: 'u3', name: 'Ana Sofía Ruiz', email: 'ana@nexo.gt', role: 'sales', initials: 'AR', status: 'Activo' },
   { id: 'u4', name: 'Diego Morales', email: 'diego@nexo.gt', role: 'warehouse', initials: 'DM', status: 'Activo' },
   { id: 'u5', name: 'Laura García', email: 'laura@nexo.gt', role: 'employee', initials: 'LG', status: 'Pendiente' },
+];
+
+export const roleDefinitions: RoleDefinition[] = [
+  {
+    id: 'superadmin',
+    name: 'Súper usuario',
+    description: 'Dueño de la cuenta y responsable de toda la operación.',
+    scope: 'Acceso completo',
+    users: 1,
+    updatedAt: 'Hoy, 09:42',
+    permissionKeys: ['dashboard.view', 'catalog.manage', 'orders.manage', 'sales.manage', 'inventory.manage', 'customers.manage', 'users.manage', 'reports.view', 'settings.manage'],
+    protected: true,
+    tone: 'navy',
+  },
+  {
+    id: 'admin',
+    name: 'Administrador',
+    description: 'Gestiona la operación diaria sin modificar el dueño de la cuenta.',
+    scope: 'Operación completa',
+    users: 1,
+    updatedAt: '12 sep 2025',
+    permissionKeys: ['dashboard.view', 'catalog.manage', 'orders.manage', 'sales.manage', 'inventory.manage', 'customers.manage', 'reports.view'],
+    tone: 'blue',
+  },
+  {
+    id: 'sales',
+    name: 'Vendedor',
+    description: 'Atiende pedidos, ventas y clientes desde el panel.',
+    scope: 'Ventas y clientes',
+    users: 2,
+    updatedAt: '08 sep 2025',
+    permissionKeys: ['dashboard.view', 'orders.manage', 'sales.manage', 'customers.manage'],
+    tone: 'purple',
+  },
+  {
+    id: 'warehouse',
+    name: 'Personal de bodega',
+    description: 'Controla existencias y movimientos de inventario.',
+    scope: 'Inventario',
+    users: 2,
+    updatedAt: '08 sep 2025',
+    permissionKeys: ['dashboard.view', 'inventory.manage'],
+    tone: 'orange',
+  },
+  {
+    id: 'employee',
+    name: 'Empleado',
+    description: 'Acceso limitado para apoyar tareas operativas.',
+    scope: 'Acceso limitado',
+    users: 2,
+    updatedAt: '05 sep 2025',
+    permissionKeys: ['dashboard.view', 'orders.manage'],
+    tone: 'lime',
+  },
 ];
 
 export const orders: Order[] = [

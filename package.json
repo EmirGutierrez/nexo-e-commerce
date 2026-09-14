@@ -13,13 +13,14 @@
     "lucide-react": "latest",
     "react": "latest",
     "react-dom": "latest",
-    "react-router-dom": "latest"
+    "react-router-dom": "latest",
+    "xlsx-js-style": "^1.2.0"
   },
   "devDependencies": {
-    "autoprefixer": "latest",
+    "@tailwindcss/postcss": "latest",
     "@types/react": "latest",
     "@types/react-dom": "latest",
-    "@tailwindcss/postcss": "latest",
+    "autoprefixer": "latest",
     "tailwindcss": "latest",
     "typescript": "latest",
     "vite": "latest"
