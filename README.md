@@ -15,6 +15,12 @@ Para validar producción:
 npm run build
 ```
 
+## Trabajo en equipo
+
+Las instrucciones completas de colaboración, ramas y Pull Requests están en [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+El flujo oficial es `feature/* → develop → master`. No se deben realizar cambios directamente en `develop` ni `master`.
+
 ## Alcance actual
 
 - Acceso separado de Cliente y Administrador.
