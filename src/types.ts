@@ -48,7 +48,7 @@ export interface MerchandisePurchase {
   date: string;
   items: MerchandisePurchaseItem[];
   total: number;
-  status: 'Registrada' | 'Pendiente';
+  status: 'Registrada' | 'Pendiente' | 'Anulada';
 }
 
 export interface Supplier {
@@ -67,7 +67,7 @@ export interface AccountingMovement {
   category: string;
   type: 'Ingreso' | 'Egreso';
   amount: number;
-  status: 'Registrado' | 'Pendiente';
+  status: 'Registrado' | 'Pendiente' | 'Anulado';
 }
 
 export const roleLabels: Record<Role, string> = {

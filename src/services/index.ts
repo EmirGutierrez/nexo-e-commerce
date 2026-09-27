@@ -3,6 +3,8 @@ import type { AccountingMovement, MerchandisePurchase, Order, Product, Supplier,
 export { productService } from './productService';
 
 const delay = <T,>(data: T) => new Promise<T>((resolve) => setTimeout(() => resolve(data), 120));
+const sessionPurchases: MerchandisePurchase[] = merchandisePurchases.map((purchase) => ({ ...purchase, items: purchase.items.map((item) => ({ ...item })) }));
+const sessionAccountingMovements: AccountingMovement[] = accountingMovements.map((movement) => ({ ...movement }));
 
 /** Servicios mock con firmas asíncronas equivalentes a una futura API REST. */
 export const authService = {
@@ -15,8 +17,17 @@ export const categoryService = { list: () => delay(categories.filter((category) 
 export const cartService = { calculate: (items: { productId: string; quantity: number }[]) => delay(items.reduce((total, item) => total + (products.find((p) => p.id === item.productId)?.price || 0) * item.quantity, 0)) };
 export const orderService = { list: () => delay(orders), getById: (id: string) => delay(orders.find((order) => order.id === id) || null), create: (order: Partial<Order>) => delay({ ...order, id: '#NX-DEMO' } as Order) };
 export const merchandisePurchaseService = {
-  list: () => delay(merchandisePurchases),
-  create: (purchase: Omit<MerchandisePurchase, 'id'>) => delay({ ...purchase, id: `AB-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}` }),
+  list: () => delay(sessionPurchases.map((purchase) => ({ ...purchase, items: purchase.items.map((item) => ({ ...item })) }))),
+  create: (purchase: Omit<MerchandisePurchase, 'id'>) => {
+    const created = { ...purchase, items: purchase.items.map((item) => ({ ...item })), id: `AB-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}` };
+    sessionPurchases.unshift(created);
+    return delay(created);
+  },
+  updateStatus: (id: string, status: MerchandisePurchase['status']) => {
+    const purchase = sessionPurchases.find((entry) => entry.id === id);
+    if (purchase) purchase.status = status;
+    return delay({ id, status });
+  },
 };
 export const customerService = { list: () => delay(users.filter((user) => user.id.startsWith('c') || user.role === 'employee')) };
 export const supplierService = { list: (): Promise<Supplier[]> => delay(suppliers) };
@@ -28,6 +39,22 @@ export const userService = { list: () => delay(users), invite: (email: string) =
 export const roleService = { list: () => delay(['Súper Administrador', 'Administrador', 'Vendedor', 'Personal de bodega', 'Empleado']) };
 export const dashboardService = { summary: () => delay({ sales: 48290, orders: 128, newCustomers: 64, averageTicket: 377.27 }) };
 export const accountingService = {
-  list: () => delay(accountingMovements),
-  create: (movement: Omit<AccountingMovement, 'id'>) => delay({ ...movement, id: `acc-${Date.now()}` }),
+  list: () => delay(sessionAccountingMovements.map((movement) => ({ ...movement }))),
+  create: (movement: Omit<AccountingMovement, 'id'>) => {
+    const created = { ...movement, id: `acc-${Date.now()}` };
+    sessionAccountingMovements.unshift(created);
+    return delay(created);
+  },
+  updateStatus: (id: string, status: AccountingMovement['status']) => {
+    const movement = sessionAccountingMovements.find((entry) => entry.id === id);
+    if (movement) movement.status = status;
+    return delay({ id, status });
+  },
+};
+
+export type AdminTableRecord = Record<string, string | number>;
+export const adminTableService = {
+  create: (section: string, record: AdminTableRecord) => delay({ section, record }),
+  update: (section: string, id: string, record: AdminTableRecord) => delay({ section, id, record }),
+  delete: (section: string, id: string) => delay({ section, id }),
 };
