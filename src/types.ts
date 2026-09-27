@@ -37,6 +37,16 @@ export interface Order {
 
 export interface Activity { title: string; description: string; time: string; icon: string; tone: string }
 
+export interface AccountingMovement {
+  id: string;
+  date: string;
+  concept: string;
+  category: string;
+  type: 'Ingreso' | 'Egreso';
+  amount: number;
+  status: 'Registrado' | 'Pendiente';
+}
+
 export const roleLabels: Record<Role, string> = {
   superadmin: 'Súper Administrador', admin: 'Administrador', sales: 'Vendedor', warehouse: 'Personal de bodega', employee: 'Empleado'
 };
