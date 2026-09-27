@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { ArrowDownToLine, ArrowUpRight, Check, CheckCircle2, Plus, Search, Wallet } from 'lucide-react';
+import { ArrowDownToLine, ArrowUpRight, Check, CheckCircle2, Download, Plus, Search, Wallet } from 'lucide-react';
 import { accountingService } from './services';
 import { formatQ } from './data/mockData';
 import type { AccountingMovement } from './types';
@@ -33,8 +33,15 @@ export default function AccountingPage() {
   };
   const closeForm = () => { setShowForm(false); setFormError(''); };
   const tone = (status: string) => status === 'Registrado' ? 'success' : 'warning';
+  const exportMovements = () => {
+    const rows = [['Fecha', 'Concepto', 'Categoría', 'Tipo', 'Monto (Q)', 'Estado'], ...filtered.map((item) => [item.date, item.concept, item.category, item.type, item.amount.toFixed(2), item.status])];
+    const csv = `\uFEFF${rows.map((row) => row.map((value) => `"${String(value).replaceAll('"', '""')}"`).join(',')).join('\r\n')}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: 'text/csv;charset=utf-8' }));
+    const link = document.createElement('a'); link.href = url; link.download = `contabilidad-${new Date().toISOString().slice(0, 10)}.csv`; link.click();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  };
   return <div className="accounting-page">
-    <div className="admin-page-heading"><div><span className="eyebrow">Gestión NEXO · Datos de demostración</span><h1>Contabilidad</h1><p>Consulta ingresos y egresos registrados para el periodo seleccionado.</p></div><div className="heading-actions"><label className="accounting-period">Periodo <select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="all">Todos los periodos</option>{months.map((month) => <option key={month} value={month}>{new Date(`${month}-02`).toLocaleDateString('es-GT', { month: 'long', year: 'numeric' })}</option>)}</select></label><button className="button button-primary" onClick={() => { setShowForm(true); setSuccess(''); }}><Plus size={17} /> Registrar movimiento</button></div></div>
+    <div className="admin-page-heading"><div><span className="eyebrow">Gestión NEXO · Datos de demostración</span><h1>Contabilidad</h1><p>Consulta ingresos y egresos registrados para el periodo seleccionado.</p></div><div className="heading-actions"><label className="accounting-period">Periodo <select value={period} onChange={(e) => setPeriod(e.target.value)}><option value="all">Todos los periodos</option>{months.map((month) => <option key={month} value={month}>{new Date(`${month}-02`).toLocaleDateString('es-GT', { month: 'long', year: 'numeric' })}</option>)}</select></label><button className="button button-outline" onClick={exportMovements} disabled={!filtered.length}><Download size={16} /> Exportar CSV</button><button className="button button-primary" onClick={() => { setShowForm(true); setSuccess(''); }}><Plus size={17} /> Registrar movimiento</button></div></div>
     {success && <div className="accounting-success" role="status"><CheckCircle2 size={17} />{success}</div>}{loadError && <div className="accounting-error" role="alert">{loadError}</div>}
     <div className="accounting-summary"><article className="panel accounting-total"><span><ArrowDownToLine size={17} /> Ingresos</span><strong>{formatQ(totals.income)}</strong><small>Total del periodo seleccionado</small></article><article className="panel accounting-total expense"><span><ArrowUpRight size={17} /> Egresos</span><strong>{formatQ(totals.expenses)}</strong><small>Total del periodo seleccionado</small></article><article className="panel accounting-total balance"><span><Wallet size={17} /> Balance</span><strong>{formatQ(totals.income - totals.expenses)}</strong><small>Ingresos menos egresos</small></article></div>
     <section className="panel accounting-table-panel"><div className="panel-heading"><div><h2>Movimientos</h2><span>{filtered.length} registros · montos en quetzales</span></div></div><div className="module-toolbar accounting-toolbar"><div className="search-box admin-search"><Search size={17} /><input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Buscar concepto o categoría..." /></div><label className="accounting-filter">Tipo <select value={typeFilter} onChange={(e) => setTypeFilter(e.target.value)}><option>Todos</option><option>Ingreso</option><option>Egreso</option></select></label></div>

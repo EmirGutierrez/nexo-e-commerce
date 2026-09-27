@@ -1,4 +1,4 @@
-import type { AccountingMovement, Activity, Order, Product, User } from '../types';
+import type { AccountingMovement, Activity, MerchandisePurchase, Order, Product, Supplier, User } from '../types';
 
 export const products: Product[] = [
   { id: 'p1', name: 'Auriculares Wave Pro', category: 'Tecnología', price: 649, compareAt: 799, stock: 24, status: 'Activo', sku: 'TEC-WAV-001', featured: true, image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=85', description: 'Sonido envolvente, cancelación activa de ruido y hasta 36 horas de batería para acompañarte en todo momento.' },
@@ -27,6 +27,18 @@ export const orders: Order[] = [
   { id: '#NX-1046', customer: 'Sofía Rodríguez', date: 'Ayer, 16:30', items: 2, total: 1_035, status: 'Pendiente de pago', payment: 'Transferencia' },
   { id: '#NX-1045', customer: 'Mateo Estrada', date: 'Ayer, 14:02', items: 4, total: 2_160, status: 'Completado', payment: 'Tarjeta' },
   { id: '#NX-1044', customer: 'Camila Díaz', date: '12 sep, 11:20', items: 1, total: 215, status: 'Cancelado', payment: 'Tarjeta' },
+];
+
+// Compras de abastecimiento ficticias, independientes de los pedidos de clientes.
+export const merchandisePurchases: MerchandisePurchase[] = [
+  { id: 'AB-2025-014', supplier: 'TecnoImport GT', date: '2025-09-12', items: [{ productId: 'p1', productName: 'Auriculares Wave Pro', quantity: 12, unitCost: 420 }, { productId: 'p5', productName: 'Teclado Orbit 75', quantity: 8, unitCost: 610 }], total: 9920, status: 'Registrada' },
+  { id: 'AB-2025-013', supplier: 'Casa Moka', date: '2025-09-08', items: [{ productId: 'p4', productName: 'Cafetera Moka One', quantity: 6, unitCost: 540 }], total: 3240, status: 'Pendiente' },
+];
+
+// Asociaciones ilustrativas para la demo; actualizar al recibir el catálogo real por proveedor.
+export const suppliers: Supplier[] = [
+  { id: 's1', name: 'TecnoImport GT', status: 'Activo', productIds: ['p1', 'p5'] },
+  { id: 's2', name: 'Casa Moka', status: 'Activo', productIds: ['p4'] },
 ];
 
 export const activities: Activity[] = [
