@@ -1,5 +1,5 @@
-import { activities, categories, orders, products, users } from '../data/mockData';
-import type { Order, Product, User } from '../types';
+import { accountingMovements, activities, categories, orders, products, users } from '../data/mockData';
+import type { AccountingMovement, Order, Product, User } from '../types';
 export { productService } from './productService';
 
 const delay = <T,>(data: T) => new Promise<T>((resolve) => setTimeout(() => resolve(data), 120));
@@ -23,3 +23,7 @@ export const transferService = { list: () => delay(orders.filter((order) => orde
 export const userService = { list: () => delay(users), invite: (email: string) => delay({ email, status: 'pending' }) };
 export const roleService = { list: () => delay(['Súper Administrador', 'Administrador', 'Vendedor', 'Personal de bodega', 'Empleado']) };
 export const dashboardService = { summary: () => delay({ sales: 48290, orders: 128, newCustomers: 64, averageTicket: 377.27 }) };
+export const accountingService = {
+  list: () => delay(accountingMovements),
+  create: (movement: Omit<AccountingMovement, 'id'>) => delay({ ...movement, id: `acc-${Date.now()}` }),
+};

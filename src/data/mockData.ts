@@ -1,4 +1,4 @@
-import type { Activity, Order, Product, User } from '../types';
+import type { AccountingMovement, Activity, Order, Product, User } from '../types';
 
 export const products: Product[] = [
   { id: 'p1', name: 'Auriculares Wave Pro', category: 'Tecnología', price: 649, compareAt: 799, stock: 24, status: 'Activo', sku: 'TEC-WAV-001', featured: true, image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=85', description: 'Sonido envolvente, cancelación activa de ruido y hasta 36 horas de batería para acompañarte en todo momento.' },
@@ -34,6 +34,15 @@ export const activities: Activity[] = [
   { title: 'Stock actualizado', description: 'Auriculares Wave Pro · +12 unidades', time: 'Hace 42 min', icon: 'box', tone: 'green' },
   { title: 'Nuevo cliente registrado', description: 'Valeria Castillo', time: 'Hace 1 h', icon: 'user', tone: 'purple' },
   { title: 'Pedido completado', description: 'Pedido #NX-1045 · Mateo Estrada', time: 'Hace 2 h', icon: 'check', tone: 'orange' },
+];
+
+// Registros ilustrativos para la demostración; no representan contabilidad real.
+export const accountingMovements: AccountingMovement[] = [
+  { id: 'acc-1', date: '2025-09-14', concept: 'Ventas de tienda en línea', category: 'Ventas', type: 'Ingreso', amount: 12840, status: 'Registrado' },
+  { id: 'acc-2', date: '2025-09-13', concept: 'Compra de empaques', category: 'Suministros', type: 'Egreso', amount: 1450, status: 'Registrado' },
+  { id: 'acc-3', date: '2025-09-12', concept: 'Ventas presenciales', category: 'Ventas', type: 'Ingreso', amount: 4820, status: 'Registrado' },
+  { id: 'acc-4', date: '2025-09-10', concept: 'Servicio de internet', category: 'Servicios', type: 'Egreso', amount: 650, status: 'Pendiente' },
+  { id: 'acc-5', date: '2025-09-08', concept: 'Reembolso de proveedor', category: 'Otros ingresos', type: 'Ingreso', amount: 575, status: 'Registrado' },
 ];
 
 export const formatQ = (value: number) => `Q ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
