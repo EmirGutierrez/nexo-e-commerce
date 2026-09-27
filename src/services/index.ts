@@ -1,5 +1,5 @@
-import { accountingMovements, activities, categories, orders, products, users } from '../data/mockData';
-import type { AccountingMovement, Order, Product, User } from '../types';
+import { accountingMovements, activities, categories, merchandisePurchases, orders, products, suppliers, users } from '../data/mockData';
+import type { AccountingMovement, MerchandisePurchase, Order, Product, Supplier, User } from '../types';
 export { productService } from './productService';
 
 const delay = <T,>(data: T) => new Promise<T>((resolve) => setTimeout(() => resolve(data), 120));
@@ -14,8 +14,12 @@ export const authService = {
 export const categoryService = { list: () => delay(categories.filter((category) => category !== 'Todos')) };
 export const cartService = { calculate: (items: { productId: string; quantity: number }[]) => delay(items.reduce((total, item) => total + (products.find((p) => p.id === item.productId)?.price || 0) * item.quantity, 0)) };
 export const orderService = { list: () => delay(orders), getById: (id: string) => delay(orders.find((order) => order.id === id) || null), create: (order: Partial<Order>) => delay({ ...order, id: '#NX-DEMO' } as Order) };
+export const merchandisePurchaseService = {
+  list: () => delay(merchandisePurchases),
+  create: (purchase: Omit<MerchandisePurchase, 'id'>) => delay({ ...purchase, id: `AB-${new Date().getFullYear()}-${String(Date.now()).slice(-4)}` }),
+};
 export const customerService = { list: () => delay(users.filter((user) => user.id.startsWith('c') || user.role === 'employee')) };
-export const supplierService = { list: () => delay([{ id: 's1', name: 'TecnoImport GT', status: 'Activo' }, { id: 's2', name: 'Casa Moka', status: 'Activo' }]) };
+export const supplierService = { list: (): Promise<Supplier[]> => delay(suppliers) };
 export const inventoryService = { summary: () => delay({ total: 2486, lowStock: 24, outOfStock: 8 }), movements: () => delay(activities) };
 export const salesService = { summary: () => delay({ total: 48290, orders: 128, averageTicket: 377.27 }) };
 export const paymentService = { simulate: (method: 'card' | 'transfer') => delay({ status: method === 'card' ? 'approved' : 'pending_verification', reference: 'MOCK-001' }) };

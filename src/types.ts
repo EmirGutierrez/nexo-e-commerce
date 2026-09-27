@@ -35,6 +35,29 @@ export interface Order {
   payment: 'Tarjeta' | 'Transferencia';
 }
 
+export interface MerchandisePurchaseItem {
+  productId: string;
+  productName: string;
+  quantity: number;
+  unitCost: number;
+}
+
+export interface MerchandisePurchase {
+  id: string;
+  supplier: string;
+  date: string;
+  items: MerchandisePurchaseItem[];
+  total: number;
+  status: 'Registrada' | 'Pendiente';
+}
+
+export interface Supplier {
+  id: string;
+  name: string;
+  status: 'Activo' | 'Inactivo';
+  productIds: string[];
+}
+
 export interface Activity { title: string; description: string; time: string; icon: string; tone: string }
 
 export interface AccountingMovement {
