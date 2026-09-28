@@ -27,6 +27,7 @@ npm run build
 - Panel administrativo responsive con dashboard, métricas, gráfico, inventario, pedidos, ventas, clientes, productos, usuarios, transferencias, reportes y configuración.
 - El módulo Ventas registra ventas presenciales en una sesión mock, descuenta stock y genera comprobantes internos imprimibles; los pedidos web y las compras a proveedores permanecen en sus módulos separados.
 - Rutas secundarias para alertas e historial de inventario, facturación, pagos, proveedores, roles y perfil.
+- Matriz de permisos por rol y acción, con asignación de rol en la edición de usuarios; la configuración mock se guarda en `localStorage`.
 - Catálogo conectado a DummyJSON: actualmente obtiene hasta 194 productos con `limit=0`, y los presenta en páginas de 24 productos.
 - Servicios mock asíncronos en `src/services/index.ts`, diseñados para ser sustituidos por una API REST.
 
@@ -37,6 +38,7 @@ npm run build
 - Las ventas presenciales y sus movimientos de inventario viven solo en memoria durante la sesión; sus comprobantes son internos y no son facturas fiscales.
 - Los datos de demostración están relacionados en `src/data/mockData.ts` y usan quetzales con formato `Q 0.00`.
 - La protección de `/admin/*` es únicamente de demostración frontend. La autorización real deberá duplicarse en Spring Security/JWT.
+- Los permisos por módulo solo ajustan navegación y acceso de rutas en este frontend; no sustituyen controles de autorización en Spring Security ni validaciones en cada endpoint de la API.
 - El inicio de sesión de cliente también es simulado: acepta un correo y una contraseña de al menos cuatro caracteres. No existe registro ni autenticación con Google.
 - No se implementan cargos reales, almacenamiento de tarjetas, CVV, tokens ni comprobantes bancarios reales.
 - La opción de tarjeta solo simula la confirmación; no solicita ni guarda números de tarjeta ni CVV. La transferencia permanece pendiente de verificación.

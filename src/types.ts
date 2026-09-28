@@ -1,4 +1,7 @@
 export type Role = 'superadmin' | 'admin' | 'sales' | 'warehouse' | 'employee';
+export type PermissionAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
+export type PermissionModule = 'dashboard' | 'products' | 'inventory' | 'orders' | 'sales' | 'customers' | 'suppliers' | 'reports' | 'settings' | 'users';
+export type RolePermissions = Record<PermissionModule, PermissionAction[]>;
 export type PaymentMethod = 'card' | 'transfer';
 export type PaymentMethodSettings = Record<PaymentMethod, boolean>;
 

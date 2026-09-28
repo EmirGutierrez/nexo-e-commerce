@@ -531,3 +531,30 @@
   .supplier-detail-modal > .modal-actions { margin: 16px 16px 0; flex-wrap: wrap; }
   .supplier-detail-modal > .modal-actions .button { flex: 1; justify-content: center; }
 }
+
+/* Editor de permisos */
+.permission-notice { display:flex; align-items:flex-start; gap:12px; padding:15px 17px; margin:0 0 16px; border:1px solid #d8e3f5; border-radius:12px; background:#f2f6fd; color:var(--navy); }
+.permission-notice svg { flex:none; margin-top:2px; }
+.permission-notice p { margin:0; font-size:11px; line-height:1.6; }
+.permission-panel { padding:20px; }
+.permission-toolbar { display:flex; align-items:end; justify-content:space-between; gap:16px; padding-bottom:17px; }
+.permission-toolbar .field { width:min(360px,100%); }
+.permission-toolbar-note { color:var(--muted); font-size:11px; padding-bottom:12px; }
+.permission-matrix-wrap { overflow-x:auto; border:1px solid var(--border); border-radius:10px; }
+.permission-matrix { width:100%; min-width:650px; border-collapse:collapse; }
+.permission-matrix th,.permission-matrix td { padding:12px 14px; border-bottom:1px solid #edf0f5; text-align:center; font-size:11px; }
+.permission-matrix thead th { background:#f8f9fb; color:var(--muted); font:10px 'DM Mono'; text-transform:uppercase; letter-spacing:.04em; }
+.permission-matrix thead th:first-child { text-align:left; min-width:210px; }
+.permission-matrix tbody th { text-align:left; font-weight:600; }
+.permission-matrix tbody tr:last-child th,.permission-matrix tbody tr:last-child td { border-bottom:0; }
+.permission-module-check { display:flex; align-items:center; gap:10px; cursor:pointer; }
+.permission-matrix input[type=checkbox] { width:17px; height:17px; accent-color:var(--navy); cursor:pointer; vertical-align:middle; }
+.permission-matrix input:disabled { cursor:not-allowed; }
+.permission-not-applicable { color:#b5bdc9; }
+.permission-locked { color:var(--muted); font-size:11px; margin:13px 0 0; }
+.permission-footer { display:flex; align-items:center; justify-content:space-between; gap:16px; padding-top:17px; }
+.permission-footer p { margin:0; color:var(--muted); font-size:11px; }
+.permission-footer > div { display:flex; gap:8px; }
+.permission-footer button:disabled { opacity:.48; cursor:not-allowed; }
+.permissions-page .crud-error,.permissions-page .crud-feedback { margin-bottom:14px; }
+@media(max-width:700px) { .permission-panel { padding:14px 10px; }.permission-toolbar { align-items:stretch; flex-direction:column; gap:4px; }.permission-toolbar .field { width:100%; }.permission-toolbar-note { padding:0 0 8px; }.permission-footer { align-items:stretch; flex-direction:column; }.permission-footer > div { justify-content:flex-end; }.permission-matrix th,.permission-matrix td { padding:11px 12px; } }

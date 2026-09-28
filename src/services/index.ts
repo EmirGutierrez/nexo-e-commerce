@@ -1,6 +1,7 @@
 import { accountingMovements, activities, brands as mockBrands, categories, inPersonSales, merchandisePurchases, orders, products, suppliers, users } from '../data/mockData';
 import type { AccountingMovement, Brand, InPersonSale, MerchandisePurchase, Order, PaymentMethod, PaymentMethodSettings, Product, Supplier, User } from '../types';
 export { productService } from './productService';
+export { roleService } from './roleService';
 
 const delay = <T,>(data: T) => new Promise<T>((resolve) => setTimeout(() => resolve(data), 120));
 const sessionPurchases: MerchandisePurchase[] = merchandisePurchases.map((purchase) => ({ ...purchase, items: purchase.items.map((item) => ({ ...item })) }));
@@ -220,7 +221,6 @@ export const paymentService = {
 };
 export const transferService = { list: () => delay(orders.filter((order) => order.payment === 'Transferencia')), approve: (id: string) => delay({ id, status: 'approved' }) };
 export const userService = { list: () => delay(users), invite: (email: string) => delay({ email, status: 'pending' }) };
-export const roleService = { list: () => delay(['Súper Administrador', 'Administrador', 'Vendedor', 'Personal de bodega', 'Empleado']) };
 export const dashboardService = { summary: () => delay({ sales: 48290, orders: 128, newCustomers: 64, averageTicket: 377.27 }) };
 export const accountingService = {
   list: () => delay(sessionAccountingMovements.map((movement) => ({ ...movement }))),

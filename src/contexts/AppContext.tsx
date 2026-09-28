@@ -15,6 +15,7 @@ interface AppContextValue {
   login: (email: string, password: string, kind: 'admin' | 'customer') => User | null;
   logout: () => void;
   role: Role | null;
+  assignRole: (userId: string, role: Role) => void;
   paymentMethods: PaymentMethodSettings;
   updatePaymentMethod: (method: PaymentMethod, enabled: boolean) => Promise<PaymentMethodSettings>;
   adminAlert: AdminAlert | null;
@@ -91,6 +92,9 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     logout: () => { setUser(null); setUserType(null); setRole(null); },
     role,
+    assignRole: (userId, nextRole) => {
+      if (userId === user?.id) setRole(nextRole);
+    },
     paymentMethods,
     updatePaymentMethod: async (method, enabled) => {
       const next = await paymentSettingsService.setEnabled(method, enabled);

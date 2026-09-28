@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Archive, Ban, Check, ChevronDown, Download, Eye, Filter, Package, Pencil, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
-import { adminTableService, brandService, productInventoryService, type AdminTableRecord } from './services';
-import { formatQ, merchandisePurchases } from './data/mockData';
+import { adminTableService, brandService, productInventoryService, roleService, type AdminTableRecord } from './services';
+import { formatQ, merchandisePurchases, users } from './data/mockData';
 import { useApp } from './contexts/AppContext';
-import type { Brand } from './types';
+import { roleLabels, type Brand, type Role } from './types';
 
 export interface AdminModuleConfig {
   title: string;
@@ -35,12 +35,16 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const [busy, setBusy] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState('');
   const [brandOptions, setBrandOptions] = useState<Brand[]>([]);
-  const { reportLowStock } = useApp();
+  const { reportLowStock, assignRole, user } = useApp();
   const isProductSection = section === 'products' || section === 'inventory';
 
   useEffect(() => {
     const cached = sessionRows.get(section);
-    const next = cached || config.rows.map((data, index) => ({ id: `${section}-${index + 1}`, data: { ...data } }));
+    const next = cached || config.rows.map((data, index) => {
+      const user = section === 'users' ? users[index] : undefined;
+      const row: AdminTableRecord = { ...data, ...(user ? { Rol: roleLabels[roleService.getUserRole(user.id, user.role)] } : {}) };
+      return { id: `${section}-${index + 1}`, data: row };
+    });
     sessionRows.set(section, next); setEntries(next); setQuery(''); setStatusFilter('Todos'); setSortBy('');
     if (section === 'products' || section === 'inventory') {
       brandService.list().then(setBrandOptions).catch(() => setBrandOptions([]));
@@ -113,6 +117,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
         replaceEntries((current) => [entry, ...current]); setFeedback('Registro creado durante esta sesión.');
       } else {
         await adminTableService.update(section, activeId, nextRecord);
+        if (section === 'users' && nextRecord.Rol) { const selectedRole = (Object.keys(roleLabels) as Role[]).find((role) => roleLabels[role] === nextRecord.Rol); const selectedUser = users[Number(activeId.replace('users-', '')) - 1]; if (selectedRole && selectedUser) { roleService.assignUserRole(selectedUser.id, selectedRole); if (selectedUser.id === user?.id) assignRole(selectedUser.id, selectedRole); } }
         if (isProductSection && typeof nextRecord.Marca === 'string') {
           const originalSku = entries.find((entry) => entry.id === activeId)?.data.SKU;
           if (typeof originalSku === 'string') await productInventoryService.assignBrand(originalSku, nextRecord.Marca || null);
@@ -170,7 +175,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     </section>
     {mode && <div className="modal-backdrop" onClick={closeDialog}><div className={`modal crud-modal${mode === 'view' && isProductSection ? ' product-preview-modal' : ''}`} role="dialog" aria-modal="true" aria-labelledby="crud-dialog-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">{mode === 'view' ? 'Detalle' : mode === 'edit' ? 'Actualizar registro' : mode === 'create' ? 'Nuevo registro' : 'Confirmar acción'}</span><h2 id="crud-dialog-title">{mode === 'view' ? config.title : mode === 'confirm' ? `Confirmar ${actionLabel}` : mode === 'edit' ? `Editar ${config.title}` : config.action || `Crear ${config.title}`}</h2></div><button type="button" className="icon-button" aria-label="Cerrar" onClick={closeDialog}><X size={18} /></button></div>
       {mode === 'view' && activeEntry && isProductSection ? <ProductPreview entry={activeEntry.data} brandName={brandOptions.find((brand) => brand.id === activeEntry.data.Marca)?.name || 'Sin marca'} onClose={closeDialog} /> : mode === 'view' && activeEntry && <div className="crud-detail-list">{config.columns.map((column) => <div key={column}><span>{column}</span><strong>{String(activeEntry.data[column] ?? '—')}</strong></div>)}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Cerrar</button></div></div>}
-      {(mode === 'create' || mode === 'edit') && <form className="crud-form" onSubmit={saveRecord} noValidate><div className="crud-fields">{config.columns.filter((column) => !(isProductSection && mode === 'create' && column === 'Marca')).map((column) => <label className={column === 'Descripción' || column === 'Descripcion' ? 'field crud-field-wide' : 'field'} key={column}><span>{column}</span>{column === 'Marca' && isProductSection && mode === 'edit' ? <select value={draft.Marca ?? ''} onChange={(event) => setDraft({ ...draft, Marca: event.target.value })}><option value=''>Sin marca</option>{brandOptions.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}{brand.status === 'Inactiva' ? ' · Inactiva' : ''}</option>)}</select> : column === 'Estado' || column === 'Estado de pago' ? <select value={draft[column] || (column === 'Estado de pago' ? 'Pendiente' : 'Activo')} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })}>{Array.from(new Set(['Activo', 'Inactivo', 'Pendiente', 'Completado', 'Emitida', 'En stock', 'Bajo stock', 'Agotado', 'Cancelado', 'Cancelada', 'Aprobada', 'Rechazada', draft[column]].filter(Boolean))).map((value) => <option key={value}>{value}</option>)}</select> : <input type={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? 'number' : 'text'} min={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? '0' : undefined} step="any" value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={`Ingresa ${column.toLowerCase()}`} />}</label>)}</div>{error && <div className="crud-error" role="alert">{error}</div>}<div className="crud-form-note">Registro local de demostración; no se envían cambios a un servidor.</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeDialog}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy}><Check size={16} /> Guardar</button></div></form>}
+      {(mode === 'create' || mode === 'edit') && <form className="crud-form" onSubmit={saveRecord} noValidate><div className="crud-fields">{config.columns.filter((column) => !(isProductSection && mode === 'create' && column === 'Marca')).map((column) => <label className={column === 'Descripción' || column === 'Descripcion' ? 'field crud-field-wide' : 'field'} key={column}><span>{column}</span>{column === 'Rol' && section === 'users' ? <select value={draft.Rol ?? ''} onChange={(event) => setDraft({ ...draft, Rol: event.target.value })}>{(Object.keys(roleLabels) as Role[]).map((role) => <option key={role} value={roleLabels[role]}>{roleLabels[role]}</option>)}</select> : column === 'Marca' && isProductSection && mode === 'edit' ? <select value={draft.Marca ?? ''} onChange={(event) => setDraft({ ...draft, Marca: event.target.value })}><option value=''>Sin marca</option>{brandOptions.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}{brand.status === 'Inactiva' ? ' · Inactiva' : ''}</option>)}</select> : column === 'Estado' || column === 'Estado de pago' ? <select value={draft[column] || (column === 'Estado de pago' ? 'Pendiente' : 'Activo')} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })}>{Array.from(new Set(['Activo', 'Inactivo', 'Pendiente', 'Completado', 'Emitida', 'En stock', 'Bajo stock', 'Agotado', 'Cancelado', 'Cancelada', 'Aprobada', 'Rechazada', draft[column]].filter(Boolean))).map((value) => <option key={value}>{value}</option>)}</select> : <input type={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? 'number' : 'text'} min={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? '0' : undefined} step="any" value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={`Ingresa ${column.toLowerCase()}`} />}</label>)}</div>{error && <div className="crud-error" role="alert">{error}</div>}<div className="crud-form-note">Registro local de demostración; no se envían cambios a un servidor.</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeDialog}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy}><Check size={16} /> Guardar</button></div></form>}
       {mode === 'confirm' && <div className="crud-confirm"><p>¿Confirmas {actionLabel} este registro? La acción afectará solo los datos de demostración de esta sesión.</p>{error && <div className="crud-error" role="alert">{error}</div>}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Volver</button><button className="button button-primary" disabled={busy} onClick={confirmAction}>{busy ? 'Procesando...' : `Confirmar ${actionLabel}`}</button></div></div>}
       </div></div>}
   </div>;
