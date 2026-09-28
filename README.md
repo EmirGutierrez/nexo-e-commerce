@@ -23,6 +23,7 @@ npm run build
 - Tienda pública con catálogo, búsqueda instantánea, categorías, ordenamiento y productos destacados.
 - Detalle de producto, carrito en memoria, checkout y confirmación de pedido.
 - Métodos de pago simulados: tarjeta ficticia y transferencia pendiente de verificación.
+- Métodos disponibles en checkout configurables desde `/admin/settings`; las preferencias se guardan en `localStorage` del navegador y ambos métodos comienzan activos.
 - Panel administrativo responsive con dashboard, métricas, gráfico, inventario, pedidos, ventas, clientes, productos, usuarios, transferencias, reportes y configuración.
 - Rutas secundarias para alertas e historial de inventario, facturación, pagos, proveedores, roles y perfil.
 - Catálogo conectado a DummyJSON: actualmente obtiene hasta 194 productos con `limit=0`, y los presenta en páginas de 24 productos.
@@ -36,6 +37,7 @@ npm run build
 - La protección de `/admin/*` es únicamente de demostración frontend. La autorización real deberá duplicarse en Spring Security/JWT.
 - El inicio de sesión de cliente también es simulado: acepta un correo y una contraseña de al menos cuatro caracteres. No existe registro ni autenticación con Google.
 - No se implementan cargos reales, almacenamiento de tarjetas, CVV, tokens ni comprobantes bancarios reales.
+- La opción de tarjeta solo simula la confirmación; no solicita ni guarda números de tarjeta ni CVV. La transferencia permanece pendiente de verificación.
 - El sistema visual usa los tokens definidos en `src/index.css` para mantener la identidad NEXO: crema, azul marino, azul claro y lima.
 - La fuente externa de catálogo se encapsula en `src/services/productService.ts`; si falla la red, el frontend vuelve automáticamente a los datos locales.
 

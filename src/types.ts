@@ -1,4 +1,6 @@
 export type Role = 'superadmin' | 'admin' | 'sales' | 'warehouse' | 'employee';
+export type PaymentMethod = 'card' | 'transfer';
+export type PaymentMethodSettings = Record<PaymentMethod, boolean>;
 
 export interface Product {
   id: string;

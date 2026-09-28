@@ -236,3 +236,32 @@
   .product-preview-image { max-height: 38vh; aspect-ratio: 4 / 3; }
   .product-preview-info h3 { font-size: 17px; }
 }
+
+.payment-settings { margin-bottom: 16px; }
+.payment-settings-list { display: grid; gap: 10px; margin-top: 18px; }
+.payment-setting { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 42px; gap: 13px; align-items: center; padding: 13px 15px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
+.payment-setting-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: #edf2fb; color: var(--navy); }
+.payment-setting-copy { min-width: 0; }
+.payment-setting-copy strong, .payment-setting-copy span { display: block; }
+.payment-setting-copy strong { font-size: 12px; }
+.payment-setting-copy span { margin-top: 4px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.payment-setting-status { min-width: 62px; color: var(--muted); font-size: 10px; text-align: right; }
+.payment-setting-status.active { color: #5f8e5d; font-weight: 700; }
+.payment-switch { width: 40px; height: 23px; display: flex; align-items: center; padding: 3px; border: 0; border-radius: 999px; background: #cbd2dc; cursor: pointer; transition: background .18s; }
+.payment-switch span { width: 17px; height: 17px; border-radius: 50%; background: white; box-shadow: 0 1px 3px #0002; transition: transform .18s; }
+.payment-switch.on { background: #648c62; }
+.payment-switch.on span { transform: translateX(17px); }
+.payment-switch:focus-visible { outline: 3px solid rgba(61,86,143,.28); outline-offset: 2px; }
+.payment-switch:disabled { opacity: .55; cursor: wait; }
+.payment-settings-feedback, .payment-settings-error { margin: 12px 0 0; padding: 10px 12px; border-radius: 8px; font-size: 11px; }
+.payment-settings-feedback { color: #527e51; background: #eff7ed; }
+.payment-settings-error { color: #a54f4f; background: #fff0f0; }
+.payment-settings-note { display: flex; align-items: flex-start; gap: 7px; margin: 14px 0 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.payment-settings-note svg { flex: none; color: var(--navy); }
+.payment-error { margin-top: 12px; padding: 10px 12px; border-radius: 8px; color: #a54f4f; background: #fff0f0; font-size: 11px; line-height: 1.5; }
+@media (max-width: 700px) {
+  .payment-setting { grid-template-columns: 38px minmax(0, 1fr) 38px; gap: 10px; padding: 11px; }
+  .payment-setting-icon { width: 36px; height: 36px; }
+  .payment-setting-status { grid-column: 2; grid-row: 2; text-align: left; }
+  .payment-switch { grid-column: 3; grid-row: 1 / span 2; }
+}

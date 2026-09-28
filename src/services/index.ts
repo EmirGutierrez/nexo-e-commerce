@@ -1,5 +1,5 @@
 import { accountingMovements, activities, categories, merchandisePurchases, orders, products, suppliers, users } from '../data/mockData';
-import type { AccountingMovement, MerchandisePurchase, Order, Product, Supplier, User } from '../types';
+import type { AccountingMovement, MerchandisePurchase, Order, PaymentMethod, PaymentMethodSettings, Product, Supplier, User } from '../types';
 export { productService } from './productService';
 
 const delay = <T,>(data: T) => new Promise<T>((resolve) => setTimeout(() => resolve(data), 120));
@@ -33,7 +33,48 @@ export const customerService = { list: () => delay(users.filter((user) => user.i
 export const supplierService = { list: (): Promise<Supplier[]> => delay(suppliers) };
 export const inventoryService = { summary: () => delay({ total: 2486, lowStock: 24, outOfStock: 8 }), movements: () => delay(activities) };
 export const salesService = { summary: () => delay({ total: 48290, orders: 128, averageTicket: 377.27 }) };
-export const paymentService = { simulate: (method: 'card' | 'transfer') => delay({ status: method === 'card' ? 'approved' : 'pending_verification', reference: 'MOCK-001' }) };
+export const paymentSettingsStorageKey = 'nexo.payment-methods.v1';
+let currentPaymentSettings: PaymentMethodSettings = { card: true, transfer: true };
+let paymentSettingsMemoryOnly = false;
+
+/** Preferencias locales de demostración; esta interfaz se puede sustituir por una API. */
+export const paymentSettingsService = {
+  getCurrent: (): PaymentMethodSettings => {
+    if (typeof window !== 'undefined' && !paymentSettingsMemoryOnly) {
+      try {
+        const raw = window.localStorage.getItem(paymentSettingsStorageKey);
+        if (raw) {
+          const stored = JSON.parse(raw) as Partial<PaymentMethodSettings>;
+          const next = { card: stored.card === true, transfer: stored.transfer === true };
+          if (next.card || next.transfer) currentPaymentSettings = next;
+        }
+      } catch { paymentSettingsMemoryOnly = true; }
+    }
+    return { ...currentPaymentSettings };
+  },
+  setEnabled: async (method: PaymentMethod, enabled: boolean): Promise<PaymentMethodSettings> => {
+    const current = paymentSettingsService.getCurrent();
+    if (!enabled && current[method] && !current[method === 'card' ? 'transfer' : 'card']) {
+      throw new Error('Debe quedar al menos un método de pago activo.');
+    }
+    const next = { ...current, [method]: enabled };
+    currentPaymentSettings = next;
+    if (typeof window !== 'undefined') {
+      try { window.localStorage.setItem(paymentSettingsStorageKey, JSON.stringify(next)); }
+      catch { paymentSettingsMemoryOnly = true; }
+    }
+    return { ...next };
+  },
+};
+
+export const paymentService = {
+  simulate: async (method: PaymentMethod) => {
+    if (!paymentSettingsService.getCurrent()[method]) throw new Error('Este método de pago está desactivado.');
+    await delay(true);
+    if (!paymentSettingsService.getCurrent()[method]) throw new Error('Este método de pago se desactivó antes de completar la simulación.');
+    return { status: method === 'card' ? 'approved' as const : 'pending_verification' as const, reference: 'MOCK-001' };
+  },
+};
 export const transferService = { list: () => delay(orders.filter((order) => order.payment === 'Transferencia')), approve: (id: string) => delay({ id, status: 'approved' }) };
 export const userService = { list: () => delay(users), invite: (email: string) => delay({ email, status: 'pending' }) };
 export const roleService = { list: () => delay(['Súper Administrador', 'Administrador', 'Vendedor', 'Personal de bodega', 'Empleado']) };

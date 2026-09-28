@@ -1,6 +1,7 @@
-import { createContext, useContext, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
 import { products } from '../data/mockData';
-import type { CartItem, Role, User } from '../types';
+import { paymentSettingsService, paymentSettingsStorageKey } from '../services';
+import type { CartItem, PaymentMethod, PaymentMethodSettings, Role, User } from '../types';
 
 interface AppContextValue {
   cart: CartItem[];
@@ -14,6 +15,8 @@ interface AppContextValue {
   login: (email: string, password: string, kind: 'admin' | 'customer') => User | null;
   logout: () => void;
   role: Role | null;
+  paymentMethods: PaymentMethodSettings;
+  updatePaymentMethod: (method: PaymentMethod, enabled: boolean) => Promise<PaymentMethodSettings>;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -23,6 +26,15 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [userType, setUserType] = useState<'admin' | 'customer' | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  const [paymentMethods, setPaymentMethods] = useState<PaymentMethodSettings>(paymentSettingsService.getCurrent);
+
+  useEffect(() => {
+    const syncPaymentSettings = (event: StorageEvent) => {
+      if (event.key === paymentSettingsStorageKey) setPaymentMethods(paymentSettingsService.getCurrent());
+    };
+    window.addEventListener('storage', syncPaymentSettings);
+    return () => window.removeEventListener('storage', syncPaymentSettings);
+  }, []);
 
   const value = useMemo<AppContextValue>(() => ({
     cart,
@@ -50,7 +62,13 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     logout: () => { setUser(null); setUserType(null); setRole(null); },
     role,
-  }), [cart, user, userType, role]);
+    paymentMethods,
+    updatePaymentMethod: async (method, enabled) => {
+      const next = await paymentSettingsService.setEnabled(method, enabled);
+      setPaymentMethods(next);
+      return next;
+    },
+  }), [cart, user, userType, role, paymentMethods]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
