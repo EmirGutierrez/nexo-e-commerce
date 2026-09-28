@@ -33,7 +33,45 @@ export const merchandisePurchaseService = {
   },
 };
 export const customerService = { list: () => delay(users.filter((user) => user.id.startsWith('c') || user.role === 'employee')) };
-export const supplierService = { list: (): Promise<Supplier[]> => delay(suppliers) };
+const sessionSuppliers: Supplier[] = suppliers.map((supplier) => ({ ...supplier, productIds: [...supplier.productIds] }));
+const cloneSupplier = (supplier: Supplier): Supplier => ({ ...supplier, productIds: [...supplier.productIds] });
+export const supplierService = {
+  list: (): Promise<Supplier[]> => delay(sessionSuppliers.map(cloneSupplier)),
+  create: (input: Omit<Supplier, 'id'>): Promise<Supplier> => {
+    validateSupplier(input);
+    const created = { ...input, id: `sup-${Date.now()}`, productIds: [...new Set(input.productIds)] };
+    sessionSuppliers.unshift(created);
+    return delay(cloneSupplier(created));
+  },
+  update: (id: string, input: Omit<Supplier, 'id'>): Promise<Supplier> => {
+    const supplier = sessionSuppliers.find((entry) => entry.id === id);
+    if (!supplier) throw new Error('El proveedor ya no está disponible.');
+    validateSupplier(input, id);
+    for (const purchase of sessionPurchases) if (!purchase.supplierId && purchase.supplier === supplier.name) purchase.supplierId = supplier.id;
+    Object.assign(supplier, input, { productIds: [...new Set(input.productIds)] });
+    return delay(cloneSupplier(supplier));
+  },
+  archive: (id: string): Promise<Supplier> => {
+    const supplier = sessionSuppliers.find((entry) => entry.id === id);
+    if (!supplier) throw new Error('El proveedor ya no está disponible.');
+    supplier.status = 'Inactivo';
+    return delay(cloneSupplier(supplier));
+  },
+  delete: (id: string): Promise<boolean> => {
+    const supplier = sessionSuppliers.find((entry) => entry.id === id);
+    if (!supplier) throw new Error('El proveedor ya no está disponible.');
+    if (supplier.productIds.length || sessionPurchases.some((purchase) => purchase.supplierId === id || purchase.supplier === supplier.name)) throw new Error('Este proveedor tiene productos o compras relacionadas. Archívalo para conservar su historial.');
+    sessionSuppliers.splice(sessionSuppliers.indexOf(supplier), 1);
+    return delay(true);
+  },
+};
+function validateSupplier(input: Omit<Supplier, 'id'>, excludeId?: string) {
+  if (!input.name.trim()) throw new Error('El nombre de la empresa es obligatorio.');
+  if (sessionSuppliers.some((supplier) => supplier.id !== excludeId && supplier.name.trim().toLocaleLowerCase() === input.name.trim().toLocaleLowerCase())) throw new Error('Ya existe un proveedor con ese nombre.');
+  if (input.email && !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email)) throw new Error('Ingresa un correo válido.');
+  const invalidProduct = input.productIds.find((id) => !sessionProducts.some((product) => product.id === id));
+  if (invalidProduct) throw new Error('Selecciona productos existentes en el catálogo.');
+}
 export const inventoryService = { summary: () => delay({ total: 2486, lowStock: 24, outOfStock: 8 }), movements: () => delay(activities) };
 export const productInventoryService = {
   list: () => delay(sessionProducts.map((product) => ({ ...product }))),

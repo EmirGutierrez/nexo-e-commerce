@@ -46,8 +46,9 @@ export const merchandisePurchases: MerchandisePurchase[] = [
 
 // Asociaciones ilustrativas para la demo; actualizar al recibir el catálogo real por proveedor.
 export const suppliers: Supplier[] = [
-  { id: 's1', name: 'TecnoImport GT', status: 'Activo', productIds: ['p1', 'p5'] },
-  { id: 's2', name: 'Casa Moka', status: 'Activo', productIds: ['p4'] },
+  { id: 's1', name: 'TecnoImport GT', contactPerson: 'Andrea Morales', phone: '+502 2234-5678', email: 'ventas@tecnoimport.gt', status: 'Activo', productIds: ['p1', 'p5'] },
+  { id: 's2', name: 'Casa Moka', contactPerson: 'Luis Méndez', phone: '+502 2456-7890', email: 'hola@casamoka.gt', status: 'Activo', productIds: ['p4'] },
+  { id: 's3', name: 'Terra Supply', contactPerson: 'Paola Reyes', phone: '+502 2333-1400', email: 'contacto@terrasupply.gt', status: 'Activo', productIds: ['p3', 'p7'] },
 ];
 
 export const activities: Activity[] = [

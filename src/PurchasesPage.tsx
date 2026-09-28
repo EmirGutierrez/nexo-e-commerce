@@ -72,7 +72,7 @@ export default function PurchasesPage() {
       setFormError('Selecciona un proveedor con productos asignados. Valida cantidades enteras y costos mayores que cero.'); return;
     }
     try {
-      const saved = await merchandisePurchaseService.create({ supplier: selectedSupplier.name, date, items, total, status });
+      const saved = await merchandisePurchaseService.create({ supplierId: selectedSupplier.id, supplier: selectedSupplier.name, date, items, total, status });
       setPurchases((current) => [saved, ...current]); setFormOpen(false); setSuccess('Compra registrada en esta sesión de demostración.');
     } catch { setFormError('No se pudo guardar la compra. Intenta nuevamente.'); }
   };

@@ -75,6 +75,7 @@ export interface MerchandisePurchaseItem {
 
 export interface MerchandisePurchase {
   id: string;
+  supplierId?: string;
   supplier: string;
   date: string;
   items: MerchandisePurchaseItem[];
@@ -85,8 +86,12 @@ export interface MerchandisePurchase {
 export interface Supplier {
   id: string;
   name: string;
+  contactPerson?: string;
+  phone?: string;
+  email?: string;
   status: 'Activo' | 'Inactivo';
   productIds: string[];
+  lastOrder?: string;
 }
 
 export interface Activity { title: string; description: string; time: string; icon: string; tone: string }
