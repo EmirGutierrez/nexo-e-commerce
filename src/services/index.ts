@@ -1,5 +1,5 @@
-import { accountingMovements, activities, categories, inPersonSales, merchandisePurchases, orders, products, suppliers, users } from '../data/mockData';
-import type { AccountingMovement, InPersonSale, MerchandisePurchase, Order, PaymentMethod, PaymentMethodSettings, Product, Supplier, User } from '../types';
+import { accountingMovements, activities, brands as mockBrands, categories, inPersonSales, merchandisePurchases, orders, products, suppliers, users } from '../data/mockData';
+import type { AccountingMovement, Brand, InPersonSale, MerchandisePurchase, Order, PaymentMethod, PaymentMethodSettings, Product, Supplier, User } from '../types';
 export { productService } from './productService';
 
 const delay = <T,>(data: T) => new Promise<T>((resolve) => setTimeout(() => resolve(data), 120));
@@ -7,6 +7,7 @@ const sessionPurchases: MerchandisePurchase[] = merchandisePurchases.map((purcha
 const sessionAccountingMovements: AccountingMovement[] = accountingMovements.map((movement) => ({ ...movement }));
 const sessionProducts: Product[] = products.map((product) => ({ ...product }));
 const sessionSales: InPersonSale[] = inPersonSales.map((sale) => ({ ...sale, items: sale.items.map((item) => ({ ...item })) }));
+const sessionBrands: Brand[] = mockBrands.map((brand) => ({ ...brand }));
 
 /** Servicios mock con firmas asíncronas equivalentes a una futura API REST. */
 export const authService = {
@@ -36,6 +37,50 @@ export const supplierService = { list: (): Promise<Supplier[]> => delay(supplier
 export const inventoryService = { summary: () => delay({ total: 2486, lowStock: 24, outOfStock: 8 }), movements: () => delay(activities) };
 export const productInventoryService = {
   list: () => delay(sessionProducts.map((product) => ({ ...product }))),
+  assignBrand: (sku: string, brandId: string | null) => {
+    const product = sessionProducts.find((entry) => entry.sku === sku);
+    if (!product) throw new Error('No se encontró el producto para asociar su marca.');
+    if (brandId && !sessionBrands.some((brand) => brand.id === brandId)) throw new Error('La marca seleccionada ya no está disponible.');
+    product.brandId = brandId || undefined;
+    const baseProduct = products.find((entry) => entry.id === product.id);
+    if (baseProduct) baseProduct.brandId = product.brandId;
+    return delay({ ...product });
+  },
+};
+export const brandService = {
+  list: () => delay(sessionBrands.map((brand) => ({ ...brand }))),
+  create: (input: Omit<Brand, 'id'>) => {
+    if (sessionBrands.some((brand) => brand.name.trim().toLocaleLowerCase() === input.name.trim().toLocaleLowerCase())) throw new Error('Ya existe una marca con ese nombre.');
+    const brand = { ...input, id: `brand-${Date.now()}` };
+    sessionBrands.unshift(brand);
+    return delay({ ...brand });
+  },
+  update: (id: string, input: Omit<Brand, 'id'>) => {
+    const brand = sessionBrands.find((entry) => entry.id === id);
+    if (!brand) throw new Error('La marca ya no está disponible.');
+    if (sessionBrands.some((entry) => entry.id !== id && entry.name.trim().toLocaleLowerCase() === input.name.trim().toLocaleLowerCase())) throw new Error('Ya existe otra marca con ese nombre.');
+    Object.assign(brand, input);
+    return delay({ ...brand });
+  },
+  delete: (id: string, reassignToBrandId?: string | null) => {
+    const brand = sessionBrands.find((entry) => entry.id === id);
+    if (!brand) throw new Error('La marca ya no está disponible.');
+    const linked = sessionProducts.filter((product) => product.brandId === id);
+    if (linked.length && reassignToBrandId === undefined) throw new Error(`Hay ${linked.length} productos asociados. Reasígnalos antes de eliminar la marca.`);
+    if (reassignToBrandId === id) throw new Error('Selecciona otra marca o deja los productos sin marca.');
+    if (reassignToBrandId && !sessionBrands.some((entry) => entry.id === reassignToBrandId)) throw new Error('La marca destino ya no está disponible.');
+    linked.forEach((product) => {
+      product.brandId = reassignToBrandId || undefined;
+      const baseProduct = products.find((entry) => entry.id === product.id);
+      if (baseProduct) baseProduct.brandId = product.brandId;
+    });
+    sessionBrands.splice(sessionBrands.indexOf(brand), 1);
+    return delay({ id, reassignedProducts: linked.length });
+  },
+  productCounts: () => delay(sessionProducts.reduce<Record<string, number>>((counts, product) => {
+    if (product.brandId) counts[product.brandId] = (counts[product.brandId] || 0) + 1;
+    return counts;
+  }, {})),
 };
 export const salesService = {
   summary: () => delay({ total: 48290, orders: 128, averageTicket: 377.27 }),

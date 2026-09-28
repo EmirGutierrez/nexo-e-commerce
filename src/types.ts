@@ -2,8 +2,18 @@ export type Role = 'superadmin' | 'admin' | 'sales' | 'warehouse' | 'employee';
 export type PaymentMethod = 'card' | 'transfer';
 export type PaymentMethodSettings = Record<PaymentMethod, boolean>;
 
+export interface Brand {
+  id: string;
+  name: string;
+  description?: string;
+  contact?: string;
+  website?: string;
+  status: 'Activa' | 'Inactiva';
+}
+
 export interface Product {
   id: string;
+  brandId?: string;
   name: string;
   category: string;
   price: number;
