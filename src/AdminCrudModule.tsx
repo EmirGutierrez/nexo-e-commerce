@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Archive, Ban, Check, ChevronDown, Download, Eye, Filter, Pencil, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
+import { Archive, Ban, Check, ChevronDown, Download, Eye, Filter, Package, Pencil, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { adminTableService, type AdminTableRecord } from './services';
 import { formatQ, merchandisePurchases } from './data/mockData';
 
@@ -32,6 +32,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const [feedback, setFeedback] = useState('');
   const [busy, setBusy] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState('');
+  const isProductSection = section === 'products' || section === 'inventory';
 
   useEffect(() => {
     const cached = sessionRows.get(section);
@@ -65,6 +66,13 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     setActiveId(entry.id); setConfirmMessage(action); setError(''); setMode('confirm');
   };
 
+  useEffect(() => {
+    if (mode !== 'view' || !isProductSection) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') closeDialog(); };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [mode, isProductSection]);
+
   const saveRecord = async (event: React.FormEvent) => {
     event.preventDefault(); setError('');
     const nextRecord: AdminTableRecord = {};
@@ -78,6 +86,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
         nextRecord[column] = parsed;
       } else nextRecord[column] = value;
     }
+    if (mode === 'edit') nextRecord.Imagen = entries.find((entry) => entry.id === activeId)?.data.Imagen || '';
     setBusy(true);
     try {
       if (mode === 'create') {
@@ -134,22 +143,46 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     <div className="module-stats">{config.stats.map((stat) => <div key={stat.label}><span>{stat.label}</span><strong>{stat.value}</strong><small className={stat.tone || ''}>{stat.detail}</small></div>)}</div>
     {feedback && <div className="crud-feedback" role="status">{feedback}<button aria-label="Cerrar mensaje" onClick={() => setFeedback('')}><X size={14} /></button></div>}
     <section className="panel module-panel"><div className="panel-heading"><div><h2>{config.title}</h2><span>{entriesForView.length} registros · los cambios son locales a esta sesión</span></div></div><div className="module-toolbar"><label className="search-box admin-search"><Search size={17} /><input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={`Buscar ${config.title.toLowerCase()}...`} />{query && <button type="button" onClick={() => setQuery('')} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label>{stateColumn && <label className="crud-filter"><Filter size={15} /><select value={statusFilter} onChange={(event) => setStatusFilter(event.target.value)}>{statusOptions.map((option) => <option key={option}>{option}</option>)}</select></label>}<label className="crud-filter"><SlidersHorizontal size={15} /><select value={sortBy} onChange={(event) => setSortBy(event.target.value)} aria-label="Ordenar tabla"><option value="">Orden original</option>{config.columns.map((column) => <option key={column} value={column}>{column}</option>)}</select><ChevronDown size={13} /></label></div>
-      {entriesForView.length ? <div className="data-table crud-table"><div className="table-head" style={{ gridTemplateColumns: `repeat(${config.columns.length}, minmax(105px, 1fr)) 132px` }}>{config.columns.map((column) => <span key={column}>{column}</span>)}<span>Acciones</span></div>{entriesForView.map((entry) => <div className="table-row" key={entry.id} style={{ gridTemplateColumns: `repeat(${config.columns.length}, minmax(105px, 1fr)) 132px` }}>{config.columns.map((column) => <CrudCell key={column} value={entry.data[column]} column={column} />)}<div className="table-actions crud-actions"><button className="icon-button" aria-label={`Ver ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Ver detalle" onClick={() => openView(entry)}><Eye size={15} /></button>{canEdit && <button className="icon-button" aria-label={`Editar ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Editar" onClick={() => openEdit(entry)}><Pencil size={15} /></button>}{isTransactional && <button className="icon-button danger" aria-label={`Anular ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Anular con confirmación" onClick={() => openConfirm(entry, 'annul')}><Ban size={15} /></button>}{section === 'suppliers' && entry.data.Estado !== 'Inactivo' && <button className="icon-button danger" aria-label={`Archivar proveedor ${String(entry.data.Nombre)}`} title="Archivar con confirmación" onClick={() => openConfirm(entry, 'archive')}><Archive size={15} /></button>}{canDelete && <button className="icon-button danger" aria-label={`Eliminar ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Eliminar con confirmación" onClick={() => openConfirm(entry, 'delete')}><Trash2 size={15} /></button>}</div></div>)}</div> : <AdminCrudEmptyState search={query} />}
+      {entriesForView.length ? <div className="data-table crud-table"><div className="table-head" style={{ gridTemplateColumns: `repeat(${config.columns.length}, minmax(105px, 1fr)) 132px` }}>{config.columns.map((column) => <span key={column}>{column}</span>)}<span>Acciones</span></div>{entriesForView.map((entry) => <div className="table-row" key={entry.id} style={{ gridTemplateColumns: `repeat(${config.columns.length}, minmax(105px, 1fr)) 132px` }}>{config.columns.map((column) => <CrudCell key={column} value={entry.data[column]} column={column} image={isProductSection && column === 'Producto' ? String(entry.data.Imagen || '') : undefined} onSelect={isProductSection && column === 'Producto' ? () => openView(entry) : undefined} />)}<div className="table-actions crud-actions"><button className="icon-button" aria-label={`Ver ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Ver detalle" onClick={() => openView(entry)}><Eye size={15} /></button>{canEdit && <button className="icon-button" aria-label={`Editar ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Editar" onClick={() => openEdit(entry)}><Pencil size={15} /></button>}{isTransactional && <button className="icon-button danger" aria-label={`Anular ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Anular con confirmación" onClick={() => openConfirm(entry, 'annul')}><Ban size={15} /></button>}{section === 'suppliers' && entry.data.Estado !== 'Inactivo' && <button className="icon-button danger" aria-label={`Archivar proveedor ${String(entry.data.Nombre)}`} title="Archivar con confirmación" onClick={() => openConfirm(entry, 'archive')}><Archive size={15} /></button>}{canDelete && <button className="icon-button danger" aria-label={`Eliminar ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Eliminar con confirmación" onClick={() => openConfirm(entry, 'delete')}><Trash2 size={15} /></button>}</div></div>)}</div> : <AdminCrudEmptyState search={query} />}
       <div className="pagination"><span>Mostrando {entriesForView.length} de {entries.length} registros</span></div>
     </section>
-    {mode && <div className="modal-backdrop" onClick={closeDialog}><div className="modal crud-modal" role="dialog" aria-modal="true" aria-labelledby="crud-dialog-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">{mode === 'view' ? 'Detalle' : mode === 'edit' ? 'Actualizar registro' : mode === 'create' ? 'Nuevo registro' : 'Confirmar acción'}</span><h2 id="crud-dialog-title">{mode === 'view' ? config.title : mode === 'confirm' ? `Confirmar ${actionLabel}` : mode === 'edit' ? `Editar ${config.title}` : config.action || `Crear ${config.title}`}</h2></div><button type="button" className="icon-button" aria-label="Cerrar" onClick={closeDialog}><X size={18} /></button></div>
-      {mode === 'view' && activeEntry && <div className="crud-detail-list">{config.columns.map((column) => <div key={column}><span>{column}</span><strong>{String(activeEntry.data[column] ?? '—')}</strong></div>)}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Cerrar</button></div></div>}
+    {mode && <div className="modal-backdrop" onClick={closeDialog}><div className={`modal crud-modal${mode === 'view' && isProductSection ? ' product-preview-modal' : ''}`} role="dialog" aria-modal="true" aria-labelledby="crud-dialog-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">{mode === 'view' ? 'Detalle' : mode === 'edit' ? 'Actualizar registro' : mode === 'create' ? 'Nuevo registro' : 'Confirmar acción'}</span><h2 id="crud-dialog-title">{mode === 'view' ? config.title : mode === 'confirm' ? `Confirmar ${actionLabel}` : mode === 'edit' ? `Editar ${config.title}` : config.action || `Crear ${config.title}`}</h2></div><button type="button" className="icon-button" aria-label="Cerrar" onClick={closeDialog}><X size={18} /></button></div>
+      {mode === 'view' && activeEntry && isProductSection ? <ProductPreview entry={activeEntry.data} onClose={closeDialog} /> : mode === 'view' && activeEntry && <div className="crud-detail-list">{config.columns.map((column) => <div key={column}><span>{column}</span><strong>{String(activeEntry.data[column] ?? '—')}</strong></div>)}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Cerrar</button></div></div>}
       {(mode === 'create' || mode === 'edit') && <form className="crud-form" onSubmit={saveRecord} noValidate><div className="crud-fields">{config.columns.map((column) => <label className={column === 'Descripción' || column === 'Descripcion' ? 'field crud-field-wide' : 'field'} key={column}><span>{column}</span>{column === 'Estado' || column === 'Estado de pago' ? <select value={draft[column] || (column === 'Estado de pago' ? 'Pendiente' : 'Activo')} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })}>{Array.from(new Set(['Activo', 'Inactivo', 'Pendiente', 'Completado', 'Emitida', 'En stock', 'Bajo stock', 'Agotado', 'Cancelado', 'Cancelada', 'Aprobada', 'Rechazada', draft[column]].filter(Boolean))).map((value) => <option key={value}>{value}</option>)}</select> : <input type={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? 'number' : 'text'} min={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? '0' : undefined} step="any" value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={`Ingresa ${column.toLowerCase()}`} />}</label>)}</div>{error && <div className="crud-error" role="alert">{error}</div>}<div className="crud-form-note">Registro local de demostración; no se envían cambios a un servidor.</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeDialog}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy}><Check size={16} /> Guardar</button></div></form>}
       {mode === 'confirm' && <div className="crud-confirm"><p>¿Confirmas {actionLabel} este registro? La acción afectará solo los datos de demostración de esta sesión.</p>{error && <div className="crud-error" role="alert">{error}</div>}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Volver</button><button className="button button-primary" disabled={busy} onClick={confirmAction}>{busy ? 'Procesando...' : `Confirmar ${actionLabel}`}</button></div></div>}
       </div></div>}
   </div>;
 }
 
-function CrudCell({ value, column }: { value: string | number | undefined; column: string }) {
+function CrudCell({ value, column, image, onSelect }: { value: string | number | undefined; column: string; image?: string; onSelect?: () => void }) {
   if (column === 'Estado' || column === 'Estado de pago') return <span className={`status-pill ${String(value).includes('Complet') || value === 'Activo' || value === 'Emitida' || value === 'Aprobada' ? 'success' : String(value).includes('Anul') || String(value).includes('Cancel') || value === 'Inactivo' ? 'danger' : 'warning'}`}><i />{value}</span>;
   if (typeof value === 'number' && ['Total', 'Ventas', 'Valor', 'Ventas del mes', 'Total comprado'].includes(column)) return <strong>{formatQ(value)}</strong>;
-  if (column === 'Producto' || column === 'Cliente' || column === 'Nombre') return <span className="name-cell"><span className="table-avatar">{String(value).slice(0, 2).toUpperCase()}</span><strong>{value}</strong></span>;
+  if (column === 'Producto' && image !== undefined && onSelect) return <button type="button" className="name-cell product-select" onClick={onSelect} aria-label={`Ver producto ${String(value)}`}><ProductImage src={image} alt={`Imagen de ${String(value)}`} className="product-table-thumb" /><strong>{value}</strong></button>;
+  if (column === 'Producto' || column === 'Cliente' || column === 'Nombre') return <span className="name-cell">{column === 'Producto' && image !== undefined ? <ProductImage src={image} alt={`Imagen de ${String(value)}`} className="product-table-thumb" /> : <span className="table-avatar">{String(value).slice(0, 2).toUpperCase()}</span>}<strong>{value}</strong></span>;
   return <span>{value}</span>;
+}
+
+function ProductImage({ src, alt, className }: { src: string; alt: string; className: string }) {
+  const [failed, setFailed] = useState(!src.trim());
+  useEffect(() => setFailed(!src.trim()), [src]);
+  return failed ? <span className={`${className} image-fallback`} role="img" aria-label={`${alt} no disponible`}><Package aria-hidden="true" /></span> : <img className={className} src={src} alt={alt} onError={() => setFailed(true)} />;
+}
+
+function ProductPreview({ entry, onClose }: { entry: AdminTableRecord; onClose: () => void }) {
+  const name = String(entry.Producto || 'Producto');
+  return <div className="product-preview">
+    <ProductImage src={String(entry.Imagen || '')} alt={`Imagen de ${name}`} className="product-preview-image" />
+    <div className="product-preview-info">
+      <h3>{name}</h3>
+      <dl>
+        <div><dt>SKU</dt><dd>{String(entry.SKU || '—')}</dd></div>
+        <div><dt>Categoría</dt><dd>{String(entry.Categoría || '—')}</dd></div>
+        <div><dt>Precio</dt><dd>{typeof entry.Valor === 'number' ? formatQ(entry.Valor) : '—'}</dd></div>
+        <div><dt>Stock</dt><dd>{String(entry.Existencias ?? '—')} unidades</dd></div>
+      </dl>
+      <div className="modal-actions"><button className="button button-outline" onClick={onClose}>Cerrar</button></div>
+    </div>
+  </div>;
 }
 
 function AdminCrudEmptyState({ search }: { search: string }) { return <div className="empty-state"><Search size={28} /><h3>{search ? 'No encontramos resultados' : 'No hay registros disponibles'}</h3><p>{search ? 'Prueba con otra búsqueda.' : 'Crea un registro para comenzar.'}</p></div>; }
