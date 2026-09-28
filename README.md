@@ -25,6 +25,7 @@ npm run build
 - Métodos de pago simulados: tarjeta ficticia y transferencia pendiente de verificación.
 - Métodos disponibles en checkout configurables desde `/admin/settings`; las preferencias se guardan en `localStorage` del navegador y ambos métodos comienzan activos.
 - Panel administrativo responsive con dashboard, métricas, gráfico, inventario, pedidos, ventas, clientes, productos, usuarios, transferencias, reportes y configuración.
+- El módulo Ventas registra ventas presenciales en una sesión mock, descuenta stock y genera comprobantes internos imprimibles; los pedidos web y las compras a proveedores permanecen en sus módulos separados.
 - Rutas secundarias para alertas e historial de inventario, facturación, pagos, proveedores, roles y perfil.
 - Catálogo conectado a DummyJSON: actualmente obtiene hasta 194 productos con `limit=0`, y los presenta en páginas de 24 productos.
 - Servicios mock asíncronos en `src/services/index.ts`, diseñados para ser sustituidos por una API REST.
@@ -33,6 +34,7 @@ npm run build
 
 - El estado de sesión y carrito vive temporalmente en `AppContext`; no se persiste información sensible.
 - Los servicios mock devuelven `Promise` para conservar el mismo flujo que usarán los futuros endpoints Spring Boot.
+- Las ventas presenciales y sus movimientos de inventario viven solo en memoria durante la sesión; sus comprobantes son internos y no son facturas fiscales.
 - Los datos de demostración están relacionados en `src/data/mockData.ts` y usan quetzales con formato `Q 0.00`.
 - La protección de `/admin/*` es únicamente de demostración frontend. La autorización real deberá duplicarse en Spring Security/JWT.
 - El inicio de sesión de cliente también es simulado: acepta un correo y una contraseña de al menos cuatro caracteres. No existe registro ni autenticación con Google.

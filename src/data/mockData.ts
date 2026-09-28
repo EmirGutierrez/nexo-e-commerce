@@ -1,4 +1,4 @@
-import type { AccountingMovement, Activity, MerchandisePurchase, Order, Product, Supplier, User } from '../types';
+import type { AccountingMovement, Activity, InPersonSale, MerchandisePurchase, Order, Product, Supplier, User } from '../types';
 
 export const products: Product[] = [
   { id: 'p1', name: 'Auriculares Wave Pro', category: 'Tecnología', price: 649, compareAt: 799, stock: 24, status: 'Activo', sku: 'TEC-WAV-001', featured: true, image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=85', description: 'Sonido envolvente, cancelación activa de ruido y hasta 36 horas de batería para acompañarte en todo momento.' },
@@ -28,6 +28,9 @@ export const orders: Order[] = [
   { id: '#NX-1045', customer: 'Mateo Estrada', date: 'Ayer, 14:02', items: 4, total: 2_160, status: 'Completado', payment: 'Tarjeta' },
   { id: '#NX-1044', customer: 'Camila Díaz', date: '12 sep, 11:20', items: 1, total: 215, status: 'Cancelado', payment: 'Tarjeta' },
 ];
+
+// Las ventas presenciales de la sesión se mantienen separadas de los pedidos web.
+export const inPersonSales: InPersonSale[] = [];
 
 // Compras de abastecimiento ficticias, independientes de los pedidos de clientes.
 export const merchandisePurchases: MerchandisePurchase[] = [

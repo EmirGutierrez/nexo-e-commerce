@@ -13,6 +13,7 @@ import { paymentService } from './services';
 import type { PaymentMethod, Product, Role } from './types';
 import AccountingPage from './AccountingPage';
 import PurchasesPage from './PurchasesPage';
+import SalesPage from './SalesPage';
 import AdminCrudModule, { type AdminModuleConfig } from './AdminCrudModule';
 
 const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
@@ -172,7 +173,7 @@ function AdminShell({ children }: { children: React.ReactNode }) { const { user,
 function MoreDots() { return <span className="more-dots">•••</span>; }
 function getModuleLabel(path: string) { const labels: Record<string, string> = { dashboard: 'Resumen', products: 'Productos', categories: 'Categorías', sales: 'Ventas', inventory: 'Inventario', customers: 'Clientes', transfers: 'Transferencias', users: 'Usuarios', reports: 'Reportes', purchases: 'Compras de mercancía', accounting: 'Contabilidad', settings: 'Configuración', profile: 'Mi perfil', invoices: 'Facturación', payments: 'Pagos', suppliers: 'Proveedores', 'roles-permissions': 'Roles y permisos' }; return labels[path.split('/')[2]] || 'Resumen'; }
 
-function AdminPage() { const { '*': section = 'dashboard' } = useParams(); return <AdminShell>{section === 'dashboard' ? <Dashboard /> : section === 'accounting' ? <AccountingPage /> : section === 'purchases' ? <PurchasesPage /> : section === 'orders' ? <Navigate to="/admin/dashboard" replace /> : section === 'settings' ? <><PaymentMethodsSettings /><ModulePage section={section} /></> : <ModulePage section={section} />}</AdminShell>; }
+function AdminPage() { const { '*': section = 'dashboard' } = useParams(); return <AdminShell>{section === 'dashboard' ? <Dashboard /> : section === 'accounting' ? <AccountingPage /> : section === 'purchases' ? <PurchasesPage /> : section === 'sales' ? <SalesPage /> : section === 'orders' ? <Navigate to="/admin/dashboard" replace /> : section === 'settings' ? <><PaymentMethodsSettings /><ModulePage section={section} /></> : <ModulePage section={section} />}</AdminShell>; }
 
 function PaymentMethodsSettings() {
   const { paymentMethods, updatePaymentMethod } = useApp();

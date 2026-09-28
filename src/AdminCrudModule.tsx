@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Archive, Ban, Check, ChevronDown, Download, Eye, Filter, Package, Pencil, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
-import { adminTableService, type AdminTableRecord } from './services';
+import { adminTableService, productInventoryService, type AdminTableRecord } from './services';
 import { formatQ, merchandisePurchases } from './data/mockData';
 
 export interface AdminModuleConfig {
@@ -38,6 +38,16 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     const cached = sessionRows.get(section);
     const next = cached || config.rows.map((data, index) => ({ id: `${section}-${index + 1}`, data: { ...data } }));
     sessionRows.set(section, next); setEntries(next); setQuery(''); setStatusFilter('Todos'); setSortBy('');
+    if (section === 'products' || section === 'inventory') {
+      productInventoryService.list().then((currentProducts) => {
+        const synced = next.map((entry) => {
+          const product = currentProducts.find((item) => item.sku === entry.data.SKU);
+          if (!product) return entry;
+          return { ...entry, data: { ...entry.data, Existencias: product.stock, Estado: section === 'inventory' && product.status === 'Activo' ? 'En stock' : product.status } };
+        });
+        sessionRows.set(section, synced); setEntries(synced);
+      }).catch(() => undefined);
+    }
   }, [section, config]);
 
   const isTransactional = transactionSections.has(section);

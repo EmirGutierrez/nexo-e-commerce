@@ -1,10 +1,12 @@
-import { accountingMovements, activities, categories, merchandisePurchases, orders, products, suppliers, users } from '../data/mockData';
-import type { AccountingMovement, MerchandisePurchase, Order, PaymentMethod, PaymentMethodSettings, Product, Supplier, User } from '../types';
+import { accountingMovements, activities, categories, inPersonSales, merchandisePurchases, orders, products, suppliers, users } from '../data/mockData';
+import type { AccountingMovement, InPersonSale, MerchandisePurchase, Order, PaymentMethod, PaymentMethodSettings, Product, Supplier, User } from '../types';
 export { productService } from './productService';
 
 const delay = <T,>(data: T) => new Promise<T>((resolve) => setTimeout(() => resolve(data), 120));
 const sessionPurchases: MerchandisePurchase[] = merchandisePurchases.map((purchase) => ({ ...purchase, items: purchase.items.map((item) => ({ ...item })) }));
 const sessionAccountingMovements: AccountingMovement[] = accountingMovements.map((movement) => ({ ...movement }));
+const sessionProducts: Product[] = products.map((product) => ({ ...product }));
+const sessionSales: InPersonSale[] = inPersonSales.map((sale) => ({ ...sale, items: sale.items.map((item) => ({ ...item })) }));
 
 /** Servicios mock con firmas asíncronas equivalentes a una futura API REST. */
 export const authService = {
@@ -32,7 +34,49 @@ export const merchandisePurchaseService = {
 export const customerService = { list: () => delay(users.filter((user) => user.id.startsWith('c') || user.role === 'employee')) };
 export const supplierService = { list: (): Promise<Supplier[]> => delay(suppliers) };
 export const inventoryService = { summary: () => delay({ total: 2486, lowStock: 24, outOfStock: 8 }), movements: () => delay(activities) };
-export const salesService = { summary: () => delay({ total: 48290, orders: 128, averageTicket: 377.27 }) };
+export const productInventoryService = {
+  list: () => delay(sessionProducts.map((product) => ({ ...product }))),
+};
+export const salesService = {
+  summary: () => delay({ total: 48290, orders: 128, averageTicket: 377.27 }),
+  listInPerson: () => delay(sessionSales.map((sale) => ({ ...sale, items: sale.items.map((item) => ({ ...item })) }))),
+  createInPerson: (input: { seller: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[] }) => {
+    if (!input.items.length) throw new Error('Agrega al menos un producto para registrar la venta.');
+    if (!input.seller.trim()) throw new Error('No se pudo identificar al vendedor.');
+    if (!paymentSettingsService.getCurrent()[input.paymentMethod]) throw new Error('El método de pago seleccionado está desactivado.');
+    const quantities = new Map<string, number>();
+    for (const item of input.items) {
+      if (!Number.isInteger(item.quantity) || item.quantity < 1) throw new Error('Las cantidades deben ser números enteros mayores que cero.');
+      quantities.set(item.productId, (quantities.get(item.productId) || 0) + item.quantity);
+    }
+    const saleItems = Array.from(quantities, ([productId, quantity]) => {
+      const product = sessionProducts.find((entry) => entry.id === productId);
+      if (!product) throw new Error('Uno de los productos ya no está disponible.');
+      if (quantity > product.stock) throw new Error(`Stock insuficiente para ${product.name}. Disponible: ${product.stock}.`);
+      return { productId, productName: product.name, sku: product.sku, quantity, unitPrice: product.price, subtotal: product.price * quantity };
+    });
+    const now = new Date();
+    const id = `VP-${now.getFullYear()}-${String(sessionSales.length + 1).padStart(4, '0')}`;
+    const sale: InPersonSale = {
+      id,
+      date: now.toISOString(),
+      seller: input.seller.trim(),
+      paymentMethod: input.paymentMethod,
+      paymentStatus: input.paymentMethod === 'transfer' ? 'Pendiente de verificación' : 'Simulada',
+      items: saleItems,
+      total: saleItems.reduce((sum, item) => sum + item.subtotal, 0),
+    };
+    for (const item of saleItems) {
+      const product = sessionProducts.find((entry) => entry.id === item.productId)!;
+      product.stock -= item.quantity;
+      product.status = product.stock === 0 ? 'Agotado' : product.stock < 10 ? 'Bajo stock' : 'Activo';
+      const publicProduct = products.find((entry) => entry.id === item.productId);
+      if (publicProduct) { publicProduct.stock = product.stock; publicProduct.status = product.status; }
+    }
+    sessionSales.unshift(sale);
+    return delay({ ...sale, items: sale.items.map((item) => ({ ...item })) });
+  },
+};
 export const paymentSettingsStorageKey = 'nexo.payment-methods.v1';
 let currentPaymentSettings: PaymentMethodSettings = { card: true, transfer: true };
 let paymentSettingsMemoryOnly = false;

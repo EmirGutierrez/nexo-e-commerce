@@ -37,6 +37,25 @@ export interface Order {
   payment: 'Tarjeta' | 'Transferencia';
 }
 
+export interface InPersonSaleItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
+}
+
+export interface InPersonSale {
+  id: string;
+  date: string;
+  seller: string;
+  paymentMethod: PaymentMethod;
+  paymentStatus: 'Simulada' | 'Pendiente de verificación';
+  items: InPersonSaleItem[];
+  total: number;
+}
+
 export interface MerchandisePurchaseItem {
   productId: string;
   productName: string;
