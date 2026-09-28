@@ -26,7 +26,7 @@ function Brand({ light = false }: { light?: boolean }) {
 
 function PublicHeader() {
   const { cartCount } = useApp();
-  return <header className="public-header"><Brand /><nav className="public-nav"><Link to="/store">Tienda</Link><Link to="/#benefits">Beneficios</Link><Link to="/#about">Nosotros</Link></nav><div className="header-actions"><Link to="/customer/login" className="header-login">Ingresar</Link><Link to="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link></div></header>;
+  return <header className="public-header"><Brand /><nav className="public-nav"><Link to="/store">Tienda</Link><Link to="/#benefits">Beneficios</Link><Link to="/#about">Nosotros</Link></nav><div className="header-actions"><Link to="/access" className="header-login">Ingresar</Link><Link to="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link></div></header>;
 }
 
 function Landing() {
@@ -35,24 +35,70 @@ function Landing() {
 
 function HeartIcon() { return <Sparkles size={22} />; }
 
-function Access() {
-  return <div className="access-page"><PublicHeader /><main className="access-main"><div className="page-intro"><span className="eyebrow">Bienvenido a NEXO</span><h1>Elige cómo quieres<br /><em>ingresar</em></h1><p>Selecciona el espacio que necesitas para comenzar.</p></div><div className="access-cards"><Link to="/customer/login" className="access-card customer-card"><div className="access-card-top"><span className="access-icon"><ShoppingBag size={28} /></span><span className="card-arrow"><ArrowUpRight size={22} /></span></div><div><span className="card-kicker">Para tus compras</span><h2>Ingresar como<br /><strong>Cliente</strong></h2><p>Explora productos, gestiona tu carrito y revisa tus pedidos.</p></div><span className="access-cta">Ir a mi tienda <ArrowRight size={16} /></span></Link><Link to="/admin/login" className="access-card admin-card"><div className="access-card-top"><span className="access-icon"><LayoutDashboard size={28} /></span><span className="card-arrow"><ArrowUpRight size={22} /></span></div><div><span className="card-kicker">Para tu negocio</span><h2>Ingresar como<br /><strong>Administrador</strong></h2><p>Administra ventas, inventario, pedidos y el crecimiento de tu negocio.</p></div><span className="access-cta">Ir al panel <ArrowRight size={16} /></span></Link></div><div className="access-note"><ShieldCheck size={16} /> Espacios seguros y separados para cada experiencia</div></main></div>;
-}
+function Access() { return <LoginPage />; }
+function CustomerLogin() { return <LoginPage initialKind="customer" />; }
+function AdminLogin() { return <LoginPage initialKind="admin" />; }
 
-function CustomerLogin() {
-  const { login } = useApp(); const navigate = useNavigate(); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState('');
-  const submit = (event: React.FormEvent) => { event.preventDefault(); if (login(email, password, 'customer')) navigate('/store'); else setError('Ingresa un correo válido y una contraseña de al menos 4 caracteres.'); };
-  return <div className="auth-page customer-auth"><div className="auth-visual"><Brand light /><div className="auth-quote"><span>“</span><h2>Todo lo que buscas,<br />en un solo lugar.</h2><p>Una experiencia de compra hecha para ti.</p></div><div className="auth-visual-art"><img src="https://images.unsplash.com/photo-1556740749-887f6717d7e4?auto=format&fit=crop&w=1000&q=85" alt="Compras online" /></div></div><div className="auth-form-wrap"><Link to="/access" className="back-link"><ArrowLeft size={16} /> Volver a opciones</Link><div className="auth-form"><span className="eyebrow">Espacio cliente</span><h1>Hola de nuevo</h1><p className="form-lead">Ingresa para continuar con tus compras.</p><form onSubmit={submit}><Field label="Correo electrónico" type="email" value={email} onChange={setEmail} placeholder="tu@correo.com" /><Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="••••••••" /><div className="form-row"><label className="check-label"><input type="checkbox" /> Recordarme</label><a href="#forgot">¿Olvidaste tu contraseña?</a></div>{error && <div className="error-message"><X size={15} />{error}</div>}<button className="button button-primary full" type="submit">Ingresar <ArrowRight size={16} /></button></form><div className="auth-divider"><span>o continúa con</span></div><button className="button button-outline full" type="button"><span className="google-dot">G</span> Continuar con Google</button><p className="auth-bottom">¿Aún no tienes una cuenta? <a href="#register">Crear cuenta</a></p></div></div></div>;
-}
+function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
+  const { login, user, userType, role } = useApp();
+  const navigate = useNavigate();
+  const location = useLocation();
+  const [kind, setKind] = useState<'admin' | 'customer'>(initialKind || 'customer');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
+  const [error, setError] = useState('');
+  const requested = (location.state as { from?: unknown } | null)?.from;
+  if (user && userType) return <Navigate to={resolveLoginDestination(userType, role, requested)} replace />;
 
-function AdminLogin() {
-  const { login } = useApp(); const navigate = useNavigate(); const [email, setEmail] = useState(''); const [password, setPassword] = useState(''); const [error, setError] = useState('');
-  const submit = (event: React.FormEvent) => { event.preventDefault(); if (login(email, password, 'admin')) navigate('/admin/dashboard'); else setError('Las credenciales no coinciden con un usuario administrativo.'); };
-  return <div className="admin-login-page"><div className="admin-login-panel"><Brand /><div className="security-pill"><ShieldCheck size={15} /> Acceso privado y protegido</div><div className="admin-login-copy"><span className="eyebrow">NEXO · Administración</span><h1>Haz que tu negocio<br /><em>avance.</em></h1><p>Todo el control de tu operación, en un solo lugar.</p></div><div className="admin-login-footer"><span>© 2025 NEXO COMMERCE</span><span>Centro de ayuda <ArrowUpRight size={13} /></span></div></div><div className="admin-login-form"><Link to="/access" className="back-link"><ArrowLeft size={16} /> Volver a opciones</Link><div className="admin-form-inner"><div className="admin-icon"><LockIcon /></div><h2>Ingresar al panel</h2><p>Usa tus credenciales de administrador para continuar.</p><form onSubmit={submit}><Field label="Correo electrónico" type="email" value={email} onChange={setEmail} placeholder="superadmin@nexo.gt" /><Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="Ingresa tu contraseña" /><div className="form-row"><label className="check-label"><input type="checkbox" /> Recordarme</label><a href="#forgot">¿Olvidaste tu contraseña?</a></div>{error && <div className="error-message"><X size={15} />{error}</div>}<button className="button button-dark full" type="submit">Ingresar al panel <LogIn size={16} /></button></form><div className="demo-hint"><span>Acceso de demostración</span><code>superadmin@nexo.gt</code><code>Admin123!</code></div></div></div></div>;
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault(); setError('');
+    const authenticatedUser = login(email, password, kind);
+    if (!authenticatedUser) {
+      setError(kind === 'admin' ? 'Las credenciales no corresponden al acceso administrativo de demostración.' : 'Ingresa un correo válido y una contraseña de al menos 4 caracteres.');
+      return;
+    }
+    navigate(resolveLoginDestination(kind, authenticatedUser.role, requested), { replace: true });
+  };
+
+  const adminMode = kind === 'admin';
+  return <div className="admin-login-page"><div className="admin-login-panel"><Brand /><div className="security-pill"><ShieldCheck size={15} /> Acceso de demostración</div><div className="admin-login-copy"><span className="eyebrow">NEXO · {adminMode ? 'Administración' : 'Tienda'}</span><h1>{adminMode ? <>Haz que tu negocio<br /><em>avance.</em></> : <>Todo lo que buscas,<br /><em>en un solo lugar.</em></>}</h1><p>{adminMode ? 'Ingresa con tu cuenta de personal para continuar.' : 'Ingresa para continuar con tus compras.'}</p></div><div className="admin-login-footer"><span>© 2025 NEXO COMMERCE</span><span>Modo demostración</span></div></div><div className="admin-login-form"><Link to="/" className="back-link"><ArrowLeft size={16} /> Volver al inicio</Link><div className="admin-form-inner"><div className="admin-icon"><LockIcon /></div><h2>Iniciar sesión</h2><p>Usa tus credenciales para acceder a tu espacio.</p><form onSubmit={submit}>
+    {!initialKind && <label className="field"><span>Tipo de cuenta</span><select value={kind} onChange={(event) => { setKind(event.target.value as 'admin' | 'customer'); setError(''); }}><option value="customer">Cliente</option><option value="admin">Personal administrativo</option></select></label>}
+    <Field label="Correo electrónico" type="email" value={email} onChange={setEmail} placeholder={adminMode ? 'superadmin@nexo.gt' : 'tu@correo.com'} /><Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="Ingresa tu contraseña" />
+    {error && <div className="error-message" role="alert"><X size={15} />{error}</div>}<button className={`button ${adminMode ? 'button-dark' : 'button-primary'} full`} type="submit">Ingresar <ArrowRight size={16} /></button></form>
+    {adminMode ? <div className="demo-hint"><span>Credenciales administrativas de demostración</span><code>superadmin@nexo.gt</code><code>Admin123!</code></div> : <p className="auth-bottom demo-login-note">Inicio de sesión de demostración. El registro de cuentas aún no está disponible.</p>}
+    {initialKind && <Link className="auth-bottom login-switch" to="/access">Cambiar tipo de cuenta</Link>}
+  </div></div></div>;
 }
 
 function LockIcon() { return <ShieldCheck size={25} />; }
 function Field({ label, type, value, onChange, placeholder }: { label: string; type: string; value: string; onChange: (value: string) => void; placeholder: string }) { return <label className="field"><span>{label}</span><input required type={type} defaultValue={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} /></label>; }
+
+const adminRoleHome: Record<Role, string> = {
+  superadmin: '/admin/dashboard', admin: '/admin/dashboard', sales: '/admin/sales', warehouse: '/admin/inventory', employee: '/admin/profile',
+};
+const adminRoleRoutes: Record<Role, string[]> = {
+  superadmin: ['/admin'], admin: ['/admin'],
+  sales: ['/admin/dashboard', '/admin/sales', '/admin/customers', '/admin/transfers', '/admin/payments', '/admin/invoices', '/admin/reports'],
+  warehouse: ['/admin/dashboard', '/admin/inventory', '/admin/purchases'],
+  employee: ['/admin/profile'],
+};
+
+function canVisitAdminPath(role: Role, pathname: string) {
+  if (pathname.includes('\\') || /%2f|%5c/i.test(pathname) || pathname.split('/').some((segment) => segment === '.' || segment === '..')) return false;
+  return adminRoleRoutes[role].some((base) => base === '/admin' ? pathname.startsWith('/admin/') || pathname === '/admin' : pathname === base || pathname.startsWith(`${base}/`));
+}
+
+function resolveLoginDestination(kind: 'admin' | 'customer', role: Role | null, requested: unknown) {
+  if (kind === 'customer') return '/store';
+  const safeRole = role || 'employee';
+  const requestedPath = typeof requested === 'string' ? requested : requested && typeof requested === 'object' && 'pathname' in requested ? (requested as { pathname?: unknown }).pathname : undefined;
+  if (typeof requestedPath === 'string' && requestedPath.startsWith('/admin/') && canVisitAdminPath(safeRole, requestedPath)) {
+    const search = requested && typeof requested === 'object' && 'search' in requested && typeof requested.search === 'string' && requested.search.startsWith('?') ? requested.search : '';
+    const hash = requested && typeof requested === 'object' && 'hash' in requested && typeof requested.hash === 'string' && requested.hash.startsWith('#') ? requested.hash : '';
+    return `${requestedPath}${search}${hash}`;
+  }
+  return adminRoleHome[safeRole];
+}
 
 function PublicShell({ children }: { children: React.ReactNode }) { return <div className="public-app"><PublicHeader />{children}</div>; }
 
@@ -113,6 +159,13 @@ moduleConfig.suppliers = { ...moduleConfig.products, title: 'Proveedores', descr
 moduleConfig['roles-permissions'] = { ...moduleConfig.users, title: 'Roles y permisos', description: 'Define el acceso de cada perfil a las áreas de NEXO.', action: 'Nuevo rol', columns: ['Nombre', 'Usuarios', 'Permisos', 'Última actualización', 'Estado'], rows: [{ Nombre: 'Súper Administrador', Usuarios: 1, Permisos: 'Acceso completo', 'Última actualización': 'Hoy, 09:42', Estado: 'Activo' }, { Nombre: 'Administrador', Usuarios: 1, Permisos: 'Operación completa', 'Última actualización': '12 sep 2025', Estado: 'Activo' }, { Nombre: 'Vendedor', Usuarios: 2, Permisos: 'Ventas y clientes', 'Última actualización': '08 sep 2025', Estado: 'Activo' }, { Nombre: 'Personal de bodega', Usuarios: 2, Permisos: 'Inventario', 'Última actualización': '08 sep 2025', Estado: 'Activo' }] };
 moduleConfig.profile = { ...moduleConfig.settings, title: 'Mi perfil', description: 'Actualiza tus datos personales y preferencias de acceso.', action: 'Guardar perfil', columns: ['Configuración', 'Descripción', 'Estado'], rows: [{ Configuración: 'Información personal', Descripción: 'Nombre y correo del usuario', Estado: 'Activo' }, { Configuración: 'Seguridad', Descripción: 'Contraseña y sesiones activas', Estado: 'Activo' }, { Configuración: 'Preferencias', Descripción: 'Idioma y notificaciones', Estado: 'Activo' }] };
 
-function ProtectedAdmin() { const { user } = useApp(); return user ? <Routes><Route path="*" element={<AdminPage />} /></Routes> : <Navigate to="/admin/login" replace />; }
+function ProtectedAdmin() {
+  const { user, userType, role } = useApp();
+  const location = useLocation();
+  if (!user || !userType) return <Navigate to="/access" replace state={{ from: location }} />;
+  if (userType !== 'admin') return <Navigate to={resolveLoginDestination(userType, role, null)} replace />;
+  if (!role || !canVisitAdminPath(role, location.pathname)) return <Navigate to={resolveLoginDestination('admin', role, null)} replace />;
+  return <Routes><Route path="*" element={<AdminPage />} /></Routes>;
+}
 
 export default function App() { return <Routes><Route path="/" element={<Landing />} /><Route path="/access" element={<Access />} /><Route path="/customer/login" element={<CustomerLogin />} /><Route path="/admin/login" element={<AdminLogin />} /><Route path="/store" element={<Store />} /><Route path="/product/:id" element={<ProductDetailApi />} /><Route path="/cart" element={<CartPage />} /><Route path="/checkout" element={<Checkout />} /><Route path="/confirmation" element={<Confirmation />} /><Route path="/admin/*" element={<ProtectedAdmin />} /><Route path="*" element={<Navigate to="/" replace />} /></Routes>; }

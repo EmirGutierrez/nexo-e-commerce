@@ -17,8 +17,9 @@ npm run build
 
 ## Alcance actual
 
-- Acceso separado de Cliente y Administrador.
+- Inicio de sesión unificado con selector de tipo de cuenta; el registro aún no está disponible.
 - Login administrativo simulado con `superadmin@nexo.gt` / `Admin123!`.
+- Redirección de clientes a la tienda y de personal administrativo a una sección permitida por rol. Las rutas `/customer/login` y `/admin/login` siguen disponibles como accesos directos.
 - Tienda pública con catálogo, búsqueda instantánea, categorías, ordenamiento y productos destacados.
 - Detalle de producto, carrito en memoria, checkout y confirmación de pedido.
 - Métodos de pago simulados: tarjeta ficticia y transferencia pendiente de verificación.
@@ -33,6 +34,7 @@ npm run build
 - Los servicios mock devuelven `Promise` para conservar el mismo flujo que usarán los futuros endpoints Spring Boot.
 - Los datos de demostración están relacionados en `src/data/mockData.ts` y usan quetzales con formato `Q 0.00`.
 - La protección de `/admin/*` es únicamente de demostración frontend. La autorización real deberá duplicarse en Spring Security/JWT.
+- El inicio de sesión de cliente también es simulado: acepta un correo y una contraseña de al menos cuatro caracteres. No existe registro ni autenticación con Google.
 - No se implementan cargos reales, almacenamiento de tarjetas, CVV, tokens ni comprobantes bancarios reales.
 - El sistema visual usa los tokens definidos en `src/index.css` para mantener la identidad NEXO: crema, azul marino, azul claro y lima.
 - La fuente externa de catálogo se encapsula en `src/services/productService.ts`; si falla la red, el frontend vuelve automáticamente a los datos locales.

@@ -10,9 +10,10 @@ interface AppContextValue {
   updateQuantity: (id: string, quantity: number) => void;
   removeFromCart: (id: string) => void;
   user: User | null;
-  login: (email: string, password: string, kind: 'admin' | 'customer') => boolean;
+  userType: 'admin' | 'customer' | null;
+  login: (email: string, password: string, kind: 'admin' | 'customer') => User | null;
   logout: () => void;
-  role: Role;
+  role: Role | null;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -20,7 +21,8 @@ const AppContext = createContext<AppContextValue | null>(null);
 export function AppProvider({ children }: { children: ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [user, setUser] = useState<User | null>(null);
-  const [role, setRole] = useState<Role>('superadmin');
+  const [userType, setUserType] = useState<'admin' | 'customer' | null>(null);
+  const [role, setRole] = useState<Role | null>(null);
 
   const value = useMemo<AppContextValue>(() => ({
     cart,
@@ -34,20 +36,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
     updateQuantity: (id, quantity) => setCart((current) => current.map((item) => item.id === id ? { ...item, quantity: Math.max(1, Math.min(quantity, item.stock)) } : item)),
     removeFromCart: (id) => setCart((current) => current.filter((item) => item.id !== id)),
     user,
+    userType,
     login: (email, password, kind) => {
       if (kind === 'admin' && email === 'superadmin@nexo.gt' && password === 'Admin123!') {
         const admin = { ...({ id: 'u0', name: 'María Fernanda López', email, role: 'superadmin', initials: 'MF', status: 'Activo' } as User) };
-        setUser(admin); setRole('superadmin'); return true;
+        setUser(admin); setUserType('admin'); setRole(admin.role); return admin;
       }
-      if (kind === 'customer' && email && password.length >= 4) {
+      if (kind === 'customer' && email && password.length >= 4 && !(email === 'superadmin@nexo.gt' && password === 'Admin123!')) {
         const customer = { id: 'c1', name: 'Valeria Castillo', email, role: 'employee', initials: 'VC', status: 'Activo' } as User;
-        setUser(customer); return true;
+        setUser(customer); setUserType('customer'); setRole(customer.role); return customer;
       }
-      return false;
+      return null;
     },
-    logout: () => setUser(null),
+    logout: () => { setUser(null); setUserType(null); setRole(null); },
     role,
-  }), [cart, user, role]);
+  }), [cart, user, userType, role]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }
