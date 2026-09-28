@@ -4,6 +4,7 @@ export { productService } from './productService';
 
 const delay = <T,>(data: T) => new Promise<T>((resolve) => setTimeout(() => resolve(data), 120));
 const sessionPurchases: MerchandisePurchase[] = merchandisePurchases.map((purchase) => ({ ...purchase, items: purchase.items.map((item) => ({ ...item })) }));
+const sessionOrders: Order[] = orders.map((order) => ({ ...order }));
 const sessionAccountingMovements: AccountingMovement[] = accountingMovements.map((movement) => ({ ...movement }));
 const sessionProducts: Product[] = products.map((product) => ({ ...product }));
 const sessionSales: InPersonSale[] = inPersonSales.map((sale) => ({ ...sale, items: sale.items.map((item) => ({ ...item })) }));
@@ -18,7 +19,22 @@ export const authService = {
 
 export const categoryService = { list: () => delay(categories.filter((category) => category !== 'Todos')) };
 export const cartService = { calculate: (items: { productId: string; quantity: number }[]) => delay(items.reduce((total, item) => total + (products.find((p) => p.id === item.productId)?.price || 0) * item.quantity, 0)) };
-export const orderService = { list: () => delay(orders), getById: (id: string) => delay(orders.find((order) => order.id === id) || null), create: (order: Partial<Order>) => delay({ ...order, id: '#NX-DEMO' } as Order) };
+export const orderService = {
+  list: () => delay(sessionOrders.map((order) => ({ ...order }))),
+  getById: (id: string) => delay(sessionOrders.find((order) => order.id === id) ? { ...sessionOrders.find((order) => order.id === id)! } : null),
+  create: (order: Partial<Order>) => {
+    const created = { ...order, id: order.id || `#NX-${String(Date.now()).slice(-4)}` } as Order;
+    sessionOrders.unshift(created);
+    return delay({ ...created });
+  },
+  updateStatus: (id: string, status: Order['status']) => {
+    const order = sessionOrders.find((entry) => entry.id === id);
+    if (!order) throw new Error('No se encontró el pedido.');
+    const previousStatus = order.status;
+    order.status = status;
+    return delay({ ...order, previousStatus });
+  },
+};
 export const merchandisePurchaseService = {
   list: () => delay(sessionPurchases.map((purchase) => ({ ...purchase, items: purchase.items.map((item) => ({ ...item })) }))),
   create: (purchase: Omit<MerchandisePurchase, 'id'>) => {

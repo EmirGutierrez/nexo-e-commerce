@@ -1,7 +1,7 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react';
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { products } from '../data/mockData';
 import { paymentSettingsService, paymentSettingsStorageKey } from '../services';
-import type { CartItem, PaymentMethod, PaymentMethodSettings, Role, User } from '../types';
+import type { CartItem, PaymentMethod, PaymentMethodSettings, Product, Role, User } from '../types';
 
 interface AppContextValue {
   cart: CartItem[];
@@ -17,6 +17,21 @@ interface AppContextValue {
   role: Role | null;
   paymentMethods: PaymentMethodSettings;
   updatePaymentMethod: (method: PaymentMethod, enabled: boolean) => Promise<PaymentMethodSettings>;
+  adminAlert: AdminAlert | null;
+  notifyAdmin: (alert: Omit<AdminAlert, 'id'>) => void;
+  dismissAdminAlert: () => void;
+  reportLowStock: (products: Pick<Product, 'id' | 'name' | 'stock'>[]) => void;
+}
+
+export interface AdminAlert {
+  id: number;
+  dedupeKey: string;
+  type: 'warning' | 'success' | 'info';
+  title: string;
+  entity: string;
+  message: string;
+  nextAction: string;
+  actionTo?: string;
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -27,6 +42,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [userType, setUserType] = useState<'admin' | 'customer' | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodSettings>(paymentSettingsService.getCurrent);
+  const [adminAlerts, setAdminAlerts] = useState<AdminAlert[]>([]);
+  const seenAdminAlerts = useRef(new Set<string>());
+  const notifyAdmin = useCallback((alert: Omit<AdminAlert, 'id'>) => {
+    if (seenAdminAlerts.current.has(alert.dedupeKey)) return;
+    seenAdminAlerts.current.add(alert.dedupeKey);
+    setAdminAlerts((current) => [...current, { ...alert, id: Date.now() + current.length }]);
+  }, []);
+  const dismissAdminAlert = useCallback(() => setAdminAlerts((current) => current.slice(1)), []);
+  const reportLowStock = useCallback((rows: Pick<Product, 'id' | 'name' | 'stock'>[]) => {
+    const low = rows.filter((product) => product.stock < 10).sort((a, b) => a.id.localeCompare(b.id));
+    if (!low.length) return;
+    const names = low.slice(0, 4).map((product) => `${product.name} (${product.stock})`).join(', ');
+    notifyAdmin({ dedupeKey: `low-stock:${low.map((product) => `${product.id}:${product.stock}`).join('|')}`, type: 'warning', title: `${low.length} producto${low.length === 1 ? '' : 's'} requieren revisión de stock`, entity: names + (low.length > 4 ? ` y ${low.length - 4} más` : ''), message: 'Hay productos con menos de 10 unidades o agotados en el inventario.', nextAction: 'Revisar existencias y planificar reposición.', actionTo: '/admin/inventory/alerts' });
+  }, [notifyAdmin]);
 
   useEffect(() => {
     const syncPaymentSettings = (event: StorageEvent) => {
@@ -68,7 +97,11 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setPaymentMethods(next);
       return next;
     },
-  }), [cart, user, userType, role, paymentMethods]);
+    adminAlert: adminAlerts[0] || null,
+    notifyAdmin,
+    dismissAdminAlert,
+    reportLowStock,
+  }), [cart, user, userType, role, paymentMethods, adminAlerts, notifyAdmin, dismissAdminAlert, reportLowStock]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

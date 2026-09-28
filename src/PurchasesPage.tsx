@@ -2,12 +2,14 @@ import { useEffect, useMemo, useState } from 'react';
 import { Ban, Check, Download, Eye, Package, Plus, Search, ShoppingCart, Trash2, X } from 'lucide-react';
 import { formatQ, products } from './data/mockData';
 import { merchandisePurchaseService, supplierService } from './services';
+import { useApp } from './contexts/AppContext';
 import type { MerchandisePurchase, MerchandisePurchaseItem, Supplier } from './types';
 
 const today = () => new Date().toISOString().slice(0, 10);
 const csvCell = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
 
 export default function PurchasesPage() {
+  const { notifyAdmin } = useApp();
   const [purchases, setPurchases] = useState<MerchandisePurchase[]>([]);
   const [suppliers, setSuppliers] = useState<Supplier[]>([]);
   const [loading, setLoading] = useState(true);
@@ -74,6 +76,7 @@ export default function PurchasesPage() {
     try {
       const saved = await merchandisePurchaseService.create({ supplierId: selectedSupplier.id, supplier: selectedSupplier.name, date, items, total, status });
       setPurchases((current) => [saved, ...current]); setFormOpen(false); setSuccess('Compra registrada en esta sesión de demostración.');
+      notifyAdmin({ dedupeKey: `purchase-created:${saved.id}`, type: 'success', title: 'Compra de mercancía registrada', entity: `${saved.id} · ${saved.supplier} · ${formatQ(saved.total)}`, message: `Se registró una compra con ${saved.items.length} producto(s) y ${saved.items.reduce((sum, item) => sum + item.quantity, 0)} unidad(es).`, nextAction: 'Consultar el detalle en el historial de compras.', actionTo: '/admin/purchases' });
     } catch { setFormError('No se pudo guardar la compra. Intenta nuevamente.'); }
   };
 

@@ -2,6 +2,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Archive, Ban, Check, ChevronDown, Download, Eye, Filter, Package, Pencil, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
 import { adminTableService, brandService, productInventoryService, type AdminTableRecord } from './services';
 import { formatQ, merchandisePurchases } from './data/mockData';
+import { useApp } from './contexts/AppContext';
 import type { Brand } from './types';
 
 export interface AdminModuleConfig {
@@ -34,6 +35,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const [busy, setBusy] = useState(false);
   const [confirmMessage, setConfirmMessage] = useState('');
   const [brandOptions, setBrandOptions] = useState<Brand[]>([]);
+  const { reportLowStock } = useApp();
   const isProductSection = section === 'products' || section === 'inventory';
 
   useEffect(() => {
@@ -43,6 +45,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     if (section === 'products' || section === 'inventory') {
       brandService.list().then(setBrandOptions).catch(() => setBrandOptions([]));
       productInventoryService.list().then((currentProducts) => {
+        if (section === 'inventory') reportLowStock(currentProducts);
         const synced = next.map((entry) => {
           const product = currentProducts.find((item) => item.sku === entry.data.SKU);
           if (!product) return entry;
@@ -51,7 +54,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
         sessionRows.set(section, synced); setEntries(synced);
       }).catch(() => undefined);
     }
-  }, [section, config]);
+  }, [section, config, reportLowStock]);
 
   const isTransactional = transactionSections.has(section);
   const readOnly = viewOnlySections.has(section);

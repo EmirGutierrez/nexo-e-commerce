@@ -1,14 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowDownToLine, Check, CreditCard, Eye, Plus, Printer, ReceiptText, Trash2, X } from 'lucide-react';
 import { formatQ, orders } from './data/mockData';
-import { productInventoryService, salesService } from './services';
+import { orderService, productInventoryService, salesService } from './services';
 import { useApp } from './contexts/AppContext';
-import type { InPersonSale, PaymentMethod, Product } from './types';
+import type { InPersonSale, Order, PaymentMethod, Product } from './types';
 
 type SaleDraftItem = { productId: string; quantity: number };
 
 export default function SalesPage() {
-  const { user, paymentMethods } = useApp();
+  const { user, paymentMethods, notifyAdmin, reportLowStock } = useApp();
   const [sales, setSales] = useState<InPersonSale[]>([]);
   const [catalog, setCatalog] = useState<Product[]>([]);
   const [loading, setLoading] = useState(true);
@@ -19,12 +19,16 @@ export default function SalesPage() {
   const [formError, setFormError] = useState('');
   const [feedback, setFeedback] = useState('');
   const [selectedSale, setSelectedSale] = useState<InPersonSale | null>(null);
+  const [webOrders, setWebOrders] = useState<Order[]>(orders);
+  const [confirmOrderCancel, setConfirmOrderCancel] = useState<Order | null>(null);
+  const [orderError, setOrderError] = useState('');
   const availableMethods = (['card', 'transfer'] as const).filter((method) => paymentMethods[method]);
 
   useEffect(() => {
     Promise.all([salesService.listInPerson(), productInventoryService.list()])
       .then(([saleRows, products]) => { setSales(saleRows); setCatalog(products); })
       .finally(() => setLoading(false));
+    orderService.list().then(setWebOrders).catch(() => undefined);
   }, []);
 
   useEffect(() => {
@@ -32,11 +36,26 @@ export default function SalesPage() {
   }, [paymentMethods, payment, availableMethods]);
 
   useEffect(() => {
-    if (!showForm && !selectedSale) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) { setShowForm(false); setSelectedSale(null); } };
+    if (!showForm && !selectedSale && !confirmOrderCancel) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) { setShowForm(false); setSelectedSale(null); setConfirmOrderCancel(null); } };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [showForm, selectedSale, busy]);
+  }, [showForm, selectedSale, confirmOrderCancel, busy]);
+
+  const saveOrderStatus = async (order: Order, nextStatus: Order['status']) => {
+    setOrderError('');
+    try {
+      await orderService.updateStatus(order.id, nextStatus);
+      setWebOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, status: nextStatus } : entry));
+      setConfirmOrderCancel(null);
+      notifyAdmin({ dedupeKey: `order-status:${order.id}:${nextStatus}:${Date.now()}`, type: nextStatus === 'Cancelado' ? 'warning' : nextStatus === 'Completado' ? 'success' : 'info', title: 'Estado del pedido actualizado', entity: `${order.id} · ${order.customer}`, message: `El estado cambió de “${order.status}” a “${nextStatus}”.`, nextAction: 'Revisar el pedido y continuar su seguimiento.', actionTo: '/admin/sales' });
+    } catch { setOrderError('No se pudo actualizar el estado del pedido.'); }
+  };
+  const applyOrderStatus = (order: Order, nextStatus: Order['status']) => {
+    if (nextStatus === order.status) return;
+    if (nextStatus === 'Cancelado') { setConfirmOrderCancel(order); return; }
+    void saveOrderStatus(order, nextStatus);
+  };
 
   const productById = useMemo(() => new Map(catalog.map((product) => [product.id, product])), [catalog]);
   const lineSubtotal = (line: SaleDraftItem) => (productById.get(line.productId)?.price || 0) * line.quantity;
@@ -75,6 +94,7 @@ export default function SalesPage() {
     try {
       const sale = await salesService.createInPerson({ seller: user?.name || '', paymentMethod: payment, items: draftItems });
       const [updatedProducts, updatedSales] = await Promise.all([productInventoryService.list(), salesService.listInPerson()]);
+      reportLowStock(updatedProducts);
       setCatalog(updatedProducts); setSales(updatedSales); setShowForm(false); setSelectedSale(sale);
       setFeedback(`Venta ${sale.id} registrada. Se generó su comprobante interno.`);
     } catch (error) {
@@ -90,9 +110,9 @@ export default function SalesPage() {
     <section className="panel sales-panel"><div className="panel-heading"><div><h2>Historial de ventas presenciales</h2><span>{sales.length} comprobantes internos</span></div></div>
       {loading ? <div className="sales-empty">Cargando ventas…</div> : sales.length ? <div className="data-table sales-table"><div className="table-head"><span>Venta</span><span>Fecha</span><span>Vendedor</span><span>Productos</span><span>Pago</span><span>Total</span><span>Detalle</span></div>{sales.map((sale) => <div className="table-row" key={sale.id}><strong>{sale.id}</strong><span>{new Date(sale.date).toLocaleString('es-GT')}</span><span>{sale.seller}</span><span>{sale.items.reduce((sum, item) => sum + item.quantity, 0)}</span><span className="sale-payment-status">{sale.paymentStatus}</span><strong>{formatQ(sale.total)}</strong><div className="table-actions"><button type="button" className="icon-button" title="Ver comprobante" aria-label={`Ver venta ${sale.id}`} onClick={() => setSelectedSale(sale)}><Eye size={15} /></button></div></div>)}</div> : <div className="sales-empty"><ReceiptText size={30} /><strong>Aún no hay ventas presenciales</strong><span>Registra una venta para crear el primer comprobante de esta sesión.</span><button className="button button-outline" onClick={openForm}><Plus size={15} /> Registrar venta</button></div>}
     </section>
-    <section className="panel web-orders-panel"><div className="panel-heading"><div><h2>Pedidos de tienda en línea</h2><span>Son pedidos web; no forman parte de las ventas presenciales.</span></div></div><div className="data-table web-orders-table"><div className="table-head"><span>Pedido web</span><span>Cliente</span><span>Fecha</span><span>Método de pago</span><span>Estado</span><span>Total</span></div>{orders.map((order) => <div className="table-row" key={order.id}><strong>{order.id}</strong><span>{order.customer}</span><span>{order.date}</span><span>{order.payment}</span><span>{order.status}</span><strong>{formatQ(order.total)}</strong></div>)}</div></section>
+    <section className="panel web-orders-panel"><div className="panel-heading"><div><h2>Pedidos de tienda en línea</h2><span>Son pedidos web; no forman parte de las ventas presenciales.</span></div></div>{orderError && <div className="sale-form-error" role="alert">{orderError}</div>}<div className="data-table web-orders-table"><div className="table-head"><span>Pedido web</span><span>Cliente</span><span>Fecha</span><span>Método de pago</span><span>Estado</span><span>Total</span></div>{webOrders.map((order) => <div className="table-row" key={order.id}><strong>{order.id}</strong><span>{order.customer}</span><span>{order.date}</span><span>{order.payment}</span><label className="order-status-select"><span className="sr-only">Estado de {order.id}</span><select value={order.status} onChange={(event) => applyOrderStatus(order, event.target.value as Order['status'])}><option>Pendiente de pago</option><option>En preparación</option><option>Completado</option><option>Cancelado</option></select></label><strong>{formatQ(order.total)}</strong></div>)}</div></section>
 
-    {showForm && <div className="modal-backdrop" onClick={() => { if (!busy) setShowForm(false); }}><div className="modal sale-modal" role="dialog" aria-modal="true" aria-labelledby="sale-form-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">Venta presencial</span><h2 id="sale-form-title">Registrar venta</h2></div><button type="button" className="icon-button" aria-label="Cerrar" disabled={busy} onClick={() => setShowForm(false)}><X size={18} /></button></div>
+    {confirmOrderCancel && <div className="modal-backdrop" onClick={() => setConfirmOrderCancel(null)}><section className="modal order-cancel-confirm" role="alertdialog" aria-modal="true" aria-labelledby="order-cancel-title"><div className="modal-header"><div><span className="eyebrow">Confirmación destructiva</span><h2 id="order-cancel-title">Cancelar pedido {confirmOrderCancel.id}</h2></div><button type="button" className="icon-button" aria-label="Cerrar confirmación" onClick={() => setConfirmOrderCancel(null)}><X size={18} /></button></div><p>Esta acción cambia el estado del pedido de {confirmOrderCancel.status} a Cancelado. La advertencia informativa aparecerá después de confirmar.</p><div className="modal-actions"><button className="button button-outline" onClick={() => setConfirmOrderCancel(null)}>Volver</button><button className="button button-primary" onClick={() => void saveOrderStatus(confirmOrderCancel, 'Cancelado')}>Confirmar cancelación</button></div></section></div>}    {showForm && <div className="modal-backdrop" onClick={() => { if (!busy) setShowForm(false); }}><div className="modal sale-modal" role="dialog" aria-modal="true" aria-labelledby="sale-form-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">Venta presencial</span><h2 id="sale-form-title">Registrar venta</h2></div><button type="button" className="icon-button" aria-label="Cerrar" disabled={busy} onClick={() => setShowForm(false)}><X size={18} /></button></div>
       <form className="sale-form" onSubmit={submitSale} noValidate><div className="sale-meta-grid"><div><span>Vendedor</span><strong>{user?.name || 'Personal'}</strong></div><div><span>Fecha</span><strong>{new Date().toLocaleString('es-GT')}</strong></div></div>
         <div className="sale-items-heading"><div><strong>Productos vendidos</strong><span>El total y el inventario se validan al confirmar.</span></div><button type="button" className="button button-outline" onClick={addLine} disabled={busy || !catalog.some((product) => product.stock > 0 && !draftItems.some((line) => line.productId === product.id))}><Plus size={15} /> Añadir producto</button></div>
         {draftItems.length ? <div className="sale-items-list">{draftItems.map((line, index) => {
