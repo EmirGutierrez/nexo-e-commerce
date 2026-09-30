@@ -5,6 +5,45 @@ export type RolePermissions = Record<PermissionModule, PermissionAction[]>;
 export type PaymentMethod = 'card' | 'transfer';
 export type PaymentMethodSettings = Record<PaymentMethod, boolean>;
 
+export interface Offer {
+  id: string;
+  productId: string;
+  originalPrice: number;
+  discountedPrice: number;
+  startsAt: string;
+  endsAt: string;
+  status: 'Activa' | 'Pausada';
+}
+
+export interface Announcement {
+  id: string;
+  title: string;
+  description: string;
+  href: string;
+  status: 'Activa' | 'Pausada';
+}
+
+export interface DiscountCode {
+  id: string;
+  code: string;
+  discountPercent: number;
+  minPurchase: number;
+  maxUses: number;
+  usedCount: number;
+  startsAt: string;
+  endsAt: string;
+  status: 'Activo' | 'Pausado';
+}
+
+export interface TransferReceipt {
+  id: string;
+  customer: string;
+  date: string;
+  total: number;
+  image: string;
+  status: 'Pendiente' | 'Aprobada' | 'Rechazada';
+}
+
 export interface Brand {
   id: string;
   name: string;

@@ -1,2 +1,2 @@
-import { CartPage } from '../../../modules/app/components/NexoPages';
-export default CartPage;
+import { CartExperience } from '../../../modules/commerce/components/CommercePages';
+export default CartExperience;

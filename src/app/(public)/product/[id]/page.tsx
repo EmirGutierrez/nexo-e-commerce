@@ -1,2 +1,2 @@
-import { ProductDetailApi } from '../../../../modules/app/components/NexoPages';
-export default ProductDetailApi;
+import { ProductDetail } from '../../../../modules/commerce/components/CommercePages';
+export default ProductDetail;

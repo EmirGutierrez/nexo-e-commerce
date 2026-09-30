@@ -1,2 +1,2 @@
-import { Checkout } from '../../../modules/app/components/NexoPages';
-export default Checkout;
+import { CheckoutExperience } from '../../../modules/commerce/components/CommercePages';
+export default CheckoutExperience;
