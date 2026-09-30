@@ -169,4 +169,3 @@ Guarda el estado mock/local de forma coherente, actualiza la UI según el rol ac
 
 Al terminar, explica el modelo de permisos y sus límites de demo y ejecuta `npm run build`. No agregues dependencias salvo que sean imprescindibles.
 ```
-
