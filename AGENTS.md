@@ -61,7 +61,7 @@ Las rutas públicas están bajo `src/app/(public)`: `/`, `/store`, `/product/[id
 - Las ofertas, códigos, anuncios, recibos demo y productos vistos se guardan en `localStorage` del navegador. Son datos locales de demostración, no pedidos ni promociones persistidos en PostgreSQL.
 - El acceso administrativo inicia/restaura la sesión mediante el BFF y Spring. Los clientes y otros dominios conservan mocks.
 
-Claves locales relevantes: `nexo-promotions-v1`, `nexo-transfer-receipts-v1` y `nexo-recent-products-v1`. El checkout usa `sessionStorage` para pasar temporalmente el código aplicado y el resultado de confirmación entre pantallas.
+Claves locales relevantes: `nexo-promotions-v1`, `nexo-transfer-receipts-v1` y `nexo-recent-products-v1`. En la primera lectura también se convierten las promociones guardadas con las claves antiguas `nexo-offers`, `nexo-product-announcements`, `nexo-discount-codes` y los comprobantes de `nexo-transfer-receipts`; las claves originales se conservan como respaldo. El checkout usa `sessionStorage` para pasar temporalmente el código aplicado y el resultado de confirmación entre pantallas, y puede leer la referencia y total del flujo anterior.
 
 ## Reglas para cambios
 

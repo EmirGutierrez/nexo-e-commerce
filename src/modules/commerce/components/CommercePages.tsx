@@ -9,7 +9,7 @@ import { useApp } from '../../../contexts/AppContext';
 import { fetchCatalogFromApi } from '../../products/services/productService';
 import { paymentService } from '../../../services';
 import type { PaymentMethod, Product, TransferReceipt } from '../../../types';
-import { applyPromotion, loadPromotionData, loadRecentlyViewed, recordRecentlyViewed, savePromotionData, saveTransferReceipt, validateDiscountCode } from '../services/commerceDataService';
+import { applyPromotion, isPromotionActive, loadPromotionData, loadRecentlyViewed, recordRecentlyViewed, savePromotionData, saveTransferReceipt, validateDiscountCode } from '../services/commerceDataService';
 
 function SafeImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
   return <img className={className} src={src} alt={alt} loading="lazy" decoding="async" onError={(event) => {
@@ -56,7 +56,7 @@ export function Storefront() {
     }).catch(() => setCatalog(products)).finally(() => setLoading(false));
   }, []);
 
-  const activeOffers = promotions.offers.filter((offer) => offer.status === 'Activa' && offer.startsAt <= new Date().toISOString().slice(0, 10) && offer.endsAt >= new Date().toISOString().slice(0, 10));
+  const activeOffers = promotions.offers.filter((offer) => isPromotionActive(offer));
   const categories = ['Todos', ...(activeOffers.length ? ['Ofertas'] : []), ...Array.from(new Set(catalog.map((product) => product.category)))];
   const promotedCatalog = catalog.map((product) => applyPromotion(product, promotions.offers));
   const filtered = useMemo(() => promotedCatalog.filter((product) => {
@@ -162,6 +162,7 @@ export function CheckoutExperience() {
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState('');
   const [receiptImage, setReceiptImage] = useState('');
+  const [receiptFileName, setReceiptFileName] = useState('');
   const [discount, setDiscount] = useState(0);
   const [delivery, setDelivery] = useState({ name: user?.name || '', phone: '', address: '', city: 'Ciudad de Guatemala', reference: '' });
   const availableMethods = (['card', 'transfer'] as const).filter((method) => paymentMethods[method]);
@@ -178,8 +179,8 @@ export function CheckoutExperience() {
   const chooseReceipt = async (event: ChangeEvent<HTMLInputElement>) => {
     setError('');
     const file = event.target.files?.[0];
-    if (!file) { setReceiptImage(''); return; }
-    try { setReceiptImage(await compressImage(file)); } catch (issue) { setReceiptImage(''); setError(issue instanceof Error ? issue.message : 'No se pudo cargar el comprobante.'); }
+    if (!file) { setReceiptImage(''); setReceiptFileName(''); return; }
+    try { setReceiptImage(await compressImage(file)); setReceiptFileName(file.name); } catch (issue) { setReceiptImage(''); setReceiptFileName(''); setError(issue instanceof Error ? issue.message : 'No se pudo cargar el comprobante.'); }
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError('');
@@ -200,7 +201,7 @@ export function CheckoutExperience() {
       const total = Math.max(0, cartTotal - currentDiscount);
       const orderId = `NX-${Date.now().toString().slice(-8)}`;
       if (payment === 'transfer') {
-        const receipt: TransferReceipt = { id: orderId, customer: delivery.name, date: new Date().toISOString(), total, image: receiptImage, status: 'Pendiente' };
+        const receipt: TransferReceipt = { id: orderId, orderId, customer: delivery.name, phone: delivery.phone, address: `${delivery.address}, ${delivery.city}${delivery.reference.trim() ? ` · ${delivery.reference.trim()}` : ''}`, date: new Date().toISOString(), submittedAt: new Date().toISOString(), total, image: receiptImage, reference: delivery.reference.trim() || 'Sin referencia', fileName: receiptFileName, status: 'Pendiente' };
         if (!saveTransferReceipt(receipt)) { setError('No se pudo guardar el comprobante. Prueba con una imagen más pequeña.'); return; }
       }
       if (code) {
@@ -231,6 +232,14 @@ export function ConfirmationExperience() {
     try {
       const saved = window.sessionStorage.getItem('nexo-confirmation-result');
       if (saved) setResult(JSON.parse(saved));
+      else {
+        const orderId = window.sessionStorage.getItem('nexo-last-order-id');
+        const formattedTotal = window.sessionStorage.getItem('nexo-last-order-total');
+        const total = formattedTotal ? Number(formattedTotal.replace(/[^\d,.-]/g, '').replace(/,/g, '')) : undefined;
+        if (orderId || Number.isFinite(total)) setResult({ orderId: orderId?.replace(/^#/, ''), total });
+        window.sessionStorage.removeItem('nexo-last-order-id');
+        window.sessionStorage.removeItem('nexo-last-order-total');
+      }
     } catch { setResult(null); }
   }, []);
   const transferPending = result?.paymentMethod === 'transfer' && result.paymentStatus === 'pending_verification';

@@ -37,10 +37,16 @@ export interface DiscountCode {
 
 export interface TransferReceipt {
   id: string;
+  orderId?: string;
   customer: string;
+  phone?: string;
+  address?: string;
   date: string;
   total: number;
   image: string;
+  reference?: string;
+  fileName?: string;
+  submittedAt?: string;
   status: 'Pendiente' | 'Aprobada' | 'Rechazada';
 }
 
