@@ -18,7 +18,13 @@ npm run build
 npm run start
 ```
 
-## Estructura
+## Trabajo en equipo
+
+Las instrucciones completas de colaboración, ramas, revisión y merges están en [CONTRIBUTING.md](./CONTRIBUTING.md).
+
+El flujo oficial es `origin/develop → feature/* → revisión → merge directo a develop → master`. No se utilizan Pull Requests, `main` ni cambios directos sobre `develop` o `master`.
+
+## Estructura y alcance actual
 
 - `src/app`: rutas y layouts de Next.js, organizados en los grupos `(auth)`, `(public)` y `(admin)`.
 - `src/modules`: componentes y lógica organizados por áreas del negocio, como autenticación, productos, ventas, compras, contabilidad y proveedores.
