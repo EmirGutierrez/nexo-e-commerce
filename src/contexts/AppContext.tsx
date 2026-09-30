@@ -1,6 +1,6 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { products } from '../data/mockData';
-import { paymentSettingsService, paymentSettingsStorageKey } from '../services';
+import { authService, paymentSettingsService, paymentSettingsStorageKey } from '../services';
 import type { CartItem, PaymentMethod, PaymentMethodSettings, Product, Role, User } from '../types';
 
 interface AppContextValue {
@@ -12,8 +12,9 @@ interface AppContextValue {
   removeFromCart: (id: string) => void;
   user: User | null;
   userType: 'admin' | 'customer' | null;
-  login: (email: string, password: string, kind: 'admin' | 'customer') => User | null;
-  logout: () => void;
+  authLoading: boolean;
+  login: (email: string, password: string, kind: 'admin' | 'customer') => Promise<User | null>;
+  logout: () => Promise<void>;
   role: Role | null;
   assignRole: (userId: string, role: Role) => void;
   paymentMethods: PaymentMethodSettings;
@@ -42,6 +43,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [userType, setUserType] = useState<'admin' | 'customer' | null>(null);
   const [role, setRole] = useState<Role | null>(null);
+  const [authLoading, setAuthLoading] = useState(true);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodSettings>(paymentSettingsService.getCurrent);
   const [adminAlerts, setAdminAlerts] = useState<AdminAlert[]>([]);
   const seenAdminAlerts = useRef(new Set<string>());
@@ -57,6 +59,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const names = low.slice(0, 4).map((product) => `${product.name} (${product.stock})`).join(', ');
     notifyAdmin({ dedupeKey: `low-stock:${low.map((product) => `${product.id}:${product.stock}`).join('|')}`, type: 'warning', title: `${low.length} producto${low.length === 1 ? '' : 's'} requieren revisión de stock`, entity: names + (low.length > 4 ? ` y ${low.length - 4} más` : ''), message: 'Hay productos con menos de 10 unidades o agotados en el inventario.', nextAction: 'Revisar existencias y planificar reposición.', actionTo: '/admin/inventory/alerts' });
   }, [notifyAdmin]);
+
+  useEffect(() => {
+    let active = true;
+    authService.currentUser()
+      .then((currentUser) => {
+        if (!active || !currentUser) return;
+        setUser(currentUser);
+        setUserType('admin');
+        setRole(currentUser.role);
+      })
+      .catch(() => {
+        // El frontend público y los dominios mock siguen disponibles si la API está apagada.
+      })
+      .finally(() => {
+        if (active) setAuthLoading(false);
+      });
+    return () => { active = false; };
+  }, []);
 
   useEffect(() => {
     const syncPaymentSettings = (event: StorageEvent) => {
@@ -79,18 +99,24 @@ export function AppProvider({ children }: { children: ReactNode }) {
     removeFromCart: (id) => setCart((current) => current.filter((item) => item.id !== id)),
     user,
     userType,
-    login: (email, password, kind) => {
-      if (kind === 'admin' && email === 'superadmin@nexo.gt' && password === 'Admin123!') {
-        const admin = { ...({ id: 'u0', name: 'María Fernanda López', email, role: 'superadmin', initials: 'MF', status: 'Activo' } as User) };
-        setUser(admin); setUserType('admin'); setRole(admin.role); return admin;
+    authLoading,
+    login: async (email, password, kind) => {
+      if (kind === 'admin') {
+        const admin = await authService.loginAdmin(email, password);
+        if (!admin) return null;
+        setUser(admin); setUserType('admin'); setRole(admin.role);
+        return admin;
       }
-      if (kind === 'customer' && email && password.length >= 4 && !(email === 'superadmin@nexo.gt' && password === 'Admin123!')) {
+      if (kind === 'customer' && email && password.length >= 4) {
         const customer = { id: 'c1', name: 'Valeria Castillo', email, role: 'employee', initials: 'VC', status: 'Activo' } as User;
         setUser(customer); setUserType('customer'); setRole(customer.role); return customer;
       }
       return null;
     },
-    logout: () => { setUser(null); setUserType(null); setRole(null); },
+    logout: async () => {
+      if (userType === 'admin') await authService.logout();
+      setUser(null); setUserType(null); setRole(null);
+    },
     role,
     assignRole: (userId, nextRole) => {
       if (userId === user?.id) setRole(nextRole);
@@ -105,7 +131,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     notifyAdmin,
     dismissAdminAlert,
     reportLowStock,
-  }), [cart, user, userType, role, paymentMethods, adminAlerts, notifyAdmin, dismissAdminAlert, reportLowStock]);
+  }), [cart, user, userType, authLoading, role, paymentMethods, adminAlerts, notifyAdmin, dismissAdminAlert, reportLowStock]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

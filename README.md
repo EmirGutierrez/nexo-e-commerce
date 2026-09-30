@@ -4,6 +4,8 @@ Tienda de comercio electrónico y panel administrativo de demostración, constru
 
 ## Ejecutar
 
+Configura e inicia PostgreSQL y Spring Boot siguiendo [backend/README.md](backend/README.md). Copia `.env.example` a `.env.local` en la raíz para que Next.js conozca la URL interna de Spring mediante `SPRING_BACKEND_URL`.
+
 ```bash
 npm install
 npm run dev
@@ -31,6 +33,6 @@ Las rutas conservan las URLs existentes, incluyendo `/store`, `/cart`, `/checkou
 - Detalle de producto, carrito en memoria, checkout y confirmación.
 - Métodos de pago simulados; no se procesan cobros ni se guardan datos financieros.
 - Panel de administración con dashboard, productos, inventario, compras, ventas, clientes, proveedores, marcas, roles, reportes y configuración.
-- Acceso administrativo de demostración: `superadmin@nexo.gt` / `Admin123!`.
+- El acceso administrativo requiere una cuenta creada en Spring Boot mediante el bootstrap inicial configurado fuera del repositorio; consulta `backend/README.md`.
 
-La autenticación, los permisos y los datos son simulados en frontend. La protección administrativa no sustituye autorización del lado del servidor. El estado de sesión y carrito vive en memoria; algunas preferencias se guardan en `localStorage`.
+La autenticación administrativa usa el BFF de Next.js y sesiones, usuarios y permisos de Spring Boot. El acceso de clientes y los demás dominios continúan simulados. El carrito vive en memoria; algunas preferencias se guardan en `localStorage`.

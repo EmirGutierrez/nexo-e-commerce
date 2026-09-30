@@ -1,5 +1,7 @@
 import { accountingMovements, activities, brands as mockBrands, categories, inPersonSales, merchandisePurchases, orders, products, suppliers, users } from '../data/mockData';
 import type { AccountingMovement, Brand, InPersonSale, MerchandisePurchase, Order, PaymentMethod, PaymentMethodSettings, Product, Supplier, User } from '../types';
+import { roleLabels } from '../types';
+import { ApiError, apiClient, clearCsrfToken } from '../shared/services/http-client';
 export { productService } from './productService';
 export { roleService } from './roleService';
 
@@ -11,11 +13,54 @@ const sessionProducts: Product[] = products.map((product) => ({ ...product }));
 const sessionSales: InPersonSale[] = inPersonSales.map((sale) => ({ ...sale, items: sale.items.map((item) => ({ ...item })) }));
 const sessionBrands: Brand[] = mockBrands.map((brand) => ({ ...brand }));
 
-/** Servicios mock con firmas asíncronas equivalentes a una futura API REST. */
+/** Los dominios aún no migrados conservan servicios mock. */
+interface ApiUser {
+  id: string;
+  name: string;
+  email: string;
+  role: string;
+  status: string;
+}
+
+function mapApiUser(user: ApiUser): User {
+  if (!(user.role in roleLabels)) throw new Error('El servidor devolvió un rol que el frontend no reconoce.');
+  const words = user.name.trim().split(/\s+/).filter(Boolean);
+  return {
+    id: user.id,
+    name: user.name,
+    email: user.email,
+    role: user.role as User['role'],
+    initials: words.slice(0, 2).map((word) => word[0]).join('').toUpperCase(),
+    status: user.status === 'ACTIVE' ? 'Activo' : user.status === 'PENDING' ? 'Pendiente' : 'Inactivo',
+  };
+}
+
 export const authService = {
-  login: (email: string, _password: string) => delay<User | null>(users.find((user) => user.email === email) || null),
-  logout: () => delay(true),
-  currentUser: () => delay<User | null>(null),
+  loginAdmin: async (email: string, password: string): Promise<User | null> => {
+    try {
+      const result = await apiClient.post<ApiUser>('/api/auth/login', { email, password });
+      clearCsrfToken();
+      return mapApiUser(result);
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return null;
+      throw error;
+    }
+  },
+  logout: async (): Promise<void> => {
+    try {
+      await apiClient.post<void>('/api/auth/logout');
+    } finally {
+      clearCsrfToken();
+    }
+  },
+  currentUser: async (): Promise<User | null> => {
+    try {
+      return mapApiUser(await apiClient.get<ApiUser>('/api/auth/me'));
+    } catch (error) {
+      if (error instanceof ApiError && error.status === 401) return null;
+      throw error;
+    }
+  },
 };
 
 export const categoryService = { list: () => delay(categories.filter((category) => category !== 'Todos')) };
