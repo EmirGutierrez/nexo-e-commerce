@@ -1,11 +1,17 @@
-import type { Activity, Order, Product, RoleDefinition, User } from '../types';
+import type { AccountingMovement, Activity, Brand, InPersonSale, MerchandisePurchase, Order, Product, Supplier, User } from '../types';
+
+export const brands: Brand[] = [
+  { id: 'brand-audio', name: 'Nexa Audio', description: 'Audio y accesorios tecnológicos.', contact: 'ventas@nexaaudio.gt', website: 'https://nexaaudio.gt', status: 'Activa' },
+  { id: 'brand-hogar', name: 'Hogar Nativo', description: 'Artículos funcionales para el hogar.', status: 'Activa' },
+  { id: 'brand-orbit', name: 'Orbit', description: 'Periféricos y tecnología para el día a día.', website: 'https://orbit.example', status: 'Activa' },
+];
 
 export const products: Product[] = [
-  { id: 'p1', name: 'Auriculares Wave Pro', category: 'Tecnología', price: 649, compareAt: 799, stock: 24, status: 'Activo', sku: 'TEC-WAV-001', featured: true, image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=85', description: 'Sonido envolvente, cancelación activa de ruido y hasta 36 horas de batería para acompañarte en todo momento.' },
-  { id: 'p2', name: 'Lámpara Aura Mini', category: 'Hogar', price: 389, stock: 18, status: 'Activo', sku: 'HOG-AUR-002', featured: true, image: 'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=900&q=85', description: 'Iluminación cálida regulable con un diseño minimalista que transforma cualquier rincón.' },
+  { id: 'p1', brandId: 'brand-audio', name: 'Auriculares Wave Pro', category: 'Tecnología', price: 649, compareAt: 799, stock: 24, status: 'Activo', sku: 'TEC-WAV-001', featured: true, image: 'https://images.unsplash.com/photo-1505740420928-5e560c06d30e?auto=format&fit=crop&w=900&q=85', description: 'Sonido envolvente, cancelación activa de ruido y hasta 36 horas de batería para acompañarte en todo momento.' },
+  { id: 'p2', brandId: 'brand-hogar', name: 'Lámpara Aura Mini', category: 'Hogar', price: 389, stock: 18, status: 'Activo', sku: 'HOG-AUR-002', featured: true, image: 'https://images.unsplash.com/photo-1507473885765-e6ed057f782c?auto=format&fit=crop&w=900&q=85', description: 'Iluminación cálida regulable con un diseño minimalista que transforma cualquier rincón.' },
   { id: 'p3', name: 'Mochila Terra Daily', category: 'Accesorios', price: 475, compareAt: 550, stock: 9, status: 'Bajo stock', sku: 'ACC-TER-003', featured: true, image: 'https://images.unsplash.com/photo-1553062407-98eeb64c6a62?auto=format&fit=crop&w=900&q=85', description: 'Mochila urbana resistente al agua, con compartimento acolchado para laptop de hasta 16 pulgadas.' },
   { id: 'p4', name: 'Cafetera Moka One', category: 'Hogar', price: 820, stock: 6, status: 'Bajo stock', sku: 'HOG-MOK-004', image: 'https://images.unsplash.com/photo-1517668808822-9ebb02f2a0e6?auto=format&fit=crop&w=900&q=85', description: 'Café intenso y aromático preparado en casa con un acabado de acero inoxidable.' },
-  { id: 'p5', name: 'Teclado Orbit 75', category: 'Tecnología', price: 895, stock: 31, status: 'Activo', sku: 'TEC-ORB-005', image: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=900&q=85', description: 'Teclado mecánico compacto con switches silenciosos, retroiluminación y conexión inalámbrica.' },
+  { id: 'p5', brandId: 'brand-orbit', name: 'Teclado Orbit 75', category: 'Tecnología', price: 895, stock: 31, status: 'Activo', sku: 'TEC-ORB-005', image: 'https://images.unsplash.com/photo-1587829741301-dc798b83add3?auto=format&fit=crop&w=900&q=85', description: 'Teclado mecánico compacto con switches silenciosos, retroiluminación y conexión inalámbrica.' },
   { id: 'p6', name: 'Botella Noma 750ml', category: 'Bienestar', price: 215, stock: 0, status: 'Agotado', sku: 'BIE-NOM-006', image: 'https://images.unsplash.com/photo-1602143407151-7111542de6e8?auto=format&fit=crop&w=900&q=85', description: 'Botella reutilizable de acero inoxidable que conserva la temperatura por horas.' },
   { id: 'p7', name: 'Vela Senda Citrus', category: 'Hogar', price: 185, stock: 14, status: 'Activo', sku: 'HOG-SEN-007', image: 'https://images.unsplash.com/photo-1603006905003-be475563bc59?auto=format&fit=crop&w=900&q=85', description: 'Aroma fresco de bergamota y cedro con cera vegetal y 40 horas de duración.' },
   { id: 'p8', name: 'Smartwatch Pulse', category: 'Tecnología', price: 1240, compareAt: 1490, stock: 12, status: 'Activo', sku: 'TEC-PUL-008', image: 'https://images.unsplash.com/photo-1546868871-7041f2a55e12?auto=format&fit=crop&w=900&q=85', description: 'Monitorea tu actividad, sueño y notificaciones en una pantalla brillante y ligera.' },
@@ -21,60 +27,6 @@ export const users: User[] = [
   { id: 'u5', name: 'Laura García', email: 'laura@nexo.gt', role: 'employee', initials: 'LG', status: 'Pendiente' },
 ];
 
-export const roleDefinitions: RoleDefinition[] = [
-  {
-    id: 'superadmin',
-    name: 'Súper usuario',
-    description: 'Dueño de la cuenta y responsable de toda la operación.',
-    scope: 'Acceso completo',
-    users: 1,
-    updatedAt: 'Hoy, 09:42',
-    permissionKeys: ['dashboard.view', 'catalog.manage', 'orders.manage', 'sales.manage', 'inventory.manage', 'customers.manage', 'users.manage', 'reports.view', 'settings.manage'],
-    protected: true,
-    tone: 'navy',
-  },
-  {
-    id: 'admin',
-    name: 'Administrador',
-    description: 'Gestiona la operación diaria sin modificar el dueño de la cuenta.',
-    scope: 'Operación completa',
-    users: 1,
-    updatedAt: '12 sep 2025',
-    permissionKeys: ['dashboard.view', 'catalog.manage', 'orders.manage', 'sales.manage', 'inventory.manage', 'customers.manage', 'reports.view'],
-    tone: 'blue',
-  },
-  {
-    id: 'sales',
-    name: 'Vendedor',
-    description: 'Atiende pedidos, ventas y clientes desde el panel.',
-    scope: 'Ventas y clientes',
-    users: 2,
-    updatedAt: '08 sep 2025',
-    permissionKeys: ['dashboard.view', 'orders.manage', 'sales.manage', 'customers.manage'],
-    tone: 'purple',
-  },
-  {
-    id: 'warehouse',
-    name: 'Personal de bodega',
-    description: 'Controla existencias y movimientos de inventario.',
-    scope: 'Inventario',
-    users: 2,
-    updatedAt: '08 sep 2025',
-    permissionKeys: ['dashboard.view', 'inventory.manage'],
-    tone: 'orange',
-  },
-  {
-    id: 'employee',
-    name: 'Empleado',
-    description: 'Acceso limitado para apoyar tareas operativas.',
-    scope: 'Acceso limitado',
-    users: 2,
-    updatedAt: '05 sep 2025',
-    permissionKeys: ['dashboard.view', 'orders.manage'],
-    tone: 'lime',
-  },
-];
-
 export const orders: Order[] = [
   { id: '#NX-1048', customer: 'Valeria Castillo', date: 'Hoy, 10:42', items: 3, total: 1_284, status: 'Completado', payment: 'Tarjeta' },
   { id: '#NX-1047', customer: 'Alejandro Pérez', date: 'Hoy, 09:18', items: 1, total: 895, status: 'En preparación', payment: 'Transferencia' },
@@ -83,11 +35,36 @@ export const orders: Order[] = [
   { id: '#NX-1044', customer: 'Camila Díaz', date: '12 sep, 11:20', items: 1, total: 215, status: 'Cancelado', payment: 'Tarjeta' },
 ];
 
+// Las ventas presenciales de la sesión se mantienen separadas de los pedidos web.
+export const inPersonSales: InPersonSale[] = [];
+
+// Compras de abastecimiento ficticias, independientes de los pedidos de clientes.
+export const merchandisePurchases: MerchandisePurchase[] = [
+  { id: 'AB-2025-014', supplier: 'TecnoImport GT', date: '2025-09-12', items: [{ productId: 'p1', productName: 'Auriculares Wave Pro', quantity: 12, unitCost: 420 }, { productId: 'p5', productName: 'Teclado Orbit 75', quantity: 8, unitCost: 610 }], total: 9920, status: 'Registrada' },
+  { id: 'AB-2025-013', supplier: 'Casa Moka', date: '2025-09-08', items: [{ productId: 'p4', productName: 'Cafetera Moka One', quantity: 6, unitCost: 540 }], total: 3240, status: 'Pendiente' },
+];
+
+// Asociaciones ilustrativas para la demo; actualizar al recibir el catálogo real por proveedor.
+export const suppliers: Supplier[] = [
+  { id: 's1', name: 'TecnoImport GT', contactPerson: 'Andrea Morales', phone: '+502 2234-5678', email: 'ventas@tecnoimport.gt', status: 'Activo', productIds: ['p1', 'p5'] },
+  { id: 's2', name: 'Casa Moka', contactPerson: 'Luis Méndez', phone: '+502 2456-7890', email: 'hola@casamoka.gt', status: 'Activo', productIds: ['p4'] },
+  { id: 's3', name: 'Terra Supply', contactPerson: 'Paola Reyes', phone: '+502 2333-1400', email: 'contacto@terrasupply.gt', status: 'Activo', productIds: ['p3', 'p7'] },
+];
+
 export const activities: Activity[] = [
   { title: 'Nueva transferencia recibida', description: 'Pedido #NX-1047 · Q 895.00', time: 'Hace 18 min', icon: 'arrow', tone: 'blue' },
   { title: 'Stock actualizado', description: 'Auriculares Wave Pro · +12 unidades', time: 'Hace 42 min', icon: 'box', tone: 'green' },
   { title: 'Nuevo cliente registrado', description: 'Valeria Castillo', time: 'Hace 1 h', icon: 'user', tone: 'purple' },
   { title: 'Pedido completado', description: 'Pedido #NX-1045 · Mateo Estrada', time: 'Hace 2 h', icon: 'check', tone: 'orange' },
+];
+
+// Registros ilustrativos para la demostración; no representan contabilidad real.
+export const accountingMovements: AccountingMovement[] = [
+  { id: 'acc-1', date: '2025-09-14', concept: 'Ventas de tienda en línea', category: 'Ventas', type: 'Ingreso', amount: 12840, status: 'Registrado' },
+  { id: 'acc-2', date: '2025-09-13', concept: 'Compra de empaques', category: 'Suministros', type: 'Egreso', amount: 1450, status: 'Registrado' },
+  { id: 'acc-3', date: '2025-09-12', concept: 'Ventas presenciales', category: 'Ventas', type: 'Ingreso', amount: 4820, status: 'Registrado' },
+  { id: 'acc-4', date: '2025-09-10', concept: 'Servicio de internet', category: 'Servicios', type: 'Egreso', amount: 650, status: 'Pendiente' },
+  { id: 'acc-5', date: '2025-09-08', concept: 'Reembolso de proveedor', category: 'Otros ingresos', type: 'Ingreso', amount: 575, status: 'Registrado' },
 ];
 
 export const formatQ = (value: number) => `Q ${value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;

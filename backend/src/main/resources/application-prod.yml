@@ -1,0 +1,20 @@
+server:
+  forward-headers-strategy: framework
+  servlet:
+    session:
+      cookie:
+        secure: ${SESSION_COOKIE_SECURE:true}
+        same-site: ${SESSION_COOKIE_SAME_SITE:Lax}
+springdoc:
+  api-docs:
+    enabled: ${OPENAPI_ENABLED:false}
+  swagger-ui:
+    enabled: ${OPENAPI_ENABLED:false}
+spring:
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+nexo:
+  web:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS}

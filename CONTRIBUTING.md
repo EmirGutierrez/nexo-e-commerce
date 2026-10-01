@@ -2,7 +2,7 @@
 
 Este documento define el trabajo colaborativo del equipo en:
 
-<https://github.com/marce711/nexo-e-commerce>
+<https://github.com/EmirGutierrez/nexo-e-commerce>
 
 El Scrum Master coordina tickets, revisiones, merges e integración del producto.
 
@@ -23,7 +23,7 @@ No se debe modificar directamente `develop` ni `master`. Tampoco se utilizará u
 ## Preparar el entorno
 
 ```bash
-git clone https://github.com/marce711/nexo-e-commerce.git
+git clone https://github.com/EmirGutierrez/nexo-e-commerce.git
 cd nexo-e-commerce
 npm install
 npm run dev
@@ -160,7 +160,7 @@ Cada ticket debe quedar documentado con:
 
 ## Fases del proyecto
 
-1. Frontend web con React, Vite, TypeScript, Tailwind CSS, React Router y lucide-react.
+1. Frontend web con Next.js App Router, React y TypeScript.
 2. Acceso dividido entre Cliente y Administrador.
 3. Tienda pública.
 4. Panel de Súper Administrador.
