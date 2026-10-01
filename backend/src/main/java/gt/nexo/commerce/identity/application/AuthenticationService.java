@@ -42,12 +42,28 @@ public class AuthenticationService {
         this.userAccountService = userAccountService;
     }
 
-    @Transactional
+    @Transactional(noRollbackFor = InvalidCredentialsException.class)
     public UserResponse login(LoginRequest request, HttpServletRequest servletRequest, HttpServletResponse servletResponse) {
+        Authentication authentication = authenticateCredentials(request);
+        sessionAuthenticationStrategy.onAuthentication(authentication, servletRequest, servletResponse);
+        SecurityContext context = SecurityContextHolder.createEmptyContext();
+        context.setAuthentication(authentication);
+        SecurityContextHolder.setContext(context);
+        securityContextRepository.saveContext(context, servletRequest, servletResponse);
+
+        AppUserEntity account = recordSuccessfulLogin(authentication);
+        return userAccountService.currentUser(account.getId());
+    }
+
+    @Transactional(noRollbackFor = InvalidCredentialsException.class)
+    public AppUserEntity authenticateMobile(LoginRequest request) {
+        return recordSuccessfulLogin(authenticateCredentials(request));
+    }
+
+    private Authentication authenticateCredentials(LoginRequest request) {
         String email = request.email().trim().toLowerCase(Locale.ROOT);
-        Authentication authentication;
         try {
-            authentication = authenticationManager.authenticate(
+            return authenticationManager.authenticate(
                     UsernamePasswordAuthenticationToken.unauthenticated(email, request.password()));
         } catch (AuthenticationException exception) {
             users.findByEmailIgnoreCase(email)
@@ -55,17 +71,13 @@ public class AuthenticationService {
                     .ifPresent(user -> user.recordFailedLogin(Instant.now()));
             throw new InvalidCredentialsException();
         }
+    }
 
-        sessionAuthenticationStrategy.onAuthentication(authentication, servletRequest, servletResponse);
-        SecurityContext context = SecurityContextHolder.createEmptyContext();
-        context.setAuthentication(authentication);
-        SecurityContextHolder.setContext(context);
-        securityContextRepository.saveContext(context, servletRequest, servletResponse);
-
+    private AppUserEntity recordSuccessfulLogin(Authentication authentication) {
         NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
         AppUserEntity account = users.findById(principal.getId())
                 .orElseThrow(() -> new AuthenticationServiceException("Authenticated account disappeared"));
         account.recordSuccessfulLogin(Instant.now());
-        return userAccountService.currentUser(account.getId());
+        return account;
     }
 }

@@ -13,10 +13,16 @@ import org.springframework.context.annotation.Configuration;
         version = "v1",
         description = "API modular para la operación de NEXO Commerce."))
 @SecurityScheme(
-        name = "sessionCookie",
+    name = "sessionCookie",
         type = SecuritySchemeType.APIKEY,
         in = SecuritySchemeIn.COOKIE,
-        paramName = "NEXOSESSION",
-        description = "Sesión HttpOnly administrada por Spring.")
+    paramName = "NEXOSESSION",
+    description = "Sesión HttpOnly administrada por Spring.")
+@SecurityScheme(
+        name = "bearerAuth",
+        type = SecuritySchemeType.HTTP,
+        scheme = "bearer",
+        bearerFormat = "Opaque access token",
+        description = "Token móvil de vida limitada, revocable en el servidor.")
 public class OpenApiConfiguration {
 }

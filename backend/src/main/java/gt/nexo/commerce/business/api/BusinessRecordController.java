@@ -36,6 +36,7 @@ public class BusinessRecordController {
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Crea un registro de negocio con validaciones y auditoría de inventario.")
     public BusinessRecordResponse create(@PathVariable String resource, @RequestBody Map<String, Object> data) {
+        if (resource.equalsIgnoreCase("orders")) return service.createStaffOrder(data);
         return service.create(resource, data);
     }
 
@@ -72,6 +73,17 @@ public class BusinessRecordController {
     @GetMapping("/inventory/movements")
     @Operation(summary = "Consulta el historial auditable de movimientos de inventario.")
     public List<Map<String, Object>> inventoryMovements() { return service.inventoryMovements(); }
+
+    @PatchMapping("/inventory/products/{id}")
+    @Operation(summary = "Ajusta existencias y registra el motivo en el historial autorizado de inventario.")
+    public BusinessRecordResponse adjustInventory(@PathVariable UUID id, @RequestBody Map<String, Object> input) {
+        Object rawStock = input.get("stock");
+        int stock;
+        try { stock = new java.math.BigDecimal(String.valueOf(rawStock)).intValueExact(); }
+        catch (Exception exception) { throw new gt.nexo.commerce.business.application.BusinessRuleException(
+                HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", "Las existencias deben ser un número entero."); }
+        return service.adjustInventory(id, stock, String.valueOf(input.getOrDefault("reason", "")));
+    }
 
     @GetMapping("/dashboard/summary")
     @Operation(summary = "Agrega métricas reales de ventas, pedidos, clientes e inventario.")

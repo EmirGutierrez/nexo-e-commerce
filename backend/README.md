@@ -45,3 +45,23 @@ El formulario de acceso del frontend llama a esta API y dirige al usuario según
 La base nueva inicia sin productos. Para cargar las ocho muestras visuales del frontend como registros reales en PostgreSQL, inicia Spring y ejecuta `node backend/scripts/seed-demo-catalog.mjs` desde la raíz del repositorio. Define antes `DEMO_ADMIN_EMAIL` y `DEMO_ADMIN_PASSWORD` en el entorno con una cuenta que tenga permiso `products:create`. El script usa `http://127.0.0.1:8080` por defecto; configura `DEMO_API_ORIGIN` si Spring usa otro puerto. Solo agrega marcas y SKU ausentes, sin modificar los registros existentes. Las credenciales nunca se guardan en el script ni en Flyway.
 
 Los endpoints públicos son `GET /api/catalog/products`, `GET /api/catalog/promotions`, `POST /api/catalog/discounts/validate` y `POST /api/catalog/orders`. El pedido se crea de forma transaccional: Spring consulta el precio y la oferta vigentes, comprueba existencias, aplica y contabiliza el cupón, guarda el comprobante de transferencia cuando corresponde y reserva inventario. La tarjeta solo se simula. Las promociones se administran en `GET/PUT /api/business/promotions`; los comprobantes se consultan y revisan en `GET /api/business/transfers/receipts` y `PATCH /api/business/transfers/receipts/{id}` con permisos de pedidos.
+
+## Sesiones móviles
+
+Las apps móviles usan un token opaco independiente de la cookie web. `POST /api/mobile/auth/login` valida las mismas cuentas, devuelve el token una sola vez y guarda solo su hash SHA-256 en PostgreSQL. El token dura siete días por defecto (`MOBILE_ACCESS_TOKEN_LIFETIME` permite cambiarlo), se revoca al cerrar sesión y se rechaza si la cuenta deja de estar activa o queda bloqueada. Las peticiones móviles protegidas envían `Authorization: Bearer <token>`; Spring carga los permisos vigentes del usuario en cada petición. Estas rutas no dependen del BFF de Next.js.
+
+| Método y ruta | Acceso | Resultado |
+|---|---|---|
+| `POST /api/mobile/auth/login` | Público; JSON | `{ "accessToken": "…", "tokenType": "Bearer", "expiresAt": "…", "user": { "id": "…", "role": "sales", "permissions": ["sales:view"] } }` |
+| `GET /api/mobile/auth/me` | Bearer token | Usuario autenticado y permisos vigentes |
+| `POST /api/mobile/auth/logout` | Bearer token | `204 No Content` y revoca el token |
+
+La protección CSRF se conserva para las sesiones web con cookie. Las solicitudes autenticadas con `Bearer` no usan CSRF porque el sistema operativo no adjunta ese encabezado automáticamente como hace un navegador con una cookie. Usa HTTPS fuera del entorno local.
+
+Para probar Expo Go en un teléfono físico dentro de la red local, inicia Spring con `SERVER_ADDRESS=0.0.0.0`, configura el firewall para permitir el acceso desde esa red y usa una URL alcanzable desde el dispositivo en `EXPO_PUBLIC_API_URL`. No expongas el servidor de desarrollo a Internet.
+
+## Operación desde la app
+
+La app usa los mismos registros persistidos para productos, inventario, clientes, proveedores, ventas y pedidos que consulta el sitio web. `POST /api/business/orders` requiere el permiso `orders:create`; Spring valida los datos del cliente, disponibilidad de pago, promociones y stock, registra al usuario responsable y reserva existencias en una transacción. Las compras de proveedor admiten varios artículos y generan sus movimientos de inventario.
+
+El personal puede incluir en `image` un `data:image/jpeg;base64,...`, PNG o WEBP de hasta 140 KB al crear o editar un producto. Spring valida el formato, guarda el archivo en PostgreSQL mediante Flyway V11 y reemplaza el contenido recibido por una URL compartida (`GET /api/catalog/products/{id}/image`). También se pueden guardar URLs externas convencionales. El BFF de Next.js reenvía esa ruta de imagen junto con el resto de `/api/...`.

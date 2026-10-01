@@ -23,6 +23,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
+import org.springframework.security.web.authentication.logout.LogoutFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
@@ -38,6 +39,8 @@ import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import tools.jackson.databind.ObjectMapper;
+import gt.nexo.commerce.identity.application.MobileSessionService;
+import org.springframework.security.web.util.matcher.RequestMatcher;
 
 @Configuration(proxyBeanMethods = false)
 @EnableMethodSecurity
@@ -86,7 +89,7 @@ public class SecurityConfiguration {
                 .map(String::trim).filter(origin -> !origin.isEmpty()).toList());
         configuration.setAllowCredentials(true);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Content-Type", "Accept", "X-CSRF-TOKEN"));
+        configuration.setAllowedHeaders(List.of("Content-Type", "Accept", "X-CSRF-TOKEN", "Authorization"));
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -100,11 +103,20 @@ public class SecurityConfiguration {
             CorsConfigurationSource corsConfigurationSource,
             CsrfTokenRepository csrfTokenRepository,
             SecurityContextRepository securityContextRepository,
+            MobileSessionService mobileSessionService,
             AuthenticationEntryPoint authenticationEntryPoint,
             AccessDeniedHandler accessDeniedHandler) throws Exception {
+        RequestMatcher mobileLogin = request -> "POST".equals(request.getMethod())
+                && "/api/mobile/auth/login".equals(request.getServletPath());
+        RequestMatcher bearerRequest = request -> {
+            String authorization = request.getHeader("Authorization");
+            return authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
+        };
+
         return http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
-                .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository))
+                .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository)
+                        .ignoringRequestMatchers(mobileLogin, bearerRequest))
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .sessionManagement(session -> session.sessionFixation(fixation -> fixation.changeSessionId()))
                 .authorizeHttpRequests(authorize -> authorize
@@ -114,6 +126,8 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/auth/accept-invitation").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/catalog/products", "/api/catalog/products/**", "/api/catalog/payment-methods", "/api/catalog/promotions").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/catalog/orders", "/api/catalog/discounts/validate").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/mobile/auth/login").permitAll()
+                        .requestMatchers("/api/mobile/**").authenticated()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
@@ -122,6 +136,7 @@ public class SecurityConfiguration {
                 .logout(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
+                .addFilterAfter(new MobileBearerTokenFilter(mobileSessionService), LogoutFilter.class)
                 .build();
     }
 

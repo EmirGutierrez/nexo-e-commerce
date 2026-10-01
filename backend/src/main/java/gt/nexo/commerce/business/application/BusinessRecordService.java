@@ -35,13 +35,15 @@ public class BusinessRecordService {
     private final ObjectMapper mapper;
     private final PermissionAuthorizer permissions;
     private final CommercePromotionService promotions;
+    private final ProductImageService productImages;
 
     public BusinessRecordService(JdbcTemplate jdbc, ObjectMapper mapper, PermissionAuthorizer permissions,
-                                 CommercePromotionService promotions) {
+                                 CommercePromotionService promotions, ProductImageService productImages) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.permissions = permissions;
         this.promotions = promotions;
+        this.productImages = productImages;
     }
 
     @Transactional(readOnly = true)
@@ -84,6 +86,8 @@ public class BusinessRecordService {
         validate(normalized, data);
         ensureUnique(normalized, data, null);
         UUID id = normalized.equals("customers") ? customerRecordId(data) : UUID.randomUUID();
+        ProductImageService.ImageUpload productImage = normalized.equals("products") ? decodeProductImage(data) : null;
+        if (productImage != null) data.put("image", productImagePath(id));
         if (jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM business_records WHERE id = ?)", Boolean.class, id)) {
             throw conflict("El perfil del cliente ya está registrado.");
         }
@@ -94,6 +98,7 @@ public class BusinessRecordService {
                 VALUES (?, ?, ?::jsonb, ?, ?)
                 """, id, normalized, writeJson(data), statusOf(data), actor);
         syncProjection(id, normalized, data, actor);
+        if (productImage != null) productImages.save(id, productImage);
         jdbc.update("UPDATE business_records SET data = ?::jsonb, status_code = ? WHERE id = ?", writeJson(data), statusOf(data), id);
         if (normalized.equals("products") && number(field(data, "stock", "Existencias"), 0) > 0) {
             int initialStock = number(field(data, "stock", "Existencias"), 0);
@@ -110,7 +115,10 @@ public class BusinessRecordService {
         if (Set.of("reports", "transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este registro no admite edición directa.");
         Map<String, Object> data = clean(input);
+        ProductImageService.ImageUpload productImage = normalized.equals("products") ? decodeProductImage(data) : null;
         Map<String, Object> old = lockedRecord(normalized, id);
+        String previousImage = text(old.get("image"));
+        if (productImage != null) data.put("image", productImagePath(id));
         validate(normalized, data);
         ensureUnique(normalized, data, id);
         if (normalized.equals("categories")) {
@@ -156,6 +164,10 @@ public class BusinessRecordService {
                 """, writeJson(data), statusOf(data), id, normalized);
         if (updated == 0) throw missing();
         syncProjection(id, normalized, data, actorId());
+        if (normalized.equals("products")) {
+            if (productImage != null) productImages.save(id, productImage);
+            else if (!java.util.Objects.equals(previousImage, text(data.get("image")))) productImages.delete(id);
+        }
         jdbc.update("UPDATE business_records SET data = ?::jsonb, status_code = ? WHERE id = ?", writeJson(data), statusOf(data), id);
         var timestamps = jdbc.queryForMap("SELECT created_at, updated_at FROM business_records WHERE id = ?", id);
         return new BusinessRecordResponse(id, normalized, data,
@@ -257,7 +269,33 @@ public class BusinessRecordService {
     }
 
     @Transactional
+    public BusinessRecordResponse adjustInventory(UUID productId, int targetStock, String reason) {
+        authorize("inventory", "edit");
+        if (targetStock < 0) throw invalid("Las existencias no pueden ser negativas.");
+        String safeReason = text(reason);
+        if (safeReason.isBlank() || safeReason.length() > 160) throw invalid("Indica un motivo de ajuste de hasta 160 caracteres.");
+        Map<String, Object> before = lockedRecord("products", productId);
+        int previousStock = number(field(before, "stock", "Existencias"), 0);
+        changeStock(productId, targetStock - previousStock, "ADJUSTMENT", safeReason, null, actorId());
+        Map<String, Object> updated = lockedRecord("products", productId);
+        var timestamps = jdbc.queryForMap("SELECT created_at, updated_at FROM business_records WHERE id = ?", productId);
+        return new BusinessRecordResponse(productId, "products", updated,
+                ((java.sql.Timestamp) timestamps.get("created_at")).toInstant(),
+                ((java.sql.Timestamp) timestamps.get("updated_at")).toInstant());
+    }
+
+    @Transactional
     public BusinessRecordResponse createPublicOrder(Map<String, Object> input) {
+        return createOrder(input, null);
+    }
+
+    @Transactional
+    public BusinessRecordResponse createStaffOrder(Map<String, Object> input) {
+        authorize("orders", "create");
+        return createOrder(input, actorId());
+    }
+
+    private BusinessRecordResponse createOrder(Map<String, Object> input, UUID actor) {
         String customerName = text(input.get("customerName"));
         String customerEmail = text(input.get("customerEmail")).toLowerCase(Locale.ROOT);
         String paymentMethod = text(input.get("paymentMethod"));
@@ -305,10 +343,10 @@ public class BusinessRecordService {
         data.put("discountAmount", discount); data.put("discountCode", discountCode); data.put("total", total);
         data.put("orderNumber", "NX-" + orderId.toString().substring(0, 8).toUpperCase(Locale.ROOT));
         ensureCustomer(customerName, customerEmail, optionalText(input.get("customerPhone")));
-        jdbc.update("INSERT INTO business_records (id, resource_code, data, status_code) VALUES (?, 'orders', ?::jsonb, ?)", orderId, writeJson(data), status);
-        syncProjection(orderId, "orders", data, null);
+        jdbc.update("INSERT INTO business_records (id, resource_code, data, status_code, created_by) VALUES (?, 'orders', ?::jsonb, ?, ?)", orderId, writeJson(data), status, actor);
+        syncProjection(orderId, "orders", data, actor);
         if (paymentMethod.equals("transfer")) saveTransferReceipt(orderId, input);
-        for (var entry : quantities.entrySet()) changeStock(entry.getKey(), -entry.getValue(), "ORDER", "Reserva del pedido " + data.get("orderNumber"), orderId, null);
+        for (var entry : quantities.entrySet()) changeStock(entry.getKey(), -entry.getValue(), "ORDER", "Reserva del pedido " + data.get("orderNumber"), orderId, actor);
         return new BusinessRecordResponse(orderId, "orders", data, now, now);
     }
 
@@ -993,6 +1031,8 @@ public class BusinessRecordService {
         if (data.isEmpty()) throw invalid("El registro no puede estar vacío.");
         if (resource.equals("products")) {
             required(data, "name", "Producto"); required(data, "sku", "SKU");
+            String image = text(data.get("image"));
+            if (image.length() > 1000 && !image.startsWith("data:image/")) throw invalid("La dirección de imagen del producto es demasiado larga.");
             BigDecimal price = decimal(field(data, "price", "Valor"));
             if (price.signum() < 0) throw invalid("El precio no puede ser negativo.");
             int stock = number(field(data, "stock", "Existencias"), 0);
@@ -1037,6 +1077,38 @@ public class BusinessRecordService {
                 parseUuid(item.get("productId"));
             }
         }
+    }
+
+    private ProductImageService.ImageUpload decodeProductImage(Map<String, Object> data) {
+        Object raw = data.get("image");
+        if (!(raw instanceof String image) || !image.startsWith("data:")) return null;
+        if (image.length() > 200_000) throw invalid("La foto debe pesar menos de 150 KB después de comprimirla.");
+        String contentType;
+        String prefix;
+        if (image.startsWith("data:image/jpeg;base64,")) {
+            contentType = "image/jpeg"; prefix = "data:image/jpeg;base64,";
+        } else if (image.startsWith("data:image/png;base64,")) {
+            contentType = "image/png"; prefix = "data:image/png;base64,";
+        } else if (image.startsWith("data:image/webp;base64,")) {
+            contentType = "image/webp"; prefix = "data:image/webp;base64,";
+        } else {
+            throw invalid("La imagen debe ser JPG, PNG o WEBP.");
+        }
+        byte[] bytes;
+        try { bytes = java.util.Base64.getDecoder().decode(image.substring(prefix.length())); }
+        catch (IllegalArgumentException exception) { throw invalid("La imagen del producto no tiene un formato válido."); }
+        if (bytes.length < 16 || bytes.length > 143_360) throw invalid("La foto debe pesar menos de 140 KB.");
+        boolean jpeg = contentType.equals("image/jpeg") && bytes.length >= 2 && bytes[0] == (byte) 0xff && bytes[1] == (byte) 0xd8;
+        boolean png = contentType.equals("image/png") && bytes.length >= 8 && bytes[0] == (byte) 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G';
+        boolean webp = contentType.equals("image/webp") && bytes.length >= 12
+                && new String(bytes, 0, 4, java.nio.charset.StandardCharsets.US_ASCII).equals("RIFF")
+                && new String(bytes, 8, 4, java.nio.charset.StandardCharsets.US_ASCII).equals("WEBP");
+        if (!jpeg && !png && !webp) throw invalid("El contenido de la foto no coincide con su formato.");
+        return new ProductImageService.ImageUpload(contentType, bytes);
+    }
+
+    private static String productImagePath(UUID productId) {
+        return "/api/catalog/products/" + productId + "/image";
     }
 
     private Map<String, Object> clean(Map<String, Object> input) {
