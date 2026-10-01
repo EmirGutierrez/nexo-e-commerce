@@ -363,6 +363,8 @@ function Dashboard() {
   const { reportLowStock, user } = useApp();
   useEffect(() => {
     let active = true;
+    setSummary(null);
+    setError('');
     dashboardService.summary(period).then((value) => { if (active) { setSummary(value); setError(''); } })
       .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los indicadores.'); });
     productInventoryService.list().then(reportLowStock).catch(() => undefined);
@@ -376,25 +378,52 @@ function Dashboard() {
   };
   const p = summary?.products || { products: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 };
   const healthy = Math.max(0, p.products - p.lowStock - p.outOfStock);
-  const healthyPercent = p.products ? healthy / p.products * 100 : 0;
-  const lowPercent = p.products ? p.lowStock / p.products * 100 : 0;
   const dateLabel = new Intl.DateTimeFormat('es-GT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
   return <div className="dashboard">
     <div className="admin-page-heading"><div><span className="eyebrow">{dateLabel}</span><h1>Buenos días, {user?.name.split(' ')[0] || 'equipo'} <span>✦</span></h1><p>Indicadores calculados con los movimientos guardados en PostgreSQL.</p></div><div className="heading-actions"><button className="button button-outline" onClick={exportCsv} disabled={!summary}><Download size={16} /> Exportar</button></div></div>
     {error && <div className="crud-error" role="alert">{error}</div>}
     <div className="metric-grid"><Metric title="Ventas del periodo" value={summary ? formatQ(summary.sales) : '—'} change="PostgreSQL" positive icon={CircleDollarSign} tone="blue" /><Metric title="Pedidos y ventas" value={summary ? String(summary.orders) : '—'} change="Transacciones" positive icon={ShoppingBag} tone="purple" /><Metric title="Clientes nuevos" value={summary ? String(summary.newCustomers) : '—'} change="En el periodo" positive icon={Users} tone="green" /><Metric title="Ticket promedio" value={summary ? formatQ(summary.averageTicket) : '—'} change="En el periodo" positive icon={BarChart3} tone="orange" /></div>
-    <div className="dashboard-grid"><section className="panel sales-panel"><div className="panel-heading"><div><h2>Rendimiento de ventas</h2><span>Ventas registradas diariamente en el periodo.</span></div><select value={period} onChange={(event) => setPeriod(event.target.value as typeof period)}><option value="30d">Últimos 30 días</option><option value="7d">Últimos 7 días</option><option value="year">Este año</option></select></div><div className="chart-legend"><span><i className="legend-blue" /> Ventas (Q)</span><span><i className="legend-lime" /> Transacciones</span></div>{summary ? <SalesChart series={summary.series} /> : <div className="empty-state">Cargando actividad…</div>}</section>
-      <section className="panel inventory-panel"><div className="panel-heading"><div><h2>Estado del inventario</h2><span>Productos activos y existencias reales.</span></div><Link href="/admin/inventory" className="panel-link">Ver inventario <ArrowUpRight size={14} /></Link></div><div className="donut-wrap"><div className="donut" style={{ background: `conic-gradient(#3d568f 0 ${healthyPercent}%, #a8bd69 ${healthyPercent}% ${healthyPercent + lowPercent}%, #f0a44b ${healthyPercent + lowPercent}% 100%)` }}><div><strong>{p.products}</strong><span>productos</span></div></div><div className="donut-legend"><span><i className="dot blue-bg" /> En stock <b>{healthy}</b></span><span><i className="dot lime-bg" /> Bajo stock <b>{p.lowStock}</b></span><span><i className="dot orange-bg" /> Agotados <b>{p.outOfStock}</b></span></div></div><div className="inventory-alert"><div><span className="warning-icon">!</span><span><strong>{p.lowStock + p.outOfStock} productos requieren revisión</strong><small>{p.totalUnits} unidades registradas</small></span></div><Link href="/admin/inventory/alerts">Revisar <ArrowRight size={14} /></Link></div></section></div>
+    <div className="dashboard-grid"><section className="panel sales-panel"><div className="panel-heading"><div><h2>Rendimiento de ventas</h2><span>Ventas registradas diariamente en el periodo.</span></div><select value={period} onChange={(event) => setPeriod(event.target.value as typeof period)}><option value="30d">Últimos 30 días</option><option value="7d">Últimos 7 días</option><option value="year">Último año</option></select></div><div className="chart-legend"><span><i className="legend-blue" /> Ventas (Q)</span><span>{summary ? `${summary.series.length} días del periodo` : 'Actualizando periodo…'}</span></div>{summary ? <SalesChart series={summary.series} /> : <div className="empty-state">{error ? 'No se pudo cargar la actividad.' : 'Cargando actividad…'}</div>}</section>
+      <section className="panel inventory-panel"><div className="panel-heading"><div><h2>Estado del inventario</h2><span>Productos activos y existencias reales.</span></div><Link href="/admin/inventory" className="panel-link">Ver inventario <ArrowUpRight size={14} /></Link></div>{summary ? <><InventoryDonut products={p.products} healthy={healthy} lowStock={p.lowStock} outOfStock={p.outOfStock} /><div className="inventory-alert"><div><span className="warning-icon">!</span><span><strong>{p.lowStock + p.outOfStock} productos requieren revisión</strong><small>{p.totalUnits} unidades registradas</small></span></div><Link href="/admin/inventory/alerts">Revisar <ArrowRight size={14} /></Link></div></> : <div className="empty-state">{error ? 'No se pudo cargar el inventario.' : 'Cargando inventario…'}</div>}</section></div>
     <div className="dashboard-grid bottom-grid"><section className="panel activity-panel"><div className="panel-heading"><div><h2>Actividad reciente</h2><span>Últimos pedidos y ventas registradas</span></div></div>{summary?.recentActivity.length ? <div className="activity-list">{summary.recentActivity.map((item) => <div className="activity-item" key={`${item.type}-${item.id}`}><span className={`activity-icon ${item.type === 'sales' ? 'blue' : 'green'}`}><Icon name={item.type === 'sales' ? 'arrow' : 'check'} size={16} /></span><div><strong>{item.title}</strong><span>{item.description}</span></div><time>{item.time}</time></div>)}</div> : <div className="empty-state">Aún no hay actividad registrada.</div>}</section></div>
   </div>;
 }
 function Metric({ title, value, change, positive, icon: MetricIcon, tone }: { title: string; value: string; change: string; positive: boolean; icon: typeof CircleDollarSign; tone: string }) { return <div className="metric-card"><div className={`metric-icon ${tone}`}><MetricIcon size={20} /></div><div className="metric-content"><span>{title}</span><strong>{value}</strong><small className={positive ? 'positive' : 'negative'}>{change} <em>dato consolidado</em></small></div><div className="metric-spark" aria-hidden="true"><span /><span /><span /><span /><span /><span /></div></div>; }
 function SalesChart({ series }: { series: { date: string; sales: number; orders: number }[] }) {
   const max = Math.max(1, ...series.map((item) => item.sales));
-  const points = series.map((item, index) => `${series.length <= 1 ? 350 : index * 700 / (series.length - 1)},${190 - item.sales / max * 165}`);
-  const line = points.join(' ');
+  const points = series.map((item, index) => ({ item, x: series.length <= 1 ? 350 : index * 700 / (series.length - 1), y: 190 - item.sales / max * 165 }));
+  const line = points.map(({ x, y }) => `${x},${y}`).join(' ');
   const area = points.length ? `0,220 ${line} 700,220` : '';
-  return <div className="sales-chart"><div className="y-axis"><span>{formatQ(max)}</span><span>{formatQ(max / 2)}</span><span>Q 0</span></div><div className="chart-body"><div className="grid-lines"><i /><i /><i /><i /><i /><i /></div><svg viewBox="0 0 700 220" preserveAspectRatio="none" aria-label="Ventas almacenadas por día"><defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#9fbaf1" stopOpacity=".44" /><stop offset="100%" stopColor="#9fbaf1" stopOpacity="0" /></linearGradient></defs>{points.length > 0 && <><polygon points={area} fill="url(#chartFill)" /><polyline points={line} fill="none" stroke="#3d568f" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" /></>}</svg><div className="x-axis">{series.filter((_, index) => index === 0 || index === series.length - 1 || index % Math.max(1, Math.floor(series.length / 5)) === 0).map((item) => <span key={item.date}>{new Date(`${item.date}T00:00:00`).toLocaleDateString('es-GT', { day: 'numeric', month: 'short' })}</span>)}</div></div></div>;
+  return <div className="sales-chart"><div className="y-axis"><span>{formatQ(max)}</span><span>{formatQ(max / 2)}</span><span>Q 0</span></div><div className="chart-body"><div className="grid-lines"><i /><i /><i /><i /><i /><i /></div><svg viewBox="0 0 700 220" preserveAspectRatio="none" role="img" aria-label="Ventas almacenadas por día"><defs><linearGradient id="chartFill" x1="0" x2="0" y1="0" y2="1"><stop offset="0%" stopColor="#9fbaf1" stopOpacity=".44" /><stop offset="100%" stopColor="#9fbaf1" stopOpacity="0" /></linearGradient></defs>{points.length > 0 && <><polygon points={area} fill="url(#chartFill)" /><polyline points={line} fill="none" stroke="#3d568f" strokeWidth="3" strokeLinecap="round" strokeLinejoin="round" />{points.map(({ item, x, y }) => <circle key={item.date} cx={x} cy={y} r={series.length > 90 ? 1.8 : 3} fill="#3d568f"><title>{new Date(`${item.date}T00:00:00`).toLocaleDateString('es-GT', { day: 'numeric', month: 'long', year: 'numeric' })}: {formatQ(item.sales)} · {item.orders} transacciones</title></circle>)}</>}</svg><div className="x-axis">{series.filter((_, index) => index === 0 || index === series.length - 1 || index % Math.max(1, Math.floor(series.length / 5)) === 0).map((item) => <span key={item.date}>{new Date(`${item.date}T00:00:00`).toLocaleDateString('es-GT', { day: 'numeric', month: 'short' })}</span>)}</div></div></div>;
+}
+
+function InventoryDonut({ products, healthy, lowStock, outOfStock }: { products: number; healthy: number; lowStock: number; outOfStock: number }) {
+  const [activeSegment, setActiveSegment] = useState<'healthy' | 'low' | 'empty' | null>(null);
+  const segments = [
+    { id: 'healthy' as const, label: 'En stock', value: healthy, color: '#3d568f' },
+    { id: 'low' as const, label: 'Bajo stock', value: lowStock, color: '#a8bd69' },
+    { id: 'empty' as const, label: 'Agotados', value: outOfStock, color: '#f0a44b' },
+  ];
+  const radius = 44;
+  const circumference = 2 * Math.PI * radius;
+  let offset = 0;
+  const active = segments.find((segment) => segment.id === activeSegment);
+  const percent = active && products ? (active.value / products) * 100 : 0;
+  return <div className="donut-wrap"><div className="inventory-donut" onMouseLeave={() => setActiveSegment(null)}>
+    <svg className="donut-chart" viewBox="0 0 120 120" role="group" aria-label="Estado de las existencias de productos activos">
+      {segments.map((segment) => {
+        const length = products ? (segment.value / products) * circumference : 0;
+        const segmentOffset = offset;
+        offset += length;
+        return <circle key={segment.id} cx="60" cy="60" r={radius} fill="none" stroke={segment.color} strokeWidth="16"
+          strokeDasharray={`${length} ${circumference - length}`} strokeDashoffset={-segmentOffset}
+          tabIndex={segment.value ? 0 : -1} role="img" aria-label={`${segment.label}: ${segment.value} de ${products} productos`}
+          onMouseEnter={() => setActiveSegment(segment.id)} onFocus={() => setActiveSegment(segment.id)} onBlur={() => setActiveSegment(null)} />;
+      })}
+    </svg>
+    <div className="donut-center"><strong>{products}</strong><span>productos</span></div>
+    {active && <div className="donut-tooltip" role="status"><strong>{active.label}</strong><span>{active.value} de {products} productos</span><small>{percent.toLocaleString('es-GT', { maximumFractionDigits: 1 })}% del inventario activo</small></div>}
+  </div><div className="donut-legend"><span><i className="dot blue-bg" /> En stock <b>{healthy}</b></span><span><i className="dot lime-bg" /> Bajo stock <b>{lowStock}</b></span><span><i className="dot orange-bg" /> Agotados <b>{outOfStock}</b></span></div></div>;
 }
 
 function ModulePage({ section }: { section: string }) { const config = moduleConfig[section] || moduleConfig.products; return <AdminCrudModule section={section} config={config} />; }
