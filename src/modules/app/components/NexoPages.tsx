@@ -39,11 +39,87 @@ function Brand({ light = false }: { light?: boolean }) {
 function PublicHeader() {
   const { cartCount, userType, logout } = useApp();
   const router = useRouter();
-  return <header className="public-header"><Brand /><nav className="public-nav"><Link href="/store">Tienda</Link><Link href="/#benefits">Beneficios</Link><Link href="/#about">Nosotros</Link></nav><div className="header-actions">{userType === 'customer' ? <button type="button" className="header-login" onClick={() => { void logout().then(() => router.push('/access')).catch(() => window.alert('No se pudo cerrar la sesión. Inténtalo de nuevo.')); }}>Salir</button> : userType === 'admin' ? <Link href="/admin/dashboard" className="header-login">Panel</Link> : <Link href="/access" className="header-login">Ingresar</Link>}<Link href="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link></div></header>;
+  const [menuOpen, setMenuOpen] = useState(false);
+  useEffect(() => {
+    if (!menuOpen) return;
+    const closeOnEscape = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') setMenuOpen(false);
+    };
+    window.addEventListener('keydown', closeOnEscape);
+    return () => window.removeEventListener('keydown', closeOnEscape);
+  }, [menuOpen]);
+  const closeMenu = () => setMenuOpen(false);
+  const signOut = () => {
+    closeMenu();
+    void logout().then(() => router.push('/access')).catch(() => window.alert('No se pudo cerrar la sesión. Inténtalo de nuevo.'));
+  };
+  const accountAction = (className: string) => userType === 'customer'
+    ? <button type="button" className={className} onClick={signOut}>Salir</button>
+    : userType === 'admin'
+      ? <Link href="/admin/dashboard" className={className} onClick={closeMenu}>Panel</Link>
+      : <Link href="/access" className={className} onClick={closeMenu}>Ingresar</Link>;
+
+  return <header className="public-header">
+    <Brand />
+    <nav id="public-navigation" className={`public-nav${menuOpen ? ' is-open' : ''}`} aria-label="Navegación principal">
+      <Link href="/store" onClick={closeMenu}>Tienda</Link>
+      <Link href="/#benefits" onClick={closeMenu}>Beneficios</Link>
+      <Link href="/#about" onClick={closeMenu}>Nosotros</Link>
+      <div className="public-nav-account">{accountAction('public-nav-account-action')}</div>
+    </nav>
+    <div className="header-actions">
+      {accountAction('header-login')}
+      <button type="button" className="public-menu-toggle" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={menuOpen} aria-controls="public-navigation" onClick={() => setMenuOpen((open) => !open)}>
+        {menuOpen ? <X size={20} /> : <Menu size={20} />}
+      </button>
+      <Link href="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link>
+    </div>
+  </header>;
 }
 
 export function Landing() {
-  return <div className="landing"><PublicHeader /><main className="landing-main"><section className="landing-copy"><div className="eyebrow"><Sparkles size={15} /> Todo lo que necesitas, conectado</div><h1>Compra mejor.<br /><em>Vive en NEXO.</em></h1><p>Descubre productos pensados para hacer tu día más simple, bonito y eficiente. Una experiencia de compra cercana, rápida y confiable.</p><div className="landing-actions"><Link href="/store" className="button button-primary">Explorar tienda <ArrowRight size={17} /></Link><Link href="/access" className="text-link">Conoce nuestra plataforma <ArrowRight size={16} /></Link></div><div className="trust-row"><div className="avatar-stack"><i>V</i><i>M</i><i>A</i><i>+</i></div><span>Más de 2,500 clientes felices</span><span className="dot-divider" /> <span className="rating">★ 4.9</span></div></section><section className="landing-art"><div className="art-glow" /><div className="hero-image"><img loading="eager" decoding="async" onError={(event) => { event.currentTarget.hidden = true; event.currentTarget.parentElement?.classList.add('image-fallback'); }} src="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1100&q=85" alt="Experiencia de compra NEXO" /><div className="floating-card floating-order"><div className="mini-icon green"><Check size={16} /></div><div><strong>Pedido confirmado</strong><small>En camino a tu puerta</small></div><span>✓</span></div><div className="floating-card floating-price"><small>Tu selección de hoy</small><strong>Q 1,284.00</strong><span>+ 12% ahorro</span></div></div><div className="shape shape-a" /><div className="shape shape-b" /></section></main><SeasonalSpotlight /><section id="benefits" className="benefits-section"><div className="section-heading"><div><span className="eyebrow">La experiencia NEXO</span><h2>Comprar también puede<br /><em>sentirse bien.</em></h2></div><p>Diseñamos cada paso para que encuentres lo que necesitas, recibas tus productos a tiempo y tengas acompañamiento cuando lo necesites.</p></div><div className="benefits-grid"><div><span className="benefit-number">01</span><Truck size={22} /><strong>Envío simple y rápido</strong><p>Coordinamos entregas claras y ágiles a todo el territorio nacional.</p></div><div><span className="benefit-number">02</span><ShieldCheck size={22} /><strong>Compra protegida</strong><p>Tu información se maneja con cuidado y tu pedido siempre tiene seguimiento.</p></div><div><span className="benefit-number">03</span><HeartIcon /><strong>Curaduría con intención</strong><p>Elegimos productos útiles, duraderos y bonitos para el día a día.</p></div></div></section><section id="about" className="about-section"><div className="about-photo"><img loading="lazy" decoding="async" onError={(event) => { event.currentTarget.hidden = true; event.currentTarget.parentElement?.classList.add('image-fallback'); }} src="https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&fit=crop&w=1100&q=85" alt="Equipo NEXO trabajando" /></div><div className="about-copy"><span className="eyebrow">Nosotros · NEXO COMMERCE</span><h2>Conectamos buenas ideas con <em>personas reales.</em></h2><p>NEXO nace para ayudar a los negocios minoristas a vender mejor y a las personas a comprar con más confianza. Somos tecnología, operación y cercanía en un mismo lugar.</p><div className="about-points"><span><strong>2,500+</strong> clientes acompañados</span><span><strong>120+</strong> productos disponibles</span><span><strong>24/7</strong> operación preparada</span></div><Link href="/access" className="button button-outline">Conoce la plataforma <ArrowRight size={16} /></Link></div></section><section className="landing-stats"><div><strong>Envío rápido</strong><span>Recibe tus favoritos sin complicaciones</span></div><div><strong>Compra segura</strong><span>Tu información siempre protegida</span></div><div><strong>Soporte cercano</strong><span>Estamos aquí para ayudarte</span></div></section></div>;
+  return <div className="landing">
+    <PublicHeader />
+    <main className="landing-main">
+      <section className="landing-copy">
+        <div className="eyebrow"><Sparkles size={15} /> Catálogo y pedidos en un solo lugar</div>
+        <h1>Compra mejor.<br /><em>Vive en NEXO.</em></h1>
+        <p>Explora productos, consulta su disponibilidad y revisa el total en quetzales antes de confirmar tu pedido.</p>
+        <div className="landing-actions">
+          <Link href="/store" className="button button-primary">Explorar tienda <ArrowRight size={17} /></Link>
+          <Link href="/access" className="text-link">Conoce nuestra plataforma <ArrowRight size={16} /></Link>
+        </div>
+        <div className="trust-row"><span>Precios en quetzales</span><span className="dot-divider" /><span className="rating">Existencias validadas al confirmar</span></div>
+      </section>
+      <section className="landing-art" aria-label="Compra en NEXO">
+        <div className="art-glow" />
+        <div className="hero-image">
+          <img loading="eager" decoding="async" onError={(event) => { event.currentTarget.hidden = true; event.currentTarget.parentElement?.classList.add('image-fallback'); }} src="https://images.unsplash.com/photo-1556742049-0cfed4f6a45d?auto=format&fit=crop&w=1100&q=85" alt="Persona explorando una tienda en línea" />
+          <div className="floating-card floating-order"><div className="mini-icon green"><Check size={16} /></div><div><strong>Pedido informado</strong><small>Precios y existencias revisados</small></div></div>
+          <div className="floating-card floating-price"><small>Compra con claridad</small><strong>Montos en Q</strong><span>Total visible antes de confirmar</span></div>
+        </div>
+        <div className="shape shape-a" /><div className="shape shape-b" />
+      </section>
+    </main>
+    <SeasonalSpotlight />
+    <section id="benefits" className="benefits-section">
+      <div className="section-heading"><div><span className="eyebrow">La experiencia NEXO</span><h2>Comprar también puede<br /><em>sentirse bien.</em></h2></div><p>Consulta el catálogo y conoce el total antes de completar un pedido. La disponibilidad se vuelve a comprobar durante el checkout.</p></div>
+      <div className="benefits-grid">
+        <div><span className="benefit-number">01</span><ShoppingBag size={22} /><strong>Catálogo conectado</strong><p>Productos activos y sus precios llegan desde el sistema de comercio.</p></div>
+        <div><span className="benefit-number">02</span><ShieldCheck size={22} /><strong>Existencias validadas</strong><p>El sistema vuelve a revisar la disponibilidad al registrar tu pedido.</p></div>
+        <div><span className="benefit-number">03</span><CreditCard size={22} /><strong>Pago transparente</strong><p>La tarjeta funciona en modo de demostración; el equipo revisa las transferencias.</p></div>
+      </div>
+    </section>
+    <section id="about" className="about-section">
+      <div className="about-photo"><img loading="lazy" decoding="async" onError={(event) => { event.currentTarget.hidden = true; event.currentTarget.parentElement?.classList.add('image-fallback'); }} src="https://images.unsplash.com/photo-1556761175-b413da4baf72?auto=format&fit=crop&w=1100&q=85" alt="Equipo de comercio trabajando" /></div>
+      <div className="about-copy"><span className="eyebrow">Nosotros · NEXO COMMERCE</span><h2>Conectamos buenas ideas con <em>personas reales.</em></h2><p>NEXO reúne una tienda en línea y herramientas para operar un negocio minorista. El catálogo, los pedidos y las promociones se gestionan desde el sistema comercial.</p><div className="about-points"><span><strong>Catálogo</strong> conectado al sistema</span><span><strong>Checkout</strong> con stock validado</span><span><strong>Pago</strong> en modo demostración</span></div><Link href="/access" className="button button-outline">Conoce la plataforma <ArrowRight size={16} /></Link></div>
+    </section>
+    <section className="landing-stats" aria-label="Información de la compra">
+      <div><strong>Precios en Q</strong><span>Montos visibles en quetzales</span></div>
+      <div><strong>Checkout claro</strong><span>Revisa tu selección antes de confirmar</span></div>
+      <div><strong>Datos conectados</strong><span>Pedidos y promociones en el sistema</span></div>
+    </section>
+  </div>;
 }
 
 function HeartIcon() { return <Sparkles size={22} />; }
