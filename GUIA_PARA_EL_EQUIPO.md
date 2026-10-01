@@ -104,7 +104,20 @@ npm ci
 npm run dev
 ```
 
-Abran http://localhost:3000 e inicien sesión administrativa con el correo y la clave creados en el paso anterior. Los clientes pueden crear su propia cuenta en `/register` y entran a la tienda con su rol `customer`. Next.js reenvía las solicitudes protegidas a Spring Boot. Catálogo, pedidos y los demás dominios siguen usando los mocks actuales.
+Abran http://localhost:3000 e inicien sesión administrativa con el correo y la clave creados en el paso anterior. Los clientes pueden crear su propia cuenta en `/register` y entran a la tienda con su rol `customer`. Next.js reenvía las solicitudes protegidas a Spring Boot. El catálogo, los pedidos y los módulos principales se guardan en PostgreSQL.
+
+Una base nueva no contiene productos. Si quieren ver las ocho muestras de la tienda, ejecuten una vez desde la raíz del proyecto, con Spring en marcha:
+
+```powershell
+$env:DEMO_ADMIN_EMAIL = Read-Host 'Correo del administrador'
+$demoSecret = Read-Host 'Clave del administrador' -AsSecureString
+$env:DEMO_ADMIN_PASSWORD = [System.Net.NetworkCredential]::new('', $demoSecret).Password
+node backend/scripts/seed-demo-catalog.mjs
+Remove-Item Env:DEMO_ADMIN_EMAIL
+Remove-Item Env:DEMO_ADMIN_PASSWORD
+```
+
+El script crea solo marcas y productos que falten; no altera los existentes. Las cuentas de ejemplo de una instalación particular no se transfieren por Git: cada integrante debe crear su propio administrador o restaurar una copia autorizada de la base de datos.
 
 ## 6. Ver la base de datos con DBeaver
 

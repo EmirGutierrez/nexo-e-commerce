@@ -40,4 +40,8 @@ Ejemplo de credenciales de login: `{ "email": "admin@empresa.gt", "password": "<
 
 El formulario de acceso del frontend llama a esta API y dirige al usuario según el rol devuelto. Los clientes se registran en `/register`; `customer` no tiene permisos administrativos. El catálogo público y el checkout consultan Spring mediante el BFF; Flyway V9 agrega promociones, descuentos y comprobantes de transferencia.
 
+## Catálogo de demostración opcional
+
+La base nueva inicia sin productos. Para cargar las ocho muestras visuales del frontend como registros reales en PostgreSQL, inicia Spring y ejecuta `node backend/scripts/seed-demo-catalog.mjs` desde la raíz del repositorio. Define antes `DEMO_ADMIN_EMAIL` y `DEMO_ADMIN_PASSWORD` en el entorno con una cuenta que tenga permiso `products:create`. El script usa `http://127.0.0.1:8080` por defecto; configura `DEMO_API_ORIGIN` si Spring usa otro puerto. Solo agrega marcas y SKU ausentes, sin modificar los registros existentes. Las credenciales nunca se guardan en el script ni en Flyway.
+
 Los endpoints públicos son `GET /api/catalog/products`, `GET /api/catalog/promotions`, `POST /api/catalog/discounts/validate` y `POST /api/catalog/orders`. El pedido se crea de forma transaccional: Spring consulta el precio y la oferta vigentes, comprueba existencias, aplica y contabiliza el cupón, guarda el comprobante de transferencia cuando corresponde y reserva inventario. La tarjeta solo se simula. Las promociones se administran en `GET/PUT /api/business/promotions`; los comprobantes se consultan y revisan en `GET /api/business/transfers/receipts` y `PATCH /api/business/transfers/receipts/{id}` con permisos de pedidos.

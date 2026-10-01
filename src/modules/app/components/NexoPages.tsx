@@ -165,7 +165,7 @@ function LockIcon() { return <ShieldCheck size={25} />; }
 function Field({ label, type, value, onChange, placeholder }: { label: string; type: string; value: string; onChange: (value: string) => void; placeholder: string }) { return <label className="field"><span>{label}</span><input required type={type} defaultValue={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} /></label>; }
 
 const adminRoleHome: Record<Role, string> = {
-  superadmin: '/admin/dashboard', admin: '/admin/dashboard', sales: '/admin/sales', warehouse: '/admin/inventory', employee: '/admin/profile', customer: '/store',
+  superadmin: '/admin/dashboard', admin: '/admin/dashboard', sales: '/admin/sales', warehouse: '/admin/inventory', employee: '/admin/dashboard', customer: '/store',
 };
 const adminRoleRoutes: Record<Role, string[]> = {
   superadmin: ['/admin'], admin: ['/admin'],
