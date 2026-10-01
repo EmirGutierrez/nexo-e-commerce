@@ -96,4 +96,12 @@ public class BusinessRecordController {
     public Map<String, Object> updatePaymentSetting(@PathVariable String method, @RequestBody Map<String, Object> input) {
         return service.updatePaymentSetting(method, Boolean.TRUE.equals(input.get("enabled")));
     }
+
+    @GetMapping("/transfers/receipts")
+    public List<Map<String, Object>> transferReceipts() { return service.transferReceipts(); }
+
+    @PatchMapping("/transfers/receipts/{id}")
+    public Map<String, Object> reviewTransferReceipt(@PathVariable UUID id, @RequestBody Map<String, Object> input) {
+        return service.reviewTransferReceipt(id, String.valueOf(input.getOrDefault("status", "")));
+    }
 }

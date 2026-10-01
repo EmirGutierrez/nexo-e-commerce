@@ -21,7 +21,7 @@ El repositorio contiene dos aplicaciones:
 - Frontend Next.js en la raíz.
 - API Java con Spring Boot y PostgreSQL en `backend/`.
 
-No supongas que todas las pantallas ya están conectadas al backend. La autenticación administrativa usa Spring a través del BFF de Next.js; la tienda, clientes y varios módulos administrativos todavía usan datos simulados o `localStorage`.
+La autenticación, catálogo, pedidos, clientes y módulos principales del panel usan Spring a través del BFF de Next.js. Verifica cada ruta concreta antes de asumir persistencia; algunos recursos visuales de la portada siguen siendo ilustrativos.
 
 ## Tecnologías y ejecución
 
@@ -42,9 +42,9 @@ Backend: Java 21, Spring Boot, Spring Security, PostgreSQL, Flyway y sesiones HT
 
 - `src/app`: layouts, grupos de rutas y API BFF de Next.js.
 - `src/modules`: componentes y lógica por dominio; por ejemplo autenticación, productos, ventas, compras, contabilidad, proveedores y comercio.
-- `src/contexts/AppContext.tsx`: carrito en memoria, usuario, roles, configuración de pagos y alertas administrativas.
-- `src/data/mockData.ts`: catálogo, usuarios y datos de demostración.
-- `src/services`: autenticación, pagos, inventario y servicios compatibles con los datos simulados.
+- `src/contexts/AppContext.tsx`: carrito persistido en el navegador, usuario, roles, configuración de pagos y alertas administrativas.
+- `src/data/mockData.ts`: recursos visuales heredados y helper de formato; no es la fuente del catálogo público.
+- `src/services`: clientes del BFF para autenticación, inventario, pedidos y demás dominios.
 - `src/shared`: cliente HTTP y utilidades compartidas.
 - `src/types.ts`: tipos comunes del frontend.
 - `backend/src`: aplicación Spring y módulos backend.
@@ -53,15 +53,15 @@ Las rutas públicas están bajo `src/app/(public)`: `/`, `/store`, `/product/[id
 
 ## Funcionalidades actuales
 
-- La tienda combina el catálogo local con el catálogo de DummyJSON y vuelve a los datos locales si el servicio externo no responde.
-- Las promociones, anuncios y códigos se gestionan en la sección `/admin/offers`, visible solo para `superadmin`. La tienda aplica las ofertas vigentes; el carrito valida fechas, mínimo de compra y límite de usos de los códigos.
+- La tienda obtiene el catálogo de PostgreSQL mediante Spring y el BFF. Los productos inactivos no aparecen en la tienda.
+- Las promociones, anuncios y códigos se guardan en PostgreSQL desde `/admin/offers`. El backend valida vigencia, precio, compra mínima y límite de usos; recalcula el descuento al registrar el pedido.
 - Los productos vistos recientemente se registran en el navegador.
-- El carrito vive en memoria y se pierde al recargar la página.
-- El checkout simula tarjeta y transferencia. La transferencia pide una imagen de comprobante; no se inicia ningún cobro real. El personal con permiso de pedidos puede revisar esos comprobantes en `/admin/transfers`.
-- Las ofertas, códigos, anuncios, recibos demo y productos vistos se guardan en `localStorage` del navegador. Son datos locales de demostración, no pedidos ni promociones persistidos en PostgreSQL.
-- El acceso administrativo inicia/restaura la sesión mediante el BFF y Spring. Los clientes y otros dominios conservan mocks.
+- El carrito se conserva en `localStorage`; el checkout valida precios y existencias en Spring antes de guardar el pedido.
+- El checkout simula tarjeta y transferencia. La transferencia guarda el comprobante en PostgreSQL y el personal autorizado lo revisa en `/admin/transfers`; no se inicia ningún cobro real.
+- Solo el carrito y los productos vistos recientemente son preferencias locales. Los pedidos, promociones y comprobantes son compartidos desde PostgreSQL.
+- El acceso de personal y clientes inicia/restaura la sesión mediante el BFF y Spring.
 
-Claves locales relevantes: `nexo-promotions-v1`, `nexo-transfer-receipts-v1` y `nexo-recent-products-v1`. En la primera lectura también se convierten las promociones guardadas con las claves antiguas `nexo-offers`, `nexo-product-announcements`, `nexo-discount-codes` y los comprobantes de `nexo-transfer-receipts`; las claves originales se conservan como respaldo. El checkout usa `sessionStorage` para pasar temporalmente el código aplicado y el resultado de confirmación entre pantallas, y puede leer la referencia y total del flujo anterior.
+Claves locales relevantes: `nexo.cart.v1` y `nexo-recent-products-v1`. El checkout usa `sessionStorage` solo para pasar temporalmente el código aplicado y el resultado de confirmación entre pantallas.
 
 ## Reglas para cambios
 
@@ -77,6 +77,6 @@ Claves locales relevantes: `nexo-promotions-v1`, `nexo-transfer-receipts-v1` y `
 ## Zonas que requieren cuidado
 
 - `src/modules/app/components/NexoPages.tsx` contiene piezas antiguas y varias líneas JSX extensas; las pantallas nuevas de comercio viven en `src/modules/commerce/components/`.
-- `src/services/roleService.ts` conserva permisos administrativos mock para módulos que aún no están migrados. El rol `superadmin` siempre recibe todos los permisos.
+- `src/services/roleService.ts` usa los permisos de la sesión autenticada para mostrar el panel; Spring autoriza cada operación protegida.
 - No confundas el estado local del navegador con información compartida del backend: `localStorage` no sincroniza usuarios ni dispositivos.
 - `CONTRIBUTING.md` define el flujo de ramas del equipo. Si las instrucciones de la tarea indican otro destino de integración, sigue la solicitud explícita del usuario.

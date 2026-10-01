@@ -112,8 +112,8 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/accept-invitation").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/catalog/products", "/api/catalog/products/**", "/api/catalog/payment-methods").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/catalog/orders").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/catalog/products", "/api/catalog/products/**", "/api/catalog/payment-methods", "/api/catalog/promotions").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/catalog/orders", "/api/catalog/discounts/validate").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions

@@ -34,11 +34,14 @@ public class BusinessRecordService {
     private final JdbcTemplate jdbc;
     private final ObjectMapper mapper;
     private final PermissionAuthorizer permissions;
+    private final CommercePromotionService promotions;
 
-    public BusinessRecordService(JdbcTemplate jdbc, ObjectMapper mapper, PermissionAuthorizer permissions) {
+    public BusinessRecordService(JdbcTemplate jdbc, ObjectMapper mapper, PermissionAuthorizer permissions,
+                                 CommercePromotionService promotions) {
         this.jdbc = jdbc;
         this.mapper = mapper;
         this.permissions = permissions;
+        this.promotions = promotions;
     }
 
     @Transactional(readOnly = true)
@@ -74,7 +77,8 @@ public class BusinessRecordService {
     public BusinessRecordResponse create(String resource, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "create");
-        if (normalized.equals("orders")) throw invalid("Los pedidos se crean en el checkout para validar precios y reservar existencias.");
+        if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
+            throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);
         if (normalized.equals("reports")) data = buildReport(data, actorId());
         validate(normalized, data);
@@ -103,10 +107,24 @@ public class BusinessRecordService {
     public BusinessRecordResponse update(String resource, UUID id, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "edit");
+        if (Set.of("reports", "transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
+            throw invalid("Este registro no admite edición directa.");
         Map<String, Object> data = clean(input);
         Map<String, Object> old = lockedRecord(normalized, id);
         validate(normalized, data);
         ensureUnique(normalized, data, id);
+        if (normalized.equals("categories")) {
+            String previousName = text(field(old, "name", "Nombre"));
+            String nextName = text(field(data, "name", "Nombre"));
+            if (!previousName.equals(nextName)) {
+                jdbc.update("UPDATE products SET category_name = ? WHERE category_record_id = ?", nextName, id);
+                jdbc.update("""
+                        UPDATE business_records SET data = jsonb_set(data, '{category}', to_jsonb(?::text)),
+                        updated_at = CURRENT_TIMESTAMP WHERE id IN
+                        (SELECT record_id FROM products WHERE category_record_id = ?)
+                        """, nextName, id);
+            }
+        }
         if (normalized.equals("products")) {
             int before = number(field(old, "stock", "Existencias"), 0);
             int after = number(field(data, "stock", "Existencias"), before);
@@ -117,10 +135,20 @@ public class BusinessRecordService {
         if (normalized.equals("purchases")) transitionPurchase(id, old, data, actorId());
         if (normalized.equals("orders")) {
             if (!sameOrderContents(old, data)) throw conflict("Los datos, productos e importes de un pedido no se pueden modificar después de confirmarlo.");
-            if ("Rechazada".equals(field(data, "paymentStatus", "Estado de pago"))) data.put("status", "Cancelado");
+            if (!java.util.Objects.equals(old.get("paymentStatus"), data.get("paymentStatus")))
+                throw conflict("El estado del pago se cambia mediante la revisión del comprobante.");
+            String receiptStatus = jdbc.query("SELECT status FROM transfer_receipts WHERE order_record_id = ?",
+                    rs -> rs.next() ? rs.getString(1) : null, id);
+            if ("Pendiente".equals(receiptStatus) && !java.util.Objects.equals(old.get("status"), data.get("status")))
+                throw conflict("Debes revisar el comprobante antes de cambiar el pedido.");
             transitionOrder(id, old, data, actorId());
         }
-        if (normalized.equals("sales")) transitionSale(id, old, data, actorId());
+        if (normalized.equals("sales")) {
+            for (String key : List.of("date", "seller", "paymentMethod", "paymentStatus", "total", "items"))
+                if (!java.util.Objects.equals(old.get(key), data.get(key)))
+                    throw conflict("Los artículos e importes de una venta no pueden modificarse después de registrarse.");
+            transitionSale(id, old, data, actorId());
+        }
         if (normalized.equals("accounting")) transitionAccounting(old, data);
         int updated = jdbc.update("""
                 UPDATE business_records SET data = ?::jsonb, status_code = ?, updated_at = CURRENT_TIMESTAMP
@@ -139,6 +167,8 @@ public class BusinessRecordService {
     public void delete(String resource, UUID id) {
         String normalized = normalize(resource);
         authorize(normalized, "delete");
+        if (Set.of("orders", "purchases", "sales", "accounting", "reports", "transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
+            throw conflict("El historial de esta operación no se puede eliminar.");
         Map<String, Object> old = lockedRecord(normalized, id);
         if (normalized.equals("products") && jdbc.queryForObject(
                 "SELECT EXISTS (SELECT 1 FROM inventory_movements WHERE product_record_id = ?)", Boolean.class, id)) {
@@ -247,19 +277,22 @@ public class BusinessRecordService {
             quantities.merge(productId, quantity, Integer::sum);
         }
         List<Map<String, Object>> orderItems = new ArrayList<>();
-        BigDecimal total = BigDecimal.ZERO;
+        BigDecimal subtotal = BigDecimal.ZERO;
         for (var entry : quantities.entrySet()) {
             Map<String, Object> product = lockedRecord("products", entry.getKey());
             if (Set.of("Inactivo", "Inactive", "DISABLED").contains(String.valueOf(field(product, "status", "Estado")))) throw conflict("Un producto del pedido ya no está disponible.");
             int stock = number(field(product, "stock", "Existencias"), 0);
             if (entry.getValue() > stock) throw conflict("Stock insuficiente para " + field(product, "name", "Producto") + ". Disponible: " + stock + ".");
-            BigDecimal unitPrice = decimal(field(product, "price", "Valor"));
+            BigDecimal unitPrice = promotions.priceForProduct(entry.getKey(), decimal(field(product, "price", "Valor")));
             BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(entry.getValue()));
             Map<String, Object> item = new LinkedHashMap<>();
             item.put("productId", entry.getKey().toString()); item.put("productName", field(product, "name", "Producto"));
             item.put("sku", field(product, "sku", "SKU")); item.put("quantity", entry.getValue());
-            item.put("unitPrice", unitPrice); item.put("subtotal", lineTotal); orderItems.add(item); total = total.add(lineTotal);
+            item.put("unitPrice", unitPrice); item.put("subtotal", lineTotal); orderItems.add(item); subtotal = subtotal.add(lineTotal);
         }
+        String discountCode = text(input.get("discountCode")).toUpperCase(Locale.ROOT);
+        BigDecimal discount = promotions.useCode(discountCode, subtotal);
+        BigDecimal total = subtotal.subtract(discount);
         UUID orderId = UUID.randomUUID();
         Instant now = Instant.now();
         String status = paymentMethod.equals("card") ? "En preparación" : "Pendiente de pago";
@@ -268,13 +301,81 @@ public class BusinessRecordService {
         data.put("customer", customerName); data.put("customerEmail", customerEmail); data.put("customerPhone", optionalText(input.get("customerPhone")));
         data.put("address", address); data.put("date", now.toString()); data.put("status", status);
         data.put("paymentMethod", paymentMethod); data.put("payment", paymentMethod.equals("card") ? "Tarjeta" : "Transferencia");
-        data.put("paymentStatus", paymentStatus); data.put("items", orderItems); data.put("total", total);
+        data.put("paymentStatus", paymentStatus); data.put("items", orderItems); data.put("subtotal", subtotal);
+        data.put("discountAmount", discount); data.put("discountCode", discountCode); data.put("total", total);
         data.put("orderNumber", "NX-" + orderId.toString().substring(0, 8).toUpperCase(Locale.ROOT));
         ensureCustomer(customerName, customerEmail, optionalText(input.get("customerPhone")));
         jdbc.update("INSERT INTO business_records (id, resource_code, data, status_code) VALUES (?, 'orders', ?::jsonb, ?)", orderId, writeJson(data), status);
         syncProjection(orderId, "orders", data, null);
+        if (paymentMethod.equals("transfer")) saveTransferReceipt(orderId, input);
         for (var entry : quantities.entrySet()) changeStock(entry.getKey(), -entry.getValue(), "ORDER", "Reserva del pedido " + data.get("orderNumber"), orderId, null);
         return new BusinessRecordResponse(orderId, "orders", data, now, now);
+    }
+
+    private void saveTransferReceipt(UUID orderId, Map<String, Object> input) {
+        String image = text(input.get("receiptImage"));
+        if (!image.matches("^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/=]+$") || image.length() > 1_400_000)
+            throw invalid("Adjunta un comprobante JPG, PNG o WEBP de hasta 1 MB.");
+        byte[] bytes;
+        try { bytes = java.util.Base64.getDecoder().decode(image.substring(image.indexOf(',') + 1)); }
+        catch (IllegalArgumentException exception) { throw invalid("El comprobante no contiene una imagen válida."); }
+        if (bytes.length < 16 || bytes.length > 1_048_576) throw invalid("El comprobante debe medir entre 16 bytes y 1 MB.");
+        boolean png = image.startsWith("data:image/png;") && bytes[0] == (byte) 0x89 && bytes[1] == 'P' && bytes[2] == 'N' && bytes[3] == 'G';
+        boolean jpeg = image.startsWith("data:image/jpeg;") && bytes[0] == (byte) 0xff && bytes[1] == (byte) 0xd8;
+        boolean webp = image.startsWith("data:image/webp;") && new String(bytes, 0, 4, java.nio.charset.StandardCharsets.US_ASCII).equals("RIFF")
+                && new String(bytes, 8, 4, java.nio.charset.StandardCharsets.US_ASCII).equals("WEBP");
+        if (!png && !jpeg && !webp) throw invalid("El comprobante no coincide con el formato de imagen indicado.");
+        String fileName = text(input.get("receiptFileName"));
+        String reference = text(input.get("receiptReference"));
+        if (fileName.length() > 255 || reference.length() > 160) throw invalid("El nombre o referencia del comprobante es demasiado largo.");
+        jdbc.update("INSERT INTO transfer_receipts (order_record_id, image_data_url, file_name, reference) VALUES (?, ?, ?, ?)",
+                orderId, image, fileName, reference);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> transferReceipts() {
+        authorize("orders", "view");
+        return jdbc.query("""
+                SELECT r.order_record_id, r.image_data_url, r.file_name, r.reference, r.status, r.submitted_at,
+                       o.customer_name, o.customer_phone, o.delivery_address, o.total
+                FROM transfer_receipts r JOIN commerce_orders o ON o.record_id = r.order_record_id
+                ORDER BY r.submitted_at DESC
+                """, (rs, row) -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", rs.getObject("order_record_id", UUID.class).toString());
+            item.put("orderId", rs.getObject("order_record_id", UUID.class).toString());
+            item.put("customer", rs.getString("customer_name"));
+            item.put("phone", rs.getString("customer_phone"));
+            item.put("address", rs.getString("delivery_address"));
+            item.put("total", rs.getBigDecimal("total"));
+            item.put("image", rs.getString("image_data_url"));
+            item.put("fileName", rs.getString("file_name"));
+            item.put("reference", rs.getString("reference"));
+            item.put("status", rs.getString("status"));
+            item.put("date", rs.getTimestamp("submitted_at").toInstant().toString());
+            return item;
+        });
+    }
+
+    @Transactional
+    public Map<String, Object> reviewTransferReceipt(UUID id, String status) {
+        authorize("orders", "approve");
+        if (!Set.of("Aprobada", "Rechazada").contains(status)) throw invalid("El estado del comprobante no es válido.");
+        String current = jdbc.query("SELECT status FROM transfer_receipts WHERE order_record_id = ? FOR UPDATE",
+                rs -> rs.next() ? rs.getString(1) : null, id);
+        if (current == null) throw missing();
+        if (!"Pendiente".equals(current)) throw conflict("El comprobante ya fue revisado.");
+        Map<String, Object> before = lockedRecord("orders", id);
+        Map<String, Object> data = new LinkedHashMap<>(before);
+        data.put("paymentStatus", status);
+        data.put("status", status.equals("Aprobada") ? "En preparación" : "Cancelado");
+        transitionOrder(id, before, data, actorId());
+        jdbc.update("UPDATE business_records SET data = ?::jsonb, status_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                writeJson(data), statusOf(data), id);
+        syncOrder(id, data);
+        jdbc.update("UPDATE transfer_receipts SET status = ?, reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ? WHERE order_record_id = ?",
+                status, actorId(), id);
+        return Map.of("id", id, "status", status);
     }
 
     @Transactional(readOnly = true)
@@ -556,7 +657,7 @@ public class BusinessRecordService {
     }
 
     private boolean sameOrderContents(Map<String, Object> before, Map<String, Object> after) {
-        for (String key : List.of("customer", "customerEmail", "customerPhone", "address", "date", "paymentMethod", "payment", "total", "items")) {
+        for (String key : List.of("customer", "customerEmail", "customerPhone", "address", "date", "paymentMethod", "payment", "subtotal", "discountAmount", "discountCode", "total", "items")) {
             if (!java.util.Objects.equals(before.get(key), after.get(key))) return false;
         }
         return true;
@@ -725,7 +826,7 @@ public class BusinessRecordService {
                 INSERT INTO in_person_sales (record_id, seller_user_id, seller_name, sale_date, payment_method, payment_status, total, status)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET seller_name = EXCLUDED.seller_name,
                 payment_status = EXCLUDED.payment_status, total = EXCLUDED.total, status = EXCLUDED.status
-        """, id, actor, seller, Instant.parse(text(data.get("date"))), method, paymentStatus, total,
+        """, id, actor, seller, parseInstant(data.get("date")), method, paymentStatus, total,
                 defaultText(field(data, "status", "Estado"), "Completado"));
         jdbc.update("DELETE FROM in_person_sale_items WHERE sale_record_id = ?", id);
         for (Map<String, Object> item : items(data)) jdbc.update("""
@@ -741,14 +842,17 @@ public class BusinessRecordService {
         String paymentStatus = defaultText(data.get("paymentStatus"), status.equals("Completado") ? "approved" : "pending_verification");
         BigDecimal total = decimal(field(data, "total", "Total"));
         jdbc.update("""
-                INSERT INTO commerce_orders (record_id, customer_name, customer_email, order_date, status, payment_method, payment_status, total, customer_phone, delivery_address)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET customer_name = EXCLUDED.customer_name,
+                INSERT INTO commerce_orders (record_id, customer_name, customer_email, order_date, status, payment_method, payment_status, total, customer_phone, delivery_address, subtotal, discount_amount, discount_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET customer_name = EXCLUDED.customer_name,
                 customer_email = EXCLUDED.customer_email, status = EXCLUDED.status, payment_method = EXCLUDED.payment_method,
                 payment_status = EXCLUDED.payment_status, total = EXCLUDED.total, customer_phone = EXCLUDED.customer_phone,
                 delivery_address = EXCLUDED.delivery_address
                 """, id, defaultText(field(data, "customer", "Cliente"), "Cliente"), optionalText(data.get("customerEmail")),
                 parseInstant(field(data, "date", "Fecha")), status, payment, paymentStatus, total,
-                optionalText(data.get("customerPhone")), optionalText(data.get("address")));
+                optionalText(data.get("customerPhone")), optionalText(data.get("address")),
+                data.containsKey("subtotal") ? decimal(data.get("subtotal")) : total,
+                data.containsKey("discountAmount") ? decimal(data.get("discountAmount")) : BigDecimal.ZERO,
+                optionalText(data.get("discountCode")));
         jdbc.update("DELETE FROM commerce_order_items WHERE order_record_id = ?", id);
         for (Map<String, Object> item : items(data)) jdbc.update("""
                 INSERT INTO commerce_order_items (order_record_id, product_record_id, product_name_snapshot, sku_snapshot, quantity, unit_price, line_total)
@@ -882,7 +986,11 @@ public class BusinessRecordService {
             required(data, "name", "Producto"); required(data, "sku", "SKU");
             BigDecimal price = decimal(field(data, "price", "Valor"));
             if (price.signum() < 0) throw invalid("El precio no puede ser negativo.");
-            if (number(field(data, "stock", "Existencias"), 0) < 0) throw invalid("Las existencias no pueden ser negativas.");
+            int stock = number(field(data, "stock", "Existencias"), 0);
+            if (stock < 0) throw invalid("Las existencias no pueden ser negativas.");
+            String requestedStatus = defaultText(field(data, "status", "Estado"), "Activo");
+            if (!Set.of("Activo", "Inactivo", "Bajo stock", "Agotado").contains(requestedStatus)) throw invalid("El estado del producto no es válido.");
+            data.put("status", requestedStatus.equals("Inactivo") ? "Inactivo" : productStatus(stock));
             if (field(data, "brandId", "Marca") != null && !String.valueOf(field(data, "brandId", "Marca")).isBlank()) {
                 UUID brandId = parseOptionalUuid(field(data, "brandId", "Marca"));
                 if (!Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM brands WHERE record_id = ? AND status = 'Activa')", Boolean.class, brandId))) {
@@ -1014,9 +1122,9 @@ public class BusinessRecordService {
         try { return LocalDate.parse(text(value).substring(0, 10)); }
         catch (Exception ignored) { return LocalDate.now(); }
     }
-    private static Instant parseInstant(Object value) {
-        try { return Instant.parse(text(value)); }
-        catch (Exception ignored) { return Instant.now(); }
+    private static java.sql.Timestamp parseInstant(Object value) {
+        try { return java.sql.Timestamp.from(Instant.parse(text(value))); }
+        catch (Exception ignored) { return java.sql.Timestamp.from(Instant.now()); }
     }
     private Map<String, Object> readMap(String value) {
         try { @SuppressWarnings("unchecked") Map<String, Object> map = mapper.readValue(value, Map.class); return map; }

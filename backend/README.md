@@ -1,6 +1,6 @@
 # NEXO Commerce Backend
 
-Monolito modular con Spring Boot, PostgreSQL, Flyway y sesiones HTTP administradas por Spring. El módulo `identity` gestiona el registro de clientes, el inicio y cierre de sesión y la consulta del usuario autenticado. Los demás dominios conservan sus datos de demostración.
+Monolito modular con Spring Boot, PostgreSQL, Flyway y sesiones HTTP administradas por Spring. `identity` gestiona cuentas, sesiones, roles y permisos. `business` persiste catálogo, inventario, compras, ventas, clientes, pedidos, promociones, descuentos y comprobantes. Los cobros con tarjeta y transferencia siguen siendo simulados.
 
 ## Requisitos
 
@@ -38,4 +38,6 @@ Todas las escrituras requieren un token CSRF; las operaciones privadas también 
 
 Ejemplo de credenciales de login: `{ "email": "admin@empresa.gt", "password": "<secreto configurado fuera del repositorio>" }`.
 
-El formulario de acceso del frontend llama a esta API y dirige al usuario según el rol devuelto. Los clientes se registran en `/register`; `customer` no tiene permisos administrativos. Los servicios de catálogo, pedidos y demás dominios conservan sus mocks durante esta etapa.
+El formulario de acceso del frontend llama a esta API y dirige al usuario según el rol devuelto. Los clientes se registran en `/register`; `customer` no tiene permisos administrativos. El catálogo público y el checkout consultan Spring mediante el BFF; Flyway V9 agrega promociones, descuentos y comprobantes de transferencia.
+
+Los endpoints públicos son `GET /api/catalog/products`, `GET /api/catalog/promotions`, `POST /api/catalog/discounts/validate` y `POST /api/catalog/orders`. El pedido se crea de forma transaccional: Spring consulta el precio y la oferta vigentes, comprueba existencias, aplica y contabiliza el cupón, guarda el comprobante de transferencia cuando corresponde y reserva inventario. La tarjeta solo se simula. Las promociones se administran en `GET/PUT /api/business/promotions`; los comprobantes se consultan y revisan en `GET /api/business/transfers/receipts` y `PATCH /api/business/transfers/receipts/{id}` con permisos de pedidos.

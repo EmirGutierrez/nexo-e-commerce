@@ -12,6 +12,7 @@ export const permissionModules: { id: PermissionModule; label: string; actions: 
   { id: 'suppliers', label: 'Proveedores', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'reports', label: 'Reportes', actions: ['view', 'create'] },
   { id: 'accounting', label: 'Contabilidad', actions: ['view', 'create', 'edit'] },
+  { id: 'promotions', label: 'Promociones', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'settings', label: 'Configuración', actions: ['view', 'edit'] },
   { id: 'users', label: 'Usuarios y roles', actions: ['view', 'create', 'edit', 'delete'] },
 ];
@@ -21,10 +22,10 @@ const fullPermissions = (): RolePermissions => Object.fromEntries(permissionModu
 const defaults: Record<Role, RolePermissions> = {
   superadmin: fullPermissions(),
   admin: fullPermissions(),
-  sales: { dashboard: ['view'], products: ['view'], inventory: [], orders: ['view', 'edit', 'approve'], sales: ['view', 'create', 'edit'], customers: ['view', 'create', 'edit'], suppliers: [], reports: ['view', 'create'], accounting: [], settings: [], users: [] },
-  warehouse: { dashboard: ['view'], products: ['view'], inventory: ['view', 'create', 'edit'], orders: ['view'], sales: [], customers: [], suppliers: ['view', 'create', 'edit'], reports: ['view'], accounting: [], settings: [], users: [] },
-  employee: { dashboard: ['view'], products: ['view'], inventory: ['view'], orders: [], sales: ['view', 'create'], customers: [], suppliers: [], reports: [], accounting: [], settings: [], users: [] },
-  customer: { dashboard: [], products: [], inventory: [], orders: [], sales: [], customers: [], suppliers: [], reports: [], accounting: [], settings: [], users: [] },
+  sales: { dashboard: ['view'], products: ['view'], inventory: [], orders: ['view', 'edit', 'approve'], sales: ['view', 'create', 'edit'], customers: ['view', 'create', 'edit'], suppliers: [], reports: ['view', 'create'], accounting: [], promotions: [], settings: [], users: [] },
+  warehouse: { dashboard: ['view'], products: ['view'], inventory: ['view', 'create', 'edit'], orders: ['view'], sales: [], customers: [], suppliers: ['view', 'create', 'edit'], reports: ['view'], accounting: [], promotions: [], settings: [], users: [] },
+  employee: { dashboard: ['view'], products: ['view'], inventory: ['view'], orders: [], sales: ['view', 'create'], customers: [], suppliers: [], reports: [], accounting: [], promotions: [], settings: [], users: [] },
+  customer: { dashboard: [], products: [], inventory: [], orders: [], sales: [], customers: [], suppliers: [], reports: [], accounting: [], promotions: [], settings: [], users: [] },
 };
 const copy = (value: RolePermissions): RolePermissions => Object.fromEntries(permissionModules.map(({ id }) => [id, [...value[id]]])) as RolePermissions;
 type RoleDto = { code: string; displayName: string; users: number; permissions: Partial<RolePermissions> };
@@ -44,8 +45,8 @@ export const roleService = {
   getPermissions: (role: Role) => copy(current[role]),
   can: (role: Role, module: PermissionModule, action: PermissionAction = 'view') => {
     if (role === 'customer') return false;
-    if (role === 'superadmin') return true;
     if (authenticated?.role === role && authenticated.permissions !== undefined) return authenticated.permissions.includes(`${module}:${action}`);
+    if (role === 'superadmin') return true;
     return current[role][module].includes(action);
   },
   getUserRole: (_userId: string, fallback: Role) => fallback,

@@ -37,11 +37,11 @@ Las rutas conservan las URLs existentes, incluyendo `/store`, `/cart`, `/checkou
 
 ## Funcionalidades de demostración
 
-- Tienda pública con búsqueda, categorías, ordenamiento, catálogo externo DummyJSON y datos locales de respaldo.
+- Tienda pública con búsqueda, categorías, ordenamiento y catálogo persistido en PostgreSQL.
 - Detalle de producto, ofertas, anuncios, productos vistos recientemente, carrito, códigos de descuento, checkout y confirmación.
-- Métodos de pago simulados y revisión local de comprobantes de transferencia; no se procesan cobros reales.
+- Métodos de pago simulados y revisión de comprobantes guardados en PostgreSQL; no se procesan cobros reales.
 - Panel de administración con dashboard, productos, inventario, compras, ventas, clientes, proveedores, marcas, roles, reportes y configuración.
 - Gestión de ofertas, anuncios y códigos de descuento para Súper Administrador.
 - El acceso administrativo requiere una cuenta creada en Spring Boot mediante el bootstrap inicial configurado fuera del repositorio; consulta `backend/README.md`.
 
-El acceso de personal y clientes usa el BFF de Next.js y sesiones, usuarios y roles de Spring Boot. Los clientes pueden crear una cuenta en `/register`; el formulario de acceso dirige a cada persona según el rol devuelto por la API. Los demás dominios continúan simulados. El carrito vive en memoria; algunas preferencias se guardan en `localStorage`.
+El acceso de personal y clientes usa el BFF de Next.js y sesiones, usuarios y roles de Spring Boot. Los clientes pueden crear una cuenta en `/register`; el formulario de acceso dirige a cada persona según el rol devuelto por la API. Catálogo, pedidos, promociones y comprobantes se guardan en PostgreSQL. El carrito y los productos vistos recientemente se guardan en `localStorage`.

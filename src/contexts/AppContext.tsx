@@ -6,6 +6,7 @@ import type { CartItem, PaymentMethod, PaymentMethodSettings, Product, Role, Use
 
 interface AppContextValue {
   cart: CartItem[];
+  cartLoaded: boolean;
   cartCount: number;
   cartTotal: number;
   addToCart: (product: CartItem | (typeof products)[number]) => void;
@@ -44,6 +45,7 @@ const AppContext = createContext<AppContextValue | null>(null);
 
 export function AppProvider({ children }: { children: ReactNode }) {
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [cartLoaded, setCartLoaded] = useState(false);
   const [user, setUser] = useState<User | null>(null);
   const [userType, setUserType] = useState<'admin' | 'customer' | null>(null);
   const [role, setRole] = useState<Role | null>(null);
@@ -63,6 +65,20 @@ export function AppProvider({ children }: { children: ReactNode }) {
     const names = low.slice(0, 4).map((product) => `${product.name} (${product.stock})`).join(', ');
     notifyAdmin({ dedupeKey: `low-stock:${low.map((product) => `${product.id}:${product.stock}`).join('|')}`, type: 'warning', title: `${low.length} producto${low.length === 1 ? '' : 's'} requieren revisión de stock`, entity: names + (low.length > 4 ? ` y ${low.length - 4} más` : ''), message: 'Hay productos con menos de 10 unidades o agotados en el inventario.', nextAction: 'Revisar existencias y planificar reposición.', actionTo: '/admin/inventory/alerts' });
   }, [notifyAdmin]);
+
+  useEffect(() => {
+    try {
+      const saved = JSON.parse(window.localStorage.getItem('nexo.cart.v1') || '[]');
+      if (Array.isArray(saved)) setCart(saved.filter((item): item is CartItem =>
+        item && typeof item.id === 'string' && Number.isInteger(item.quantity) && item.quantity > 0 && item.quantity <= 100));
+    } catch { /* El carrito inicia vacío si los datos locales son inválidos. */ }
+    setCartLoaded(true);
+  }, []);
+  useEffect(() => {
+    if (!cartLoaded) return;
+    try { window.localStorage.setItem('nexo.cart.v1', JSON.stringify(cart)); }
+    catch { /* El checkout sigue disponible en la sesión actual. */ }
+  }, [cart, cartLoaded]);
 
   useEffect(() => {
     let active = true;
@@ -93,6 +109,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   const value = useMemo<AppContextValue>(() => ({
     cart,
+    cartLoaded,
     cartCount: cart.reduce((sum, item) => sum + item.quantity, 0),
     cartTotal: cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
     addToCart: (product) => setCart((current) => {
@@ -151,7 +168,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     notifyAdmin,
     dismissAdminAlert,
     reportLowStock,
-  }), [cart, user, userType, authLoading, role, paymentMethods, adminAlerts, notifyAdmin, dismissAdminAlert, reportLowStock]);
+  }), [cart, cartLoaded, user, userType, authLoading, role, paymentMethods, adminAlerts, notifyAdmin, dismissAdminAlert, reportLowStock]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

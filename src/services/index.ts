@@ -214,7 +214,7 @@ export const paymentSettingsStorageKey = 'nexo.payment-methods.v1';
 export const paymentSettingsService = {
   getCurrent: (): PaymentMethodSettings => ({ ...currentPaymentSettings }),
   load: async (): Promise<PaymentMethodSettings> => {
-    const value = await apiClient.get<PaymentMethodSettings>('/api/business/payment-settings'); currentPaymentSettings = value; return { ...value };
+      const value = await apiClient.get<PaymentMethodSettings>('/api/catalog/payment-methods'); currentPaymentSettings = value; return { ...value };
   },
   setEnabled: async (method: PaymentMethod, enabled: boolean): Promise<PaymentMethodSettings> => {
     currentPaymentSettings = await apiClient.put<PaymentMethodSettings>(`/api/business/payment-settings/${method}`, { enabled });
@@ -229,7 +229,7 @@ export const paymentService = {
   },
 };
 export const checkoutService = {
-  create: (input: { customerName: string; customerEmail: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[] }) =>
+  create: (input: { customerName: string; customerEmail: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[]; discountCode?: string; receiptImage?: string; receiptFileName?: string; receiptReference?: string }) =>
     apiClient.post<ApiRecord>('/api/catalog/orders', input).then((record) => ({
       id: record.id, reference: stringValue(record.data, 'orderNumber') || record.id,
       total: numberValue(record.data, 'total'), status: stringValue(record.data, 'status'),
@@ -325,7 +325,7 @@ function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
   if (section === 'reports') return { Reporte: stringValue(data, 'name'), Periodo: stringValue(data, 'period'), 'Generado por': stringValue(data, 'generatedBy'), Fecha: stringValue(data, 'date').slice(0, 10), Estado: stringValue(data, 'status') };
   if (section === 'orders' || section === 'sales') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };
   if (section === 'transfers' || section === 'payments') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Valor: numberValue(data, 'total'), 'Estado de pago': stringValue(data, 'paymentStatus') };
-  if (section === 'invoices') return { Factura: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') === 'Cancelado' ? 'Cancelada' : 'Emitida' };
+  if (section === 'invoices') return { Referencia: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };
   if (section === 'settings' || section === 'profile') return { Configuración: stringValue(data, 'name'), Descripción: stringValue(data, 'description'), Estado: stringValue(data, 'status') };
   return Object.fromEntries(Object.entries(data).map(([key, item]) => [key, typeof item === 'number' || typeof item === 'string' ? item : JSON.stringify(item)]));
 }
