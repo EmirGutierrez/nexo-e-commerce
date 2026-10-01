@@ -1,2 +1,2 @@
-import { Store } from '../../../modules/app/components/NexoPages';
-export default Store;
+import { Storefront } from '../../../modules/commerce/components/CommercePages';
+export default Storefront;

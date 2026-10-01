@@ -1,6 +1,7 @@
 # Prompts para Codex Visual — Fases 11 a 22
 
-Repositorio: `EmirGutierrez/nexo-e-commerce`  
+Repositorio: `EmirGutierrez/nexo-e-commerce`
+
 Cada bloque es un prompt independiente. Ejecuta un solo bloque por tarea en Codex Visual, desde la raíz del repositorio. Las fases 11–22 corresponden a los tickets #12–#23; el ticket #14 (`CRUDs`) queda incluido como Fase 13, ya que la secuencia publicada salta de la Fase 12 a la 14.
 
 ## Fase 11 — Apartado de Contabilidad (#12)
@@ -168,4 +169,3 @@ Guarda el estado mock/local de forma coherente, actualiza la UI según el rol ac
 
 Al terminar, explica el modelo de permisos y sus límites de demo y ejecuta `npm run build`. No agregues dependencias salvo que sean imprescindibles.
 ```
-

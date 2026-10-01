@@ -1,2 +1,2 @@
-import { Confirmation } from '../../../modules/app/components/NexoPages';
-export default Confirmation;
+import { ConfirmationExperience } from '../../../modules/commerce/components/CommercePages';
+export default ConfirmationExperience;
