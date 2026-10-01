@@ -476,7 +476,7 @@ public class BusinessRecordService {
         LocalDate today = LocalDate.now(ZoneOffset.UTC);
         LocalDate start = switch (period == null ? "30d" : period) {
             case "7d" -> today.minusDays(6);
-            case "year" -> today.withDayOfYear(1);
+            case "year" -> today.minusYears(1).plusDays(1);
             case "30d" -> today.minusDays(29);
             default -> throw invalid("El periodo del tablero no es válido.");
         };
@@ -492,7 +492,7 @@ public class BusinessRecordService {
                     WHERE o.order_date >= ? AND o.order_date < ? AND o.status <> 'Cancelado'
                 ) activity
                 """, rs -> { rs.next(); return Map.of("sales", rs.getBigDecimal("total_sales"), "orders", rs.getLong("transactions")); }, startAt, endAt, startAt, endAt);
-        List<Map<String, Object>> series = jdbc.query("""
+        List<Map<String, Object>> recordedDays = jdbc.query("""
                 SELECT DATE(bucket) AS day, COALESCE(SUM(amount), 0) AS sales, COALESCE(SUM(transaction_count), 0) AS orders
                 FROM (
                     SELECT s.sale_date AS bucket, s.total AS amount, 1 AS transaction_count FROM in_person_sales s
@@ -503,6 +503,15 @@ public class BusinessRecordService {
                 ) activity GROUP BY DATE(bucket) ORDER BY DATE(bucket)
                 """, (rs, row) -> Map.<String, Object>of("date", rs.getDate("day").toLocalDate().toString(),
                 "sales", rs.getBigDecimal("sales"), "orders", rs.getLong("orders")), startAt, endAt, startAt, endAt);
+        Map<String, Map<String, Object>> recordedDaysByDate = recordedDays.stream()
+                .collect(java.util.stream.Collectors.toMap(day -> (String) day.get("date"), day -> day));
+        List<Map<String, Object>> series = new ArrayList<>();
+        for (LocalDate day = start; !day.isAfter(today); day = day.plusDays(1)) {
+            Map<String, Object> recorded = recordedDaysByDate.get(day.toString());
+            series.add(Map.of("date", day.toString(),
+                    "sales", recorded == null ? BigDecimal.ZERO : recorded.get("sales"),
+                    "orders", recorded == null ? 0L : recorded.get("orders")));
+        }
         Long newCustomers = jdbc.queryForObject("SELECT COUNT(*) FROM customers WHERE created_at >= ? AND created_at < ?", Long.class, startAt, endAt);
         BigDecimal totalSales = (BigDecimal) totals.get("sales");
         long count = ((Number) totals.get("orders")).longValue();
