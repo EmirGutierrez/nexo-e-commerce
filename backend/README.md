@@ -1,6 +1,6 @@
 # NEXO Commerce Backend
 
-Monolito modular con Spring Boot, PostgreSQL, Flyway y sesiones HTTP administradas por Spring. Este primer corte contiene la base técnica y el módulo `identity` para inicio/cierre de sesión y consulta de usuarios. Los clientes siguen usando el flujo simulado del frontend.
+Monolito modular con Spring Boot, PostgreSQL, Flyway y sesiones HTTP administradas por Spring. El módulo `identity` gestiona el registro de clientes, el inicio y cierre de sesión y la consulta del usuario autenticado. Los demás dominios conservan sus datos de demostración.
 
 ## Requisitos
 
@@ -21,20 +21,21 @@ El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWOR
 
 ## Primer administrador
 
-No se crean cuentas ni contraseñas en Flyway. Para una base nueva, configura temporalmente `BOOTSTRAP_ADMIN_ENABLED=true`, `BOOTSTRAP_ADMIN_NAME`, `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` en el entorno. La contraseña debe tener entre 16 y 128 caracteres. El proceso crea un único usuario `superadmin` si la tabla está vacía y falla si ya hay usuarios. Después elimina las cuatro variables de bootstrap antes de reiniciar la API.
+No se crean cuentas ni contraseñas en Flyway. Para crear el primer administrador, configura temporalmente `BOOTSTRAP_ADMIN_ENABLED=true`, `BOOTSTRAP_ADMIN_NAME`, `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` en el entorno. La contraseña debe tener entre 16 y 128 caracteres. El proceso crea un único usuario `superadmin` y falla si ya existe uno. Después elimina las cuatro variables de bootstrap antes de reiniciar la API.
 
 ## API de identidad
 
-Todas las escrituras requieren una sesión y token CSRF. Obtén el token antes de iniciar sesión y envía la cookie de sesión y la cabecera `X-CSRF-TOKEN` en cada POST. El navegador usa `credentials: include` con rutas relativas; la autorización se aplica en Spring.
+Todas las escrituras requieren un token CSRF; las operaciones privadas también requieren una sesión. Obtén el token antes de iniciar sesión o registrarte y envía la cookie de sesión y la cabecera `X-CSRF-TOKEN` en cada POST. El navegador usa `credentials: include` con rutas relativas; la autorización se aplica en Spring.
 
 | Método y ruta | Acceso | Resultado |
 |---|---|---|
 | `GET /api/auth/csrf` | Público | `{ "token": "…" }` |
 | `POST /api/auth/login` | Público + CSRF | `{ "id": "…", "name": "…", "email": "…", "role": "superadmin", "status": "ACTIVE", "permissions": ["users:view"] }` |
+| `POST /api/auth/register` | Público + CSRF | Crea un usuario con rol `customer`, inicia sesión y devuelve la cuenta |
 | `GET /api/auth/me` | Sesión | Usuario autenticado y permisos vigentes |
 | `POST /api/auth/logout` | Sesión + CSRF | `204 No Content` e invalida la sesión |
 | `GET /api/users` | Sesión + `users:view` | Usuarios sin hashes de contraseña |
 
 Ejemplo de credenciales de login: `{ "email": "admin@empresa.gt", "password": "<secreto configurado fuera del repositorio>" }`.
 
-El inicio administrativo del frontend llama a esta API y restaura la sesión tras recargar. El login de clientes y los servicios de los otros dominios conservan sus mocks durante esta etapa.
+El formulario de acceso del frontend llama a esta API y dirige al usuario según el rol devuelto. Los clientes se registran en `/register`; `customer` no tiene permisos administrativos. Los servicios de catálogo, pedidos y demás dominios conservan sus mocks durante esta etapa.

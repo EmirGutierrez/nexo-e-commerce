@@ -556,3 +556,7 @@
 .permission-footer button:disabled { opacity:.48; cursor:not-allowed; }
 .permissions-page .crud-error,.permissions-page .crud-feedback { margin-bottom:14px; }
 @media(max-width:700px) { .permission-panel { padding:14px 10px; }.permission-toolbar { align-items:stretch; flex-direction:column; gap:4px; }.permission-toolbar .field { width:100%; }.permission-toolbar-note { padding:0 0 8px; }.permission-footer { align-items:stretch; flex-direction:column; }.permission-footer > div { justify-content:flex-end; }.permission-matrix th,.permission-matrix td { padding:11px 12px; } }
+.auth-pending { min-height: 100vh; display: grid; place-content: center; gap: 12px; text-align: center; background: #f5f7fc; color: #263755; }
+.auth-pending strong { font-size: 26px; letter-spacing: .18em; }
+.auth-pending p { margin: 0; font-size: 14px; }
+.header-actions button.header-login { border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; }

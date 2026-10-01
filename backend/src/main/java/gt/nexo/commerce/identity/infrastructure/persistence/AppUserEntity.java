@@ -92,6 +92,11 @@ public class AppUserEntity {
         lastLoginAt = now;
     }
 
+    public void changeRole(RoleEntity role) { this.role = role; }
+    public void changeStatus(UserStatus status) { this.status = status; }
+    public void changeDisplayName(String displayName) { this.displayName = displayName; }
+    public void setPasswordHash(String passwordHash) { this.passwordHash = passwordHash; }
+
     public boolean isCurrentlyLocked(Instant now) {
         return status == UserStatus.LOCKED || (lockedUntil != null && lockedUntil.isAfter(now));
     }

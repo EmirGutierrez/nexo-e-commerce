@@ -35,4 +35,4 @@ Las rutas conservan las URLs existentes, incluyendo `/store`, `/cart`, `/checkou
 - Panel de administración con dashboard, productos, inventario, compras, ventas, clientes, proveedores, marcas, roles, reportes y configuración.
 - El acceso administrativo requiere una cuenta creada en Spring Boot mediante el bootstrap inicial configurado fuera del repositorio; consulta `backend/README.md`.
 
-La autenticación administrativa usa el BFF de Next.js y sesiones, usuarios y permisos de Spring Boot. El acceso de clientes y los demás dominios continúan simulados. El carrito vive en memoria; algunas preferencias se guardan en `localStorage`.
+El acceso de personal y clientes usa el BFF de Next.js y sesiones, usuarios y roles de Spring Boot. Los clientes pueden crear una cuenta en `/register`; el formulario de acceso dirige a cada persona según el rol devuelto por la API. Los demás dominios continúan simulados. El carrito vive en memoria; algunas preferencias se guardan en `localStorage`.

@@ -39,8 +39,8 @@ public class BootstrapAdminConfiguration {
                     || password.length() < 16 || password.length() > 128) {
                 throw new IllegalStateException("Bootstrap requires a valid name and email plus a password of 16–128 characters.");
             }
-            if (users.count() > 0) {
-                throw new IllegalStateException("Bootstrap was enabled after users already existed. Disable BOOTSTRAP_ADMIN_ENABLED and remove the bootstrap secrets.");
+            if (users.existsByRole_Code("superadmin")) {
+                throw new IllegalStateException("Bootstrap was enabled after a superadmin already existed. Disable BOOTSTRAP_ADMIN_ENABLED and remove the bootstrap secrets.");
             }
             RoleEntity superadmin = roles.findById("superadmin")
                     .orElseThrow(() -> new IllegalStateException("The superadmin role is missing from the Flyway seed."));

@@ -1,5 +1,6 @@
 package gt.nexo.commerce.shared.errors;
 
+import gt.nexo.commerce.business.application.BusinessRuleException;
 import jakarta.validation.ConstraintViolationException;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
@@ -9,12 +10,28 @@ import org.springframework.security.core.userdetails.UsernameNotFoundException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.dao.DataIntegrityViolationException;
 
 @RestControllerAdvice
 public class ApiExceptionHandler {
+    @ExceptionHandler(AccountAlreadyExistsException.class)
+    ResponseEntity<ApiError> accountAlreadyExists(AccountAlreadyExistsException exception) {
+        return error(HttpStatus.CONFLICT, "ACCOUNT_ALREADY_EXISTS", exception.getMessage());
+    }
+
     @ExceptionHandler(InvalidCredentialsException.class)
     ResponseEntity<ApiError> invalidCredentials(InvalidCredentialsException exception) {
         return error(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", exception.getMessage());
+    }
+
+    @ExceptionHandler(BusinessRuleException.class)
+    ResponseEntity<ApiError> businessRule(BusinessRuleException exception) {
+        return error(exception.getStatus(), exception.getCode(), exception.getMessage());
+    }
+
+    @ExceptionHandler(DataIntegrityViolationException.class)
+    ResponseEntity<ApiError> persistenceConflict(DataIntegrityViolationException exception) {
+        return error(HttpStatus.CONFLICT, "PERSISTENCE_CONFLICT", "La operación entra en conflicto con datos relacionados o una restricción del negocio.");
     }
 
     @ExceptionHandler({MethodArgumentNotValidException.class, ConstraintViolationException.class})

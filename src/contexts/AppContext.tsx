@@ -1,6 +1,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ReactNode } from 'react';
 import { products } from '../data/mockData';
-import { authService, paymentSettingsService, paymentSettingsStorageKey } from '../services';
+import { authService, paymentSettingsService, userService } from '../services';
+import { roleService } from '../services/roleService';
 import type { CartItem, PaymentMethod, PaymentMethodSettings, Product, Role, User } from '../types';
 
 interface AppContextValue {
@@ -10,10 +11,13 @@ interface AppContextValue {
   addToCart: (product: CartItem | (typeof products)[number]) => void;
   updateQuantity: (id: string, quantity: number) => void;
   removeFromCart: (id: string) => void;
+  clearCart: () => void;
   user: User | null;
   userType: 'admin' | 'customer' | null;
   authLoading: boolean;
-  login: (email: string, password: string, kind: 'admin' | 'customer') => Promise<User | null>;
+  login: (email: string, password: string) => Promise<{ user: User; kind: 'admin' | 'customer' } | null>;
+  registerCustomer: (name: string, email: string, password: string) => Promise<User>;
+  updateProfile: (name: string) => Promise<User>;
   logout: () => Promise<void>;
   role: Role | null;
   assignRole: (userId: string, role: Role) => void;
@@ -62,29 +66,30 @@ export function AppProvider({ children }: { children: ReactNode }) {
 
   useEffect(() => {
     let active = true;
-    authService.currentUser()
+    let timeout: ReturnType<typeof setTimeout>;
+    const sessionCheck = Promise.race([
+      authService.currentUser(),
+      new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null), 8000); }),
+    ]);
+    sessionCheck
       .then((currentUser) => {
         if (!active || !currentUser) return;
         setUser(currentUser);
-        setUserType('admin');
+        roleService.setAuthenticatedPermissions(currentUser.role, currentUser.permissions);
+        setUserType(currentUser.role === 'customer' ? 'customer' : 'admin');
         setRole(currentUser.role);
       })
       .catch(() => {
-        // El frontend público y los dominios mock siguen disponibles si la API está apagada.
+        // El frontend público sigue disponible si la API está apagada.
       })
       .finally(() => {
+        clearTimeout(timeout);
         if (active) setAuthLoading(false);
       });
-    return () => { active = false; };
+    return () => { active = false; clearTimeout(timeout); };
   }, []);
 
-  useEffect(() => {
-    const syncPaymentSettings = (event: StorageEvent) => {
-      if (event.key === paymentSettingsStorageKey) setPaymentMethods(paymentSettingsService.getCurrent());
-    };
-    window.addEventListener('storage', syncPaymentSettings);
-    return () => window.removeEventListener('storage', syncPaymentSettings);
-  }, []);
+  useEffect(() => { paymentSettingsService.load().then(setPaymentMethods).catch(() => undefined); }, []);
 
   const value = useMemo<AppContextValue>(() => ({
     cart,
@@ -97,29 +102,44 @@ export function AppProvider({ children }: { children: ReactNode }) {
     }),
     updateQuantity: (id, quantity) => setCart((current) => current.map((item) => item.id === id ? { ...item, quantity: Math.max(1, Math.min(quantity, item.stock)) } : item)),
     removeFromCart: (id) => setCart((current) => current.filter((item) => item.id !== id)),
+    clearCart: () => setCart([]),
     user,
     userType,
     authLoading,
-    login: async (email, password, kind) => {
-      if (kind === 'admin') {
-        const admin = await authService.loginAdmin(email, password);
-        if (!admin) return null;
-        setUser(admin); setUserType('admin'); setRole(admin.role);
-        return admin;
-      }
-      if (kind === 'customer' && email && password.length >= 4) {
-        const customer = { id: 'c1', name: 'Valeria Castillo', email, role: 'employee', initials: 'VC', status: 'Activo' } as User;
-        setUser(customer); setUserType('customer'); setRole(customer.role); return customer;
-      }
-      return null;
+    login: async (email, password) => {
+      const account = await authService.login(email, password);
+      if (!account) return null;
+      const kind = account.role === 'customer' ? 'customer' : 'admin';
+      roleService.setAuthenticatedPermissions(account.role, account.permissions);
+      setUser(account); setUserType(kind); setRole(account.role);
+      return { user: account, kind };
+    },
+    registerCustomer: async (name, email, password) => {
+      const customer = await authService.registerCustomer(name, email, password);
+      roleService.setAuthenticatedPermissions(customer.role, customer.permissions);
+      setUser(customer); setUserType('customer'); setRole(customer.role);
+      return customer;
+    },
+    updateProfile: async (name) => {
+      const updated = await userService.updateProfile(name);
+      roleService.setAuthenticatedPermissions(updated.role, updated.permissions);
+      setUser(updated);
+      return updated;
     },
     logout: async () => {
-      if (userType === 'admin') await authService.logout();
+      if (userType) await authService.logout();
+      roleService.setAuthenticatedPermissions(null);
       setUser(null); setUserType(null); setRole(null);
     },
     role,
     assignRole: (userId, nextRole) => {
-      if (userId === user?.id) setRole(nextRole);
+      if (userId === user?.id) {
+        setRole(nextRole);
+        roleService.setAuthenticatedPermissions(nextRole);
+        void authService.currentUser().then((currentUser) => {
+          if (currentUser) { setUser(currentUser); setRole(currentUser.role); roleService.setAuthenticatedPermissions(currentUser.role, currentUser.permissions); }
+        }).catch(() => undefined);
+      }
     },
     paymentMethods,
     updatePaymentMethod: async (method, enabled) => {

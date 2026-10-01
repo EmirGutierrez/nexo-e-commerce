@@ -1,5 +1,6 @@
 import type { PermissionAction, PermissionModule, Role, RolePermissions } from '../types';
 import { roleLabels } from '../types';
+import { apiClient } from '../shared/services/http-client';
 
 export const permissionModules: { id: PermissionModule; label: string; actions: PermissionAction[] }[] = [
   { id: 'dashboard', label: 'Dashboard', actions: ['view'] },
@@ -10,6 +11,7 @@ export const permissionModules: { id: PermissionModule; label: string; actions: 
   { id: 'customers', label: 'Clientes', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'suppliers', label: 'Proveedores', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'reports', label: 'Reportes', actions: ['view', 'create'] },
+  { id: 'accounting', label: 'Contabilidad', actions: ['view', 'create', 'edit'] },
   { id: 'settings', label: 'Configuración', actions: ['view', 'edit'] },
   { id: 'users', label: 'Usuarios y roles', actions: ['view', 'create', 'edit', 'delete'] },
 ];
@@ -19,35 +21,40 @@ const fullPermissions = (): RolePermissions => Object.fromEntries(permissionModu
 const defaults: Record<Role, RolePermissions> = {
   superadmin: fullPermissions(),
   admin: fullPermissions(),
-  sales: { dashboard: ['view'], products: ['view'], inventory: [], orders: ['view', 'edit', 'approve'], sales: ['view', 'create', 'edit'], customers: ['view', 'create', 'edit'], suppliers: [], reports: ['view', 'create'], settings: [], users: [] },
-  warehouse: { dashboard: ['view'], products: ['view'], inventory: ['view', 'create', 'edit'], orders: ['view'], sales: [], customers: [], suppliers: ['view', 'create', 'edit'], reports: ['view'], settings: [], users: [] },
-  employee: { dashboard: [], products: [], inventory: [], orders: [], sales: [], customers: [], suppliers: [], reports: [], settings: [], users: [] },
+  sales: { dashboard: ['view'], products: ['view'], inventory: [], orders: ['view', 'edit', 'approve'], sales: ['view', 'create', 'edit'], customers: ['view', 'create', 'edit'], suppliers: [], reports: ['view', 'create'], accounting: [], settings: [], users: [] },
+  warehouse: { dashboard: ['view'], products: ['view'], inventory: ['view', 'create', 'edit'], orders: ['view'], sales: [], customers: [], suppliers: ['view', 'create', 'edit'], reports: ['view'], accounting: [], settings: [], users: [] },
+  employee: { dashboard: ['view'], products: ['view'], inventory: ['view'], orders: [], sales: ['view', 'create'], customers: [], suppliers: [], reports: [], accounting: [], settings: [], users: [] },
+  customer: { dashboard: [], products: [], inventory: [], orders: [], sales: [], customers: [], suppliers: [], reports: [], accounting: [], settings: [], users: [] },
 };
-const storageKey = 'nexo.role-permissions.v1';
-const userRoleStorageKey = 'nexo.user-roles.v1';
 const copy = (value: RolePermissions): RolePermissions => Object.fromEntries(permissionModules.map(({ id }) => [id, [...value[id]]])) as RolePermissions;
-function read(): Record<Role, RolePermissions> {
-  try {
-    const saved = JSON.parse(localStorage.getItem(storageKey) || '{}') as Partial<Record<Role, Partial<RolePermissions>>>;
-    return Object.fromEntries((Object.keys(defaults) as Role[]).map((role) => [role, role === 'superadmin' ? fullPermissions() : Object.fromEntries(permissionModules.map(({ id }) => [id, (saved[role]?.[id] || defaults[role][id]).filter((action) => actions(id).includes(action))]))])) as Record<Role, RolePermissions>;
-  } catch { return Object.fromEntries((Object.keys(defaults) as Role[]).map((role) => [role, copy(defaults[role])])) as Record<Role, RolePermissions>; }
-}
-let current = read();
+type RoleDto = { code: string; displayName: string; users: number; permissions: Partial<RolePermissions> };
+let current = Object.fromEntries((Object.keys(defaults) as Role[]).map((role) => [role, copy(defaults[role])])) as Record<Role, RolePermissions>;
+let authenticated: { role: Role; permissions?: string[] } | null = null;
+const normalize = (permissions: Partial<RolePermissions>): RolePermissions => Object.fromEntries(permissionModules.map(({ id }) =>
+  [id, (permissions[id] || []).filter((action) => actions(id).includes(action))])) as RolePermissions;
 export const roleService = {
-  list: async () => (Object.keys(roleLabels) as Role[]).map((id) => ({ id, name: roleLabels[id], permissions: copy(current[id]) })),
+  setAuthenticatedPermissions: (role: Role | null, permissions?: string[]) => {
+    authenticated = role ? { role, permissions: permissions === undefined ? undefined : [...permissions] } : null;
+  },
+  list: async () => {
+    const rows = await apiClient.get<RoleDto[]>('/api/roles');
+    rows.forEach((row) => { if (row.code in current) current[row.code as Role] = row.code === 'superadmin' ? fullPermissions() : normalize(row.permissions); });
+    return rows.map((row) => ({ id: row.code as Role, name: roleLabels[row.code as Role] || row.displayName, users: row.users, permissions: copy(current[row.code as Role] || normalize(row.permissions)) }));
+  },
   getPermissions: (role: Role) => copy(current[role]),
-  can: (role: Role, module: PermissionModule, action: PermissionAction = 'view') => role === 'superadmin' || current[role][module].includes(action),
-  getUserRole: (userId: string, fallback: Role) => {
-    try { const assignments = JSON.parse(localStorage.getItem(userRoleStorageKey) || '{}') as Record<string, Role>; return assignments[userId] && roleLabels[assignments[userId]] ? assignments[userId] : fallback; } catch { return fallback; }
+  can: (role: Role, module: PermissionModule, action: PermissionAction = 'view') => {
+    if (role === 'customer') return false;
+    if (role === 'superadmin') return true;
+    if (authenticated?.role === role && authenticated.permissions !== undefined) return authenticated.permissions.includes(`${module}:${action}`);
+    return current[role][module].includes(action);
   },
-  assignUserRole: (userId: string, role: Role) => {
-    try { const assignments = JSON.parse(localStorage.getItem(userRoleStorageKey) || '{}') as Record<string, Role>; localStorage.setItem(userRoleStorageKey, JSON.stringify({ ...assignments, [userId]: role })); } catch { /* La asignación permanece disponible en la sesión actual de la pantalla. */ }
-  },
+  getUserRole: (_userId: string, fallback: Role) => fallback,
+  assignUserRole: async (userId: string, role: Role) => apiClient.patch<void>(`/api/users/${userId}/role`, { role }),
   save: async (role: Role, permissions: RolePermissions) => {
-    if (role === 'superadmin') throw new Error('El rol Súper Administrador siempre conserva todos los permisos.');
-    const normalized = Object.fromEntries(permissionModules.map(({ id }) => [id, permissions[id].filter((action) => actions(id).includes(action))])) as RolePermissions;
-    current = { ...current, [role]: normalized };
-    try { localStorage.setItem(storageKey, JSON.stringify(current)); } catch { /* La sesión sigue funcionando aunque el almacenamiento del navegador esté bloqueado. */ }
-    return copy(normalized);
+    if (role === 'superadmin' || role === 'customer') throw new Error('Los permisos de este rol están protegidos.');
+    const normalized = normalize(permissions);
+    const saved = await apiClient.put<RoleDto>(`/api/roles/${role}/permissions`, normalized);
+    current = { ...current, [role]: normalize(saved.permissions) };
+    return copy(current[role]);
   },
 };

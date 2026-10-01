@@ -3,6 +3,7 @@ export interface ApiClient {
   get<T>(path: string): Promise<T>;
   post<T>(path: string, body?: unknown): Promise<T>;
   put<T>(path: string, body: unknown): Promise<T>;
+  patch<T>(path: string, body: unknown): Promise<T>;
   delete<T>(path: string): Promise<T>;
 }
 
@@ -69,6 +70,7 @@ export const apiClient: ApiClient = {
   get: <T,>(path: string) => request<T>('GET', path),
   post: <T,>(path: string, body?: unknown) => request<T>('POST', path, body),
   put: <T,>(path: string, body: unknown) => request<T>('PUT', path, body),
+  patch: <T,>(path: string, body: unknown) => request<T>('PATCH', path, body),
   delete: <T,>(path: string) => request<T>('DELETE', path),
 };
 

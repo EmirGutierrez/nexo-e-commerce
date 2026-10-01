@@ -28,15 +28,18 @@ public class AuthenticationService {
     private final SecurityContextRepository securityContextRepository;
     private final SessionAuthenticationStrategy sessionAuthenticationStrategy;
     private final AppUserRepository users;
+    private final UserAccountService userAccountService;
 
     public AuthenticationService(AuthenticationManager authenticationManager,
                                   SecurityContextRepository securityContextRepository,
                                   SessionAuthenticationStrategy sessionAuthenticationStrategy,
-                                  AppUserRepository users) {
+                                  AppUserRepository users,
+                                  UserAccountService userAccountService) {
         this.authenticationManager = authenticationManager;
         this.securityContextRepository = securityContextRepository;
         this.sessionAuthenticationStrategy = sessionAuthenticationStrategy;
         this.users = users;
+        this.userAccountService = userAccountService;
     }
 
     @Transactional
@@ -63,6 +66,6 @@ public class AuthenticationService {
         AppUserEntity account = users.findById(principal.getId())
                 .orElseThrow(() -> new AuthenticationServiceException("Authenticated account disappeared"));
         account.recordSuccessfulLogin(Instant.now());
-        return UserResponse.from(account);
+        return userAccountService.currentUser(account.getId());
     }
 }

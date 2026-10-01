@@ -110,6 +110,10 @@ public class SecurityConfiguration {
                 .authorizeHttpRequests(authorize -> authorize
                         .requestMatchers(HttpMethod.GET, "/api/auth/csrf").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/register").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/accept-invitation").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/catalog/products", "/api/catalog/products/**", "/api/catalog/payment-methods").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/catalog/orders").permitAll()
                         .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
