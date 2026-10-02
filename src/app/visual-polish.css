@@ -42,7 +42,7 @@
   }
   .public-nav.is-open { display: flex; }
   .public-nav > a,
-  .public-nav-account-action {
+  .public-nav-account .header-login {
     display: flex;
     align-items: center;
     width: 100%;
@@ -54,13 +54,13 @@
     text-align: left;
   }
   .public-nav > a:hover,
-  .public-nav-account-action:hover { background: #f2f5fb; color: var(--navy); }
+  .public-nav-account .header-login:hover { background: #f2f5fb; color: var(--navy); }
   .public-nav-account {
     display: block;
     padding-top: 5px;
     border-top: 1px solid var(--border);
   }
-  .public-nav-account-action { background: transparent; cursor: pointer; }
+  .public-nav-account .header-login { background: transparent; cursor: pointer; }
   .landing-copy { width: 100%; }
   .trust-row { flex-wrap: wrap; row-gap: 8px; }
   .floating-order { width: 252px; }
