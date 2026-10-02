@@ -11,7 +11,11 @@ npm install
 npm run dev
 ```
 
-Abre <http://localhost:3000>. Para generar y servir una compilación de producción:
+Abre <http://localhost:3000>.
+
+El registro y el inicio de sesión requieren que PostgreSQL y Spring Boot sigan ejecutándose. Si el formulario indica que el servicio de acceso no está disponible, comprueba que `http://localhost:8080/api/auth/csrf` responde antes de volver a intentarlo. `npm run dev` inicia solamente Next.js.
+
+Para generar y servir una compilación de producción:
 
 ```bash
 npm run build

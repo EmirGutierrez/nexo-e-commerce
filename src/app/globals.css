@@ -914,6 +914,8 @@
 .auth-pending strong { font-size: 26px; letter-spacing: .18em; }
 .auth-pending p { margin: 0; font-size: 14px; }
 .header-actions button.header-login { border: 0; background: transparent; padding: 0; font: inherit; cursor: pointer; }
+.header-account-name { display: inline-block; max-width: 180px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media (max-width: 700px) { .header-account-name { max-width: 110px; } }
 
 .seasonal-spotlight { position:relative; display:grid; grid-template-columns:1.05fr .95fr; max-width:1180px; min-height:370px; margin:0 auto 92px; overflow:hidden; border-radius:22px; background:#eaf0f6; }
 .seasonal-spotlight-image { min-height:370px; overflow:hidden; background:linear-gradient(135deg,#e1e7ed,#f6f7f5); }
