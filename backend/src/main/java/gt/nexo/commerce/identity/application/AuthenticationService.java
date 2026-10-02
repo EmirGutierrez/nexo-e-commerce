@@ -5,6 +5,7 @@ import gt.nexo.commerce.identity.api.dto.UserResponse;
 import gt.nexo.commerce.identity.infrastructure.persistence.AppUserEntity;
 import gt.nexo.commerce.identity.infrastructure.persistence.AppUserRepository;
 import gt.nexo.commerce.identity.infrastructure.persistence.UserStatus;
+import gt.nexo.commerce.shared.errors.InactiveAccountException;
 import gt.nexo.commerce.shared.errors.InvalidCredentialsException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
@@ -17,6 +18,7 @@ import org.springframework.security.core.Authentication;
 import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.context.SecurityContext;
 import org.springframework.security.core.context.SecurityContextHolder;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.stereotype.Service;
@@ -29,17 +31,20 @@ public class AuthenticationService {
     private final SessionAuthenticationStrategy sessionAuthenticationStrategy;
     private final AppUserRepository users;
     private final UserAccountService userAccountService;
+    private final PasswordEncoder passwordEncoder;
 
     public AuthenticationService(AuthenticationManager authenticationManager,
                                   SecurityContextRepository securityContextRepository,
                                   SessionAuthenticationStrategy sessionAuthenticationStrategy,
                                   AppUserRepository users,
-                                  UserAccountService userAccountService) {
+                                  UserAccountService userAccountService,
+                                  PasswordEncoder passwordEncoder) {
         this.authenticationManager = authenticationManager;
         this.securityContextRepository = securityContextRepository;
         this.sessionAuthenticationStrategy = sessionAuthenticationStrategy;
         this.users = users;
         this.userAccountService = userAccountService;
+        this.passwordEncoder = passwordEncoder;
     }
 
     @Transactional(noRollbackFor = InvalidCredentialsException.class)
@@ -62,11 +67,18 @@ public class AuthenticationService {
 
     private Authentication authenticateCredentials(LoginRequest request) {
         String email = request.email().trim().toLowerCase(Locale.ROOT);
+        var existingAccount = users.findByEmailIgnoreCase(email);
+        if (existingAccount.filter(user -> user.getStatus() == UserStatus.DISABLED)
+                .filter(user -> passwordEncoder.matches(request.password(), user.getPasswordHash()))
+                .isPresent()) {
+            throw new InactiveAccountException();
+        }
+
         try {
             return authenticationManager.authenticate(
                     UsernamePasswordAuthenticationToken.unauthenticated(email, request.password()));
         } catch (AuthenticationException exception) {
-            users.findByEmailIgnoreCase(email)
+            existingAccount
                     .filter(user -> user.getStatus() == UserStatus.ACTIVE)
                     .ifPresent(user -> user.recordFailedLogin(Instant.now()));
             throw new InvalidCredentialsException();
