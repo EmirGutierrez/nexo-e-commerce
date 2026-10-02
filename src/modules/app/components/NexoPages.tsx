@@ -27,6 +27,8 @@ import { roleService } from '../../../services/roleService';
 import { roleLabels } from '../../../types';
 import { OffersAdminPage, TransferReceiptsPage } from '../../commerce/components/CommerceAdminPages';
 import { SeasonalSpotlight } from '../../commerce/components/CommercePages';
+import PublicAccountControls from './PublicAccountControls';
+import { ApiError } from '../../../shared/services/http-client';
 
 const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
   const icons: Record<string, typeof Box> = { arrow: ArrowUpRight, box: Box, user: UserCircle, check: CheckCircle2 };
@@ -39,8 +41,7 @@ function Brand({ light = false }: { light?: boolean }) {
 }
 
 function PublicHeader() {
-  const { cartCount, userType, logout } = useApp();
-  const router = useRouter();
+  const { cartCount } = useApp();
   const [menuOpen, setMenuOpen] = useState(false);
   useEffect(() => {
     if (!menuOpen) return;
@@ -51,15 +52,6 @@ function PublicHeader() {
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [menuOpen]);
   const closeMenu = () => setMenuOpen(false);
-  const signOut = () => {
-    closeMenu();
-    void logout().then(() => router.push('/access')).catch(() => window.alert('No se pudo cerrar la sesión. Inténtalo de nuevo.'));
-  };
-  const accountAction = (className: string) => userType === 'customer'
-    ? <button type="button" className={className} onClick={signOut}>Salir</button>
-    : userType === 'admin'
-      ? <Link href="/admin/dashboard" className={className} onClick={closeMenu}>Panel</Link>
-      : <Link href="/access" className={className} onClick={closeMenu}>Ingresar</Link>;
 
   return <header className="public-header">
     <Brand />
@@ -67,10 +59,10 @@ function PublicHeader() {
       <Link href="/store" onClick={closeMenu}>Tienda</Link>
       <Link href="/#benefits" onClick={closeMenu}>Beneficios</Link>
       <Link href="/#about" onClick={closeMenu}>Nosotros</Link>
-      <div className="public-nav-account">{accountAction('public-nav-account-action')}</div>
+      <div className="public-nav-account"><PublicAccountControls onAction={closeMenu} /></div>
     </nav>
     <div className="header-actions">
-      {accountAction('header-login')}
+      <PublicAccountControls onAction={closeMenu} />
       <button type="button" className="public-menu-toggle" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={menuOpen} aria-controls="public-navigation" onClick={() => setMenuOpen((open) => !open)}>
         {menuOpen ? <X size={20} /> : <Menu size={20} />}
       </button>
@@ -158,8 +150,8 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
         return;
       }
       router.push(resolveLoginDestination(session.kind, session.user.role, requested, session.user.permissions));
-    } catch {
-      setError('No fue posible conectar con el servicio de acceso. Inténtalo de nuevo.');
+    } catch (caught) {
+      setError(authErrorMessage(caught, 'No fue posible iniciar sesión. Inténtalo de nuevo.'));
     } finally {
       setSubmitting(false);
     }
@@ -198,17 +190,17 @@ export function RegisterPage() {
       await registerCustomer(name, email, password);
       router.replace('/store');
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : 'No fue posible crear la cuenta.');
+      setError(authErrorMessage(caught, 'No fue posible crear la cuenta.'));
     } finally {
       setSubmitting(false);
     }
   };
 
   return <div className="admin-login-page"><div className="admin-login-panel"><Brand /><div className="security-pill"><ShieldCheck size={15} /> Acceso protegido</div><div className="admin-login-copy"><span className="eyebrow">NEXO · TIENDA</span><h1>Comienza aquí,<br /><em>a tu manera.</em></h1><p>Crea tu cuenta para comprar en NEXO.</p></div><div className="admin-login-footer"><span>© 2025 NEXO COMMERCE</span><span>Cuenta de cliente</span></div></div><div className="admin-login-form"><Link href="/access" className="back-link"><ArrowLeft size={16} /> Volver al inicio de sesión</Link><div className="admin-form-inner"><div className="admin-icon"><LockIcon /></div><h2>Crear cuenta</h2><p>Usa un correo propio y una contraseña de al menos 12 caracteres.</p><form onSubmit={submit}>
-    <Field label="Nombre" type="text" value={name} onChange={setName} placeholder="Tu nombre" />
-    <Field label="Correo electrónico" type="email" value={email} onChange={setEmail} placeholder="tu@correo.com" />
-    <Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="Mínimo 12 caracteres" />
-    <Field label="Confirmar contraseña" type="password" value={confirmation} onChange={setConfirmation} placeholder="Repite tu contraseña" />
+    <Field label="Nombre" type="text" value={name} onChange={setName} placeholder="Tu nombre" minLength={2} maxLength={160} />
+    <Field label="Correo electrónico" type="email" value={email} onChange={setEmail} placeholder="tu@correo.com" maxLength={254} />
+    <Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="Mínimo 12 caracteres" minLength={12} maxLength={128} />
+    <Field label="Confirmar contraseña" type="password" value={confirmation} onChange={setConfirmation} placeholder="Repite tu contraseña" minLength={12} maxLength={128} />
     {error && <div className="error-message" role="alert"><X size={15} />{error}</div>}
     <button className="button button-primary full" type="submit" disabled={submitting}>{submitting ? 'Creando cuenta…' : <>Crear cuenta <ArrowRight size={16} /></>}</button>
   </form><Link className="auth-bottom login-switch" href="/access">Ya tengo una cuenta</Link></div></div></div>;
@@ -240,7 +232,16 @@ export function ProfilePage() {
 }
 
 function LockIcon() { return <ShieldCheck size={25} />; }
-function Field({ label, type, value, onChange, placeholder }: { label: string; type: string; value: string; onChange: (value: string) => void; placeholder: string }) { return <label className="field"><span>{label}</span><input required type={type} defaultValue={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} /></label>; }
+function authErrorMessage(error: unknown, fallback: string) {
+  if (error instanceof ApiError && (error.status === 502 || error.status === 503)) {
+    return 'El servicio de acceso no está disponible en este momento. Inténtalo de nuevo en unos minutos.';
+  }
+  if (error instanceof ApiError && error.status === 404) {
+    return 'No se encontró el servicio de acceso. Comunica el problema al administrador.';
+  }
+  return error instanceof Error ? error.message : fallback;
+}
+function Field({ label, type, value, onChange, placeholder, minLength, maxLength }: { label: string; type: string; value: string; onChange: (value: string) => void; placeholder: string; minLength?: number; maxLength?: number }) { return <label className="field"><span>{label}</span><input required type={type} defaultValue={value} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} minLength={minLength} maxLength={maxLength} /></label>; }
 
 const adminRoleHome: Record<Role, string> = {
   superadmin: '/admin/dashboard', admin: '/admin/dashboard', sales: '/admin/sales', warehouse: '/admin/inventory', employee: '/admin/dashboard', employee_buyer: '/admin/orders', customer: '/store',
