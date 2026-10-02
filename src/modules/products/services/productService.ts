@@ -39,6 +39,7 @@ export async function fetchCatalogFromApi(): Promise<{ products: Product[]; sour
 
 export const productService = {
   list: fetchCatalogFromApi,
+  nextSku: async (): Promise<string> => (await apiClient.post<{ sku: string }>('/api/business/products/sku')).sku,
   getById: async (id: string): Promise<Product | null> => {
     const item = await apiClient.get<CatalogProduct>(`/api/catalog/products/${encodeURIComponent(id)}`);
     return mapProduct(item);

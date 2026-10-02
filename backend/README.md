@@ -10,7 +10,7 @@ Monolito modular con Spring Boot, PostgreSQL, Flyway y sesiones HTTP administrad
 
 ## Desarrollo local
 
-1. Copia `.env.example` a `.env` dentro de `backend/` y define `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_USERNAME` y `DATABASE_PASSWORD`. Usa una contraseña local propia; los valores de `.env` quedan ignorados por Git.
+1. Copia `.env.example` a `.env` dentro de `backend/` y define `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_USERNAME` y `DATABASE_PASSWORD`. Usa una contraseña local propia; los valores de `.env` quedan ignorados por Git. La configuración inicial usa `nexo_commerce_restored` para coincidir con la base local que contiene los datos de trabajo.
 2. Desde `backend/`, inicia PostgreSQL con `docker compose up -d`. El puerto de PostgreSQL queda accesible solo desde el propio equipo.
 3. Inicia la API con `mvn spring-boot:run`. El perfil `local` se selecciona por defecto y Flyway aplica las migraciones al arrancar.
 4. Swagger UI estará disponible en `http://localhost:8080/swagger-ui.html`.
@@ -64,4 +64,6 @@ Para probar Expo Go en un teléfono físico dentro de la red local, inicia Sprin
 
 La app usa los mismos registros persistidos para productos, inventario, clientes, proveedores, ventas y pedidos que consulta el sitio web. `POST /api/business/orders` requiere el permiso `orders:create`; Spring valida los datos del cliente, disponibilidad de pago, promociones y stock, registra al usuario responsable y reserva existencias en una transacción. Las compras de proveedor admiten varios artículos y generan sus movimientos de inventario.
 
-El personal puede incluir en `image` un `data:image/jpeg;base64,...`, PNG o WEBP de hasta 140 KB al crear o editar un producto. Spring valida el formato, guarda el archivo en PostgreSQL mediante Flyway V11 y reemplaza el contenido recibido por una URL compartida (`GET /api/catalog/products/{id}/image`). También se pueden guardar URLs externas convencionales. El BFF de Next.js reenvía esa ruta de imagen junto con el resto de `/api/...`.
+El personal puede incluir en `image` un `data:image/jpeg;base64,...`, PNG o WEBP de hasta 140 KB al crear o editar un producto. Spring valida el formato, guarda el archivo en PostgreSQL mediante Flyway V11 y reemplaza el contenido recibido por una URL compartida (`GET /api/catalog/products/{id}/image`). Los formularios web y móvil comprimen y guardan las nuevas fotos en PostgreSQL; la base también conserva URLs externas existentes. El BFF de Next.js reenvía esa ruta de imagen junto con el resto de `/api/...`.
+
+Los formularios web y móvil reservan el SKU con `POST /api/business/products/sku` antes de crear el producto. Spring exige `products:create`, genera los códigos secuenciales `NEXO-000001` y completa uno en la creación si una integración omite ese campo. Flyway V13 vincula las categorías que ya estaban guardadas como texto con el catálogo normalizado. El rol `employee_buyer` (“Empleado comprador”) solo recibe `orders:create`; su pantalla abre la compra desde el catálogo y no permite consultar historial, inventario, ventas ni administración.

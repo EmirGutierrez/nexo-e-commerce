@@ -318,6 +318,7 @@ function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
     Producto: stringValue(data, 'name', 'Producto'), Marca: stringValue(data, 'brandId', 'Marca'), Categoría: stringValue(data, 'category', 'Categoría'),
     SKU: stringValue(data, 'sku', 'SKU'), Valor: numberValue(data, 'price', 'Valor'), Existencias: numberValue(data, 'stock', 'Existencias'),
     Imagen: stringValue(data, 'image', 'Imagen'), Estado: section === 'inventory' && stringValue(data, 'status', 'Estado') === 'Activo' ? 'En stock' : stringValue(data, 'status', 'Estado'),
+    Descripción: stringValue(data, 'description', 'Descripción'),
     Ubicación: stringValue(data, 'Ubicación') || 'Bodega central',
   };
   if (section === 'categories') return { Nombre: stringValue(data, 'name'), Productos: numberValue(data, 'products'), 'Ventas del mes': numberValue(data, 'monthlySales'), Estado: stringValue(data, 'status') };

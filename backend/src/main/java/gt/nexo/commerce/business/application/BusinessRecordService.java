@@ -76,12 +76,19 @@ public class BusinessRecordService {
     }
 
     @Transactional
+    public String nextProductSku() {
+        authorize("products", "create");
+        return allocateProductSku();
+    }
+
+    @Transactional
     public BusinessRecordResponse create(String resource, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "create");
         if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);
+        if (normalized.equals("products") && text(field(data, "sku", "SKU")).isBlank()) data.put("sku", allocateProductSku());
         if (normalized.equals("reports")) data = buildReport(data, actorId());
         validate(normalized, data);
         ensureUnique(normalized, data, null);
@@ -117,6 +124,10 @@ public class BusinessRecordService {
         Map<String, Object> data = clean(input);
         ProductImageService.ImageUpload productImage = normalized.equals("products") ? decodeProductImage(data) : null;
         Map<String, Object> old = lockedRecord(normalized, id);
+        if (normalized.equals("products")) {
+            data.remove("SKU");
+            data.put("sku", text(field(old, "sku", "SKU")));
+        }
         String previousImage = text(old.get("image"));
         if (productImage != null) data.put("image", productImagePath(id));
         validate(normalized, data);
@@ -752,16 +763,17 @@ public class BusinessRecordService {
             }
             case "products" -> {
                 String category = text(field(data, "category", "Categoría"));
+                UUID categoryId = ensureProductCategory(category, actor);
                 jdbc.update("""
                         INSERT INTO products (record_id, brand_record_id, category_record_id, sku, name, category_name,
                         price, compare_at, stock, status, image_url, description, featured)
-                        VALUES (?, ?, (SELECT record_id FROM product_categories WHERE LOWER(name) = LOWER(?)), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT (record_id) DO UPDATE SET brand_record_id = EXCLUDED.brand_record_id,
                         category_record_id = EXCLUDED.category_record_id, sku = EXCLUDED.sku, name = EXCLUDED.name,
                         category_name = EXCLUDED.category_name, price = EXCLUDED.price, compare_at = EXCLUDED.compare_at,
                         stock = EXCLUDED.stock, status = EXCLUDED.status, image_url = EXCLUDED.image_url,
                         description = EXCLUDED.description, featured = EXCLUDED.featured, updated_at = CURRENT_TIMESTAMP
-                        """, id, parseOptionalUuid(field(data, "brandId", "Marca")), category,
+                        """, id, parseOptionalUuid(field(data, "brandId", "Marca")), categoryId,
                         text(field(data, "sku", "SKU")), text(field(data, "name", "Producto")), category,
                         decimal(field(data, "price", "Valor")), optionalDecimal(field(data, "compareAt", "Precio anterior")),
                         number(field(data, "stock", "Existencias"), 0), defaultText(field(data, "status", "Estado"), "Activo"),
@@ -811,6 +823,45 @@ public class BusinessRecordService {
                     text(field(data, "category", "Categoría")), defaultText(field(data, "type", "Tipo"), "Ingreso"),
                     decimal(field(data, "amount", "Monto")), defaultText(field(data, "status", "Estado"), "Registrado"), actor);
             default -> { }
+        }
+    }
+
+    private UUID ensureProductCategory(String name, UUID actor) {
+        String categoryName = name.trim();
+        jdbc.update("""
+                INSERT INTO business_records (id, resource_code, data, status_code, created_by)
+                SELECT ?, 'categories', jsonb_build_object('name', ?, 'status', 'Activo'), 'Activo', ?
+                WHERE NOT EXISTS (
+                    SELECT 1 FROM business_records WHERE resource_code = 'categories'
+                    AND LOWER(COALESCE(data ->> 'name', data ->> 'Nombre')) = LOWER(?)
+                )
+                ON CONFLICT DO NOTHING
+                """, UUID.randomUUID(), categoryName, actor, categoryName);
+        UUID recordId = jdbc.queryForObject("""
+                SELECT id FROM business_records WHERE resource_code = 'categories'
+                AND LOWER(COALESCE(data ->> 'name', data ->> 'Nombre')) = LOWER(?)
+                ORDER BY created_at, id LIMIT 1
+                """, UUID.class, categoryName);
+        jdbc.update("""
+                INSERT INTO product_categories (record_id, name, status) VALUES (?, ?, 'Activo')
+                ON CONFLICT DO NOTHING
+                """, recordId, categoryName);
+        return jdbc.queryForObject("SELECT record_id FROM product_categories WHERE LOWER(name) = LOWER(?)", UUID.class, categoryName);
+    }
+
+    private String allocateProductSku() {
+        while (true) {
+            Long value = jdbc.queryForObject("SELECT nextval('product_sku_number_seq')", Long.class);
+            String sku = "NEXO-%06d".formatted(value);
+            Boolean exists = jdbc.queryForObject("""
+                    SELECT EXISTS (
+                        SELECT 1 FROM products WHERE LOWER(sku) = LOWER(?)
+                        UNION ALL
+                        SELECT 1 FROM business_records WHERE resource_code = 'products'
+                        AND LOWER(COALESCE(data ->> 'sku', data ->> 'SKU', '')) = LOWER(?)
+                    )
+                    """, Boolean.class, sku, sku);
+            if (!Boolean.TRUE.equals(exists)) return sku;
         }
     }
 
@@ -1030,8 +1081,9 @@ public class BusinessRecordService {
     private void validate(String resource, Map<String, Object> data) {
         if (data.isEmpty()) throw invalid("El registro no puede estar vacío.");
         if (resource.equals("products")) {
-            required(data, "name", "Producto"); required(data, "sku", "SKU");
+            required(data, "name", "Producto"); required(data, "sku", "SKU"); required(data, "category", "Categoría");
             String image = text(data.get("image"));
+            if (image.isBlank()) throw invalid("Selecciona una imagen para el producto.");
             if (image.length() > 1000 && !image.startsWith("data:image/")) throw invalid("La dirección de imagen del producto es demasiado larga.");
             BigDecimal price = decimal(field(data, "price", "Valor"));
             if (price.signum() < 0) throw invalid("El precio no puede ser negativo.");

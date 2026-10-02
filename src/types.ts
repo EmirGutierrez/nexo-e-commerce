@@ -1,4 +1,4 @@
-export type Role = 'superadmin' | 'admin' | 'sales' | 'warehouse' | 'employee' | 'customer';
+export type Role = 'superadmin' | 'admin' | 'sales' | 'warehouse' | 'employee' | 'employee_buyer' | 'customer';
 export type PermissionAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
 export type PermissionModule = 'dashboard' | 'products' | 'inventory' | 'orders' | 'sales' | 'customers' | 'suppliers' | 'reports' | 'accounting' | 'promotions' | 'settings' | 'users';
 export type RolePermissions = Record<PermissionModule, PermissionAction[]>;
@@ -157,5 +157,5 @@ export interface AccountingMovement {
 }
 
 export const roleLabels: Record<Role, string> = {
-  superadmin: 'Súper Administrador', admin: 'Administrador', sales: 'Vendedor', warehouse: 'Personal de bodega', employee: 'Empleado', customer: 'Cliente'
+  superadmin: 'Súper Administrador', admin: 'Administrador', sales: 'Vendedor', warehouse: 'Personal de bodega', employee: 'Empleado', employee_buyer: 'Empleado comprador', customer: 'Cliente'
 };
