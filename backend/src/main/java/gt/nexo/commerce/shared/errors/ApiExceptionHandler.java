@@ -24,6 +24,11 @@ public class ApiExceptionHandler {
         return error(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", exception.getMessage());
     }
 
+    @ExceptionHandler(InactiveAccountException.class)
+    ResponseEntity<ApiError> inactiveAccount(InactiveAccountException exception) {
+        return error(HttpStatus.FORBIDDEN, "ACCOUNT_INACTIVE", exception.getMessage());
+    }
+
     @ExceptionHandler(BusinessRuleException.class)
     ResponseEntity<ApiError> businessRule(BusinessRuleException exception) {
         return error(exception.getStatus(), exception.getCode(), exception.getMessage());
