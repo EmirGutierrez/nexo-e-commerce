@@ -71,6 +71,8 @@ public class BusinessRecordService {
                     WHERE LOWER(COALESCE(customer_email, '')) = LOWER(?) AND status <> 'Cancelado'
                     """, rs -> { rs.next(); return Map.of("orders", rs.getLong("orders"), "totalPurchased", rs.getBigDecimal("purchased")); }, email);
             data.putAll(totals);
+            long wishlistItems = jdbc.queryForObject("SELECT COUNT(*) FROM customer_wishlist_items w JOIN app_user u ON u.id = w.customer_user_id WHERE LOWER(u.email) = LOWER(?)", Long.class, email);
+            data.put("wishlistItems", wishlistItems);
             return new BusinessRecordResponse(record.id(), record.resource(), data, record.createdAt(), record.updatedAt());
         }).toList();
     }
@@ -164,6 +166,9 @@ public class BusinessRecordService {
                 """, writeJson(data), statusOf(data), id, normalized);
         if (updated == 0) throw missing();
         syncProjection(id, normalized, data, actorId());
+        if (normalized.equals("orders") && !java.util.Objects.equals(old.get("status"), data.get("status"))) {
+            createOrderStatusNotification(id, text(data.get("status")));
+        }
         if (normalized.equals("products")) {
             if (productImage != null) productImages.save(id, productImage);
             else if (!java.util.Objects.equals(previousImage, text(data.get("image")))) productImages.delete(id);
@@ -286,16 +291,21 @@ public class BusinessRecordService {
 
     @Transactional
     public BusinessRecordResponse createPublicOrder(Map<String, Object> input) {
-        return createOrder(input, null);
+        return createOrder(input, null, null);
+    }
+
+    @Transactional
+    public BusinessRecordResponse createCustomerOrder(Map<String, Object> input, UUID customerUserId) {
+        return createOrder(input, null, customerUserId);
     }
 
     @Transactional
     public BusinessRecordResponse createStaffOrder(Map<String, Object> input) {
         authorize("orders", "create");
-        return createOrder(input, actorId());
+        return createOrder(input, actorId(), null);
     }
 
-    private BusinessRecordResponse createOrder(Map<String, Object> input, UUID actor) {
+    private BusinessRecordResponse createOrder(Map<String, Object> input, UUID actor, UUID customerUserId) {
         String customerName = text(input.get("customerName"));
         String customerEmail = text(input.get("customerEmail")).toLowerCase(Locale.ROOT);
         String paymentMethod = text(input.get("paymentMethod"));
@@ -341,13 +351,121 @@ public class BusinessRecordService {
         data.put("paymentMethod", paymentMethod); data.put("payment", paymentMethod.equals("card") ? "Tarjeta" : "Transferencia");
         data.put("paymentStatus", paymentStatus); data.put("items", orderItems); data.put("subtotal", subtotal);
         data.put("discountAmount", discount); data.put("discountCode", discountCode); data.put("total", total);
+        if (customerUserId != null) data.put("customerUserId", customerUserId.toString());
         data.put("orderNumber", "NX-" + orderId.toString().substring(0, 8).toUpperCase(Locale.ROOT));
         ensureCustomer(customerName, customerEmail, optionalText(input.get("customerPhone")));
         jdbc.update("INSERT INTO business_records (id, resource_code, data, status_code, created_by) VALUES (?, 'orders', ?::jsonb, ?, ?)", orderId, writeJson(data), status, actor);
         syncProjection(orderId, "orders", data, actor);
         if (paymentMethod.equals("transfer")) saveTransferReceipt(orderId, input);
         for (var entry : quantities.entrySet()) changeStock(entry.getKey(), -entry.getValue(), "ORDER", "Reserva del pedido " + data.get("orderNumber"), orderId, actor);
+        if (customerUserId != null) createCustomerNotification(customerUserId, orderId, "ORDER_RECEIVED", "Pedido recibido",
+                "Recibimos " + data.get("orderNumber") + ". " + (paymentMethod.equals("transfer")
+                        ? "Tu comprobante está pendiente de revisión." : "El pago con tarjeta fue simulado."), "order-received:" + orderId);
         return new BusinessRecordResponse(orderId, "orders", data, now, now);
+    }
+
+    @Transactional(readOnly = true)
+    public List<BusinessRecordResponse> customerOrders(UUID customerUserId) {
+        return jdbc.query("""
+                SELECT b.id, b.resource_code, b.data::text AS data, b.created_at, b.updated_at
+                FROM business_records b JOIN commerce_orders o ON o.record_id = b.id
+                WHERE b.resource_code = 'orders' AND o.customer_user_id = ?
+                ORDER BY o.order_date DESC
+                """, (rs, row) -> new BusinessRecordResponse(rs.getObject("id", UUID.class), rs.getString("resource_code"),
+                readMap(rs.getString("data")), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()), customerUserId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> customerWishlist(UUID customerUserId) {
+        return jdbc.query("""
+                SELECT p.record_id, p.name, p.category_name, p.price, p.compare_at, p.stock, p.status, p.image_url, p.description, p.featured, p.sku
+                FROM customer_wishlist_items w JOIN products p ON p.record_id = w.product_record_id
+                WHERE w.customer_user_id = ? AND p.status NOT IN ('Inactivo', 'Inactive', 'DISABLED')
+                ORDER BY w.created_at DESC
+                """, (rs, row) -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", rs.getObject("record_id", UUID.class).toString()); item.put("name", rs.getString("name"));
+            item.put("category", rs.getString("category_name")); item.put("price", rs.getBigDecimal("price"));
+            item.put("compareAt", rs.getBigDecimal("compare_at")); item.put("stock", rs.getInt("stock"));
+            item.put("status", rs.getString("status")); item.put("image", rs.getString("image_url"));
+            item.put("description", rs.getString("description")); item.put("featured", rs.getBoolean("featured")); item.put("sku", rs.getString("sku"));
+            return item;
+        }, customerUserId);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> customerNotifications(UUID customerUserId) {
+        List<Map<String, Object>> items = jdbc.query("""
+                SELECT id, order_record_id, notification_type, title, message, read_at, created_at
+                FROM customer_notifications WHERE customer_user_id = ?
+                ORDER BY created_at DESC LIMIT 40
+                """, (rs, row) -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", rs.getObject("id", UUID.class).toString());
+            UUID orderId = rs.getObject("order_record_id", UUID.class);
+            item.put("orderId", orderId == null ? null : orderId.toString());
+            item.put("type", rs.getString("notification_type")); item.put("title", rs.getString("title"));
+            item.put("message", rs.getString("message")); item.put("read", rs.getTimestamp("read_at") != null);
+            item.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
+            return item;
+        }, customerUserId);
+        long unreadCount = jdbc.queryForObject("SELECT COUNT(*) FROM customer_notifications WHERE customer_user_id = ? AND read_at IS NULL", Long.class, customerUserId);
+        return Map.of("items", items, "unreadCount", unreadCount);
+    }
+
+    @Transactional
+    public void markCustomerNotificationRead(UUID customerUserId, UUID notificationId) {
+        jdbc.update("UPDATE customer_notifications SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = ? AND customer_user_id = ?", notificationId, customerUserId);
+    }
+
+    @Transactional
+    public void markAllCustomerNotificationsRead(UUID customerUserId) {
+        jdbc.update("UPDATE customer_notifications SET read_at = CURRENT_TIMESTAMP WHERE customer_user_id = ? AND read_at IS NULL", customerUserId);
+    }
+
+    private void createOrderStatusNotification(UUID orderId, String status) {
+        UUID customerUserId = orderCustomerId(orderId);
+        if (customerUserId == null) return;
+        String number = orderNumber(orderId);
+        String message = switch (status) {
+            case "En preparación" -> "Tu pedido " + number + " está en preparación.";
+            case "Completado" -> "Tu pedido " + number + " fue completado.";
+            case "Cancelado" -> "El pedido " + number + " fue cancelado.";
+            default -> "El estado de tu pedido " + number + " cambió a " + status + ".";
+        };
+        createCustomerNotification(customerUserId, orderId, "ORDER_STATUS", "Actualización de tu pedido", message,
+                "order-status:" + orderId + ":" + status);
+    }
+
+    private UUID orderCustomerId(UUID orderId) {
+        return jdbc.query("SELECT customer_user_id FROM commerce_orders WHERE record_id = ?",
+                rs -> rs.next() ? rs.getObject(1, UUID.class) : null, orderId);
+    }
+
+    private String orderNumber(UUID orderId) {
+        String number = jdbc.query("SELECT data ->> 'orderNumber' FROM business_records WHERE id = ?",
+                rs -> rs.next() ? rs.getString(1) : null, orderId);
+        return number == null || number.isBlank() ? "#" + orderId.toString().substring(0, 8).toUpperCase(Locale.ROOT) : number;
+    }
+
+    private void createCustomerNotification(UUID customerUserId, UUID orderId, String type, String title,
+                                            String message, String dedupeKey) {
+        jdbc.update("""
+                INSERT INTO customer_notifications (customer_user_id, order_record_id, notification_type, title, message, dedupe_key)
+                VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING
+                """, customerUserId, orderId, type, title, message, dedupeKey);
+    }
+
+    @Transactional
+    public void addCustomerWishlistItem(UUID customerUserId, UUID productId) {
+        Boolean active = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM products WHERE record_id = ? AND status NOT IN ('Inactivo', 'Inactive', 'DISABLED'))", Boolean.class, productId);
+        if (!Boolean.TRUE.equals(active)) throw missing();
+        jdbc.update("INSERT INTO customer_wishlist_items (customer_user_id, product_record_id) VALUES (?, ?) ON CONFLICT DO NOTHING", customerUserId, productId);
+    }
+
+    @Transactional
+    public void removeCustomerWishlistItem(UUID customerUserId, UUID productId) {
+        jdbc.update("DELETE FROM customer_wishlist_items WHERE customer_user_id = ? AND product_record_id = ?", customerUserId, productId);
     }
 
     private void saveTransferReceipt(UUID orderId, Map<String, Object> input) {
@@ -413,6 +531,15 @@ public class BusinessRecordService {
         syncOrder(id, data);
         jdbc.update("UPDATE transfer_receipts SET status = ?, reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ? WHERE order_record_id = ?",
                 status, actorId(), id);
+        UUID customerUserId = orderCustomerId(id);
+        if (customerUserId != null) {
+            boolean approved = status.equals("Aprobada");
+            createCustomerNotification(customerUserId, id, approved ? "PAYMENT_APPROVED" : "PAYMENT_REJECTED",
+                    approved ? "Transferencia aprobada" : "Transferencia rechazada",
+                    approved ? "Tu pago para el pedido " + text(data.get("orderNumber")) + " fue aprobado. Ya estamos preparando tu compra."
+                            : "No pudimos aprobar el comprobante del pedido " + text(data.get("orderNumber")) + ". Revisa los detalles del pedido y contacta a la tienda si necesitas ayuda.",
+                    "payment-review:" + id + ":" + status);
+        }
         return Map.of("id", id, "status", status);
     }
 
@@ -889,12 +1016,12 @@ public class BusinessRecordService {
         String paymentStatus = defaultText(data.get("paymentStatus"), status.equals("Completado") ? "approved" : "pending_verification");
         BigDecimal total = decimal(field(data, "total", "Total"));
         jdbc.update("""
-                INSERT INTO commerce_orders (record_id, customer_name, customer_email, order_date, status, payment_method, payment_status, total, customer_phone, delivery_address, subtotal, discount_amount, discount_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET customer_name = EXCLUDED.customer_name,
+                INSERT INTO commerce_orders (record_id, customer_user_id, customer_name, customer_email, order_date, status, payment_method, payment_status, total, customer_phone, delivery_address, subtotal, discount_amount, discount_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET customer_user_id = COALESCE(EXCLUDED.customer_user_id, commerce_orders.customer_user_id), customer_name = EXCLUDED.customer_name,
                 customer_email = EXCLUDED.customer_email, status = EXCLUDED.status, payment_method = EXCLUDED.payment_method,
                 payment_status = EXCLUDED.payment_status, total = EXCLUDED.total, customer_phone = EXCLUDED.customer_phone,
                 delivery_address = EXCLUDED.delivery_address
-                """, id, defaultText(field(data, "customer", "Cliente"), "Cliente"), optionalText(data.get("customerEmail")),
+                """, id, data.get("customerUserId") == null ? null : parseUuid(data.get("customerUserId")), defaultText(field(data, "customer", "Cliente"), "Cliente"), optionalText(data.get("customerEmail")),
                 parseInstant(field(data, "date", "Fecha")), status, payment, paymentStatus, total,
                 optionalText(data.get("customerPhone")), optionalText(data.get("address")),
                 data.containsKey("subtotal") ? decimal(data.get("subtotal")) : total,
