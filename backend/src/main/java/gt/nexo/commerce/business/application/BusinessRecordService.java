@@ -28,7 +28,7 @@ import tools.jackson.databind.ObjectMapper;
 public class BusinessRecordService {
     private static final Set<String> RESOURCES = Set.of(
             "products", "brands", "categories", "customers", "suppliers", "orders", "purchases",
-            "sales", "accounting", "transfers", "payments", "invoices", "reports", "settings",
+            "sales", "accounting", "transfers", "payments", "invoices", "settings",
             "profile", "roles-permissions", "inventory-alerts");
 
     private final JdbcTemplate jdbc;
@@ -82,7 +82,6 @@ public class BusinessRecordService {
         if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);
-        if (normalized.equals("reports")) data = buildReport(data, actorId());
         validate(normalized, data);
         ensureUnique(normalized, data, null);
         UUID id = normalized.equals("customers") ? customerRecordId(data) : UUID.randomUUID();
@@ -112,7 +111,7 @@ public class BusinessRecordService {
     public BusinessRecordResponse update(String resource, UUID id, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "edit");
-        if (Set.of("reports", "transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
+        if (Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este registro no admite edición directa.");
         Map<String, Object> data = clean(input);
         ProductImageService.ImageUpload productImage = normalized.equals("products") ? decodeProductImage(data) : null;
@@ -179,7 +178,7 @@ public class BusinessRecordService {
     public void delete(String resource, UUID id) {
         String normalized = normalize(resource);
         authorize(normalized, "delete");
-        if (Set.of("orders", "purchases", "sales", "accounting", "reports", "transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
+        if (Set.of("orders", "purchases", "sales", "accounting", "transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw conflict("El historial de esta operación no se puede eliminar.");
         Map<String, Object> old = lockedRecord(normalized, id);
         if (normalized.equals("products") && jdbc.queryForObject(
@@ -988,38 +987,6 @@ public class BusinessRecordService {
         } + ".");
     }
 
-    private Map<String, Object> buildReport(Map<String, Object> input, UUID actor) {
-        String name = defaultText(field(input, "name", "Reporte"), "Ventas");
-        String period = defaultText(field(input, "period", "Periodo"), "Últimos 30 días");
-        LocalDate end = LocalDate.now(ZoneOffset.UTC);
-        LocalDate start = switch (period.toLowerCase(Locale.ROOT)) {
-            case "últimos 7 días", "ultimos 7 dias", "7d" -> end.minusDays(6);
-            case "este año", "este ano", "year" -> end.withDayOfYear(1);
-            case "hoy", "today" -> end;
-            default -> end.minusDays(29);
-        };
-        java.sql.Timestamp from = java.sql.Timestamp.from(start.atStartOfDay().toInstant(ZoneOffset.UTC));
-        java.sql.Timestamp until = java.sql.Timestamp.from(end.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC));
-        Map<String, Object> metrics = new LinkedHashMap<>();
-        String lowerName = name.toLowerCase(Locale.ROOT);
-        if (lowerName.contains("inventario") || lowerName.contains("stock")) {
-            metrics.putAll(inventorySummaryWithoutAuthorization());
-            metrics.put("estimatedRetailValue", jdbc.queryForObject("SELECT COALESCE(SUM(price * stock), 0) FROM products WHERE status NOT IN ('Inactivo', 'Inactive', 'DISABLED')", BigDecimal.class));
-        } else if (lowerName.contains("cliente")) {
-            metrics.put("customers", jdbc.queryForObject("SELECT COUNT(*) FROM customers WHERE created_at >= ? AND created_at < ?", Long.class, from, until));
-            metrics.put("orders", jdbc.queryForObject("SELECT COUNT(*) FROM commerce_orders WHERE order_date >= ? AND order_date < ? AND status <> 'Cancelado'", Long.class, from, until));
-        } else {
-            metrics.put("inPersonSales", jdbc.queryForObject("SELECT COALESCE(SUM(total), 0) FROM in_person_sales WHERE sale_date >= ? AND sale_date < ? AND status <> 'Cancelado'", BigDecimal.class, from, until));
-            metrics.put("onlineOrders", jdbc.queryForObject("SELECT COUNT(*) FROM commerce_orders WHERE order_date >= ? AND order_date < ? AND status <> 'Cancelado'", Long.class, from, until));
-            metrics.put("onlineSales", jdbc.queryForObject("SELECT COALESCE(SUM(total), 0) FROM commerce_orders WHERE order_date >= ? AND order_date < ? AND status <> 'Cancelado'", BigDecimal.class, from, until));
-        }
-        Map<String, Object> report = new LinkedHashMap<>();
-        report.put("name", name); report.put("period", period); report.put("generatedBy", principalName());
-        report.put("date", Instant.now().toString()); report.put("status", "Completado"); report.put("metrics", metrics);
-        if (actor != null) report.put("generatedById", actor.toString());
-        return report;
-    }
-
     private Map<String, Object> lockedRecord(String resource, UUID id) {
         return jdbc.query("SELECT data::text FROM business_records WHERE id = ? AND resource_code = ? FOR UPDATE", rs -> {
             if (!rs.next()) throw missing();
@@ -1134,7 +1101,6 @@ public class BusinessRecordService {
             case "brands", "categories", "products" -> "products";
             case "purchases" -> "inventory";
             case "accounting" -> "accounting";
-            case "reports" -> "reports";
             case "payments", "transfers", "invoices", "orders" -> "orders";
             case "profile", "settings" -> "settings";
             case "roles-permissions" -> "users";

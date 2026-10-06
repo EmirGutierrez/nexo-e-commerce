@@ -309,7 +309,6 @@ function toDomainData(section: string, row: AdminTableRecord): JsonRecord {
   }
   if (section === 'users') return {};
   if (section === 'roles-permissions') return { name: row.Nombre, users: row.Usuarios ?? 0, permissions: row.Permisos || '', status: row.Estado || 'Activo' };
-  if (section === 'reports') return { name: row.Reporte, period: row.Periodo };
   if (section === 'settings' || section === 'profile') return { name: row.Configuración, description: row.Descripción, status: row.Estado };
   return Object.fromEntries(Object.entries(row).map(([key, item]) => [key, item]));
 }
@@ -322,7 +321,6 @@ function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
   };
   if (section === 'categories') return { Nombre: stringValue(data, 'name'), Productos: numberValue(data, 'products'), 'Ventas del mes': numberValue(data, 'monthlySales'), Estado: stringValue(data, 'status') };
   if (section === 'customers') return { Nombre: stringValue(data, 'name'), Correo: stringValue(data, 'email'), Pedidos: numberValue(data, 'orders'), 'Total comprado': numberValue(data, 'totalPurchased'), Estado: stringValue(data, 'status') };
-  if (section === 'reports') return { Reporte: stringValue(data, 'name'), Periodo: stringValue(data, 'period'), 'Generado por': stringValue(data, 'generatedBy'), Fecha: stringValue(data, 'date').slice(0, 10), Estado: stringValue(data, 'status') };
   if (section === 'orders' || section === 'sales') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };
   if (section === 'transfers' || section === 'payments') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Valor: numberValue(data, 'total'), 'Estado de pago': stringValue(data, 'paymentStatus') };
   if (section === 'invoices') return { Referencia: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };

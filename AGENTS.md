@@ -60,6 +60,7 @@ Las rutas públicas están bajo `src/app/(public)`: `/`, `/store`, `/product/[id
 - El checkout simula tarjeta y transferencia. La transferencia guarda el comprobante en PostgreSQL y el personal autorizado lo revisa en `/admin/transfers`; no se inicia ningún cobro real.
 - Solo el carrito y los productos vistos recientemente son preferencias locales. Los pedidos, promociones y comprobantes son compartidos desde PostgreSQL.
 - El acceso de personal y clientes inicia/restaura la sesión mediante el BFF y Spring.
+- El panel privado ya no incluye Reportes: la navegación no lo muestra y `/admin/reports` redirige al resumen. El backend rechaza el recurso y Flyway elimina sus permisos y registros existentes.
 
 Claves locales relevantes: `nexo.cart.v1` y `nexo-recent-products-v1`. El checkout usa `sessionStorage` solo para pasar temporalmente el código aplicado y el resultado de confirmación entre pantallas.
 
