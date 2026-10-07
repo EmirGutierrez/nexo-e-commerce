@@ -11,7 +11,7 @@ export const permissionModules: { id: PermissionModule; label: string; actions: 
   { id: 'customers', label: 'Clientes', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'suppliers', label: 'Proveedores', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'reports', label: 'Reportes', actions: ['view', 'create'] },
-  { id: 'accounting', label: 'Contabilidad', actions: ['view', 'create', 'edit'] },
+  { id: 'accounting', label: 'Ingresos y egresos', actions: ['view', 'create', 'edit'] },
   { id: 'promotions', label: 'Promociones', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'settings', label: 'Configuración', actions: ['view', 'edit'] },
   { id: 'users', label: 'Usuarios y roles', actions: ['view', 'create', 'edit', 'delete'] },
