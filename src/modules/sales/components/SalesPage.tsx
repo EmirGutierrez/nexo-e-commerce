@@ -189,8 +189,8 @@ export default function SalesPage() {
     <div className="pos-layout">
       <section className="pos-catalog panel" aria-label="Buscar productos">
         <div className="pos-section-heading"><div><span className="eyebrow">Catálogo</span><h2>Agrega productos</h2><p>Escanea el SKU o escribe el nombre del producto.</p></div><span className="pos-product-count">{availableProducts.length} disponibles</span></div>
-        <form className="pos-search-form" onSubmit={submitProductSearch} role="search"><Barcode size={20} aria-hidden="true" /><label className="sr-only" htmlFor="pos-product-search">Código SKU o nombre del producto</label><input id="pos-product-search" ref={searchRef} value={search} onChange={(event) => { setSearch(event.target.value); setCatalogError(''); }} placeholder="Escanea un código o busca un producto…" autoComplete="off" /><button type="submit" aria-label="Agregar producto buscado"><Plus size={18} /><span>Agregar</span></button></form>
-        <div className="pos-search-hint"><span>Usa el lector de código y presiona Enter</span><kbd>↵</kbd></div>
+        <form className="pos-search-form" onSubmit={submitProductSearch} role="search"><Barcode size={20} aria-hidden="true" /><label className="sr-only" htmlFor="pos-product-search">Buscar por código SKU o nombre del producto</label><input id="pos-product-search" ref={searchRef} value={search} onChange={(event) => { setSearch(event.target.value); setCatalogError(''); }} placeholder="Buscar por código o nombre del producto" autoComplete="off" /><kbd aria-hidden="true">↵</kbd></form>
+        <div className="pos-search-hint"><span>Escanea el SKU o escribe el nombre y presiona Enter para agregar.</span></div>
         {catalogError && <div className="sale-form-error" role="alert">{catalogError}</div>}
         {catalogLoading ? <div className="pos-catalog-state">Cargando catálogo…</div> : filteredProducts.length ? <div className="pos-product-results" aria-live="polite">{filteredProducts.map((product) => {
           const inCart = cart.find((item) => item.productId === product.id)?.quantity || 0;
