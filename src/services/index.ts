@@ -98,8 +98,14 @@ export const orderService = {
 function mapOrder(record: ApiRecord): Order {
   const data = record.data;
   const rawPayment = stringValue(data, 'payment', 'paymentMethod');
+  const itemDetails = Array.isArray(data.items) ? data.items.map((raw) => {
+    const item = raw as JsonRecord;
+    const quantity = numberValue(item, 'quantity');
+    const unitPrice = numberValue(item, 'unitPrice');
+    return { productId: stringValue(item, 'productId'), productName: stringValue(item, 'productName'), sku: stringValue(item, 'sku'), quantity, unitPrice, subtotal: numberValue(item, 'subtotal') || quantity * unitPrice };
+  }) : [];
   return { id: record.id, customer: stringValue(data, 'customer', 'Cliente'),
-    date: stringValue(data, 'date', 'Fecha').slice(0, 10), items: Array.isArray(data.items) ? data.items.length : numberValue(data, 'itemsCount'),
+    date: stringValue(data, 'date', 'Fecha').slice(0, 10), items: itemDetails.length || numberValue(data, 'itemsCount'), itemDetails,
     total: numberValue(data, 'total', 'Total'),
     status: stringValue(data, 'status', 'Estado') as Order['status'],
     payment: rawPayment === 'transfer' || rawPayment === 'Transferencia' ? 'Transferencia' : 'Tarjeta' };
@@ -198,7 +204,7 @@ export const salesService = {
   },
   listInPerson: async (): Promise<InPersonSale[]> => (await business.list('sales')).map((record) => {
     const data = record.data;
-    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), paymentMethod: stringValue(data, 'paymentMethod') as PaymentMethod,
+    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as PaymentMethod,
       paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
   }),
   createInPerson: async (input: { seller: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[] }): Promise<InPersonSale> => {

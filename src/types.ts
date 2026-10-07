@@ -92,9 +92,19 @@ export interface Order {
   customer: string;
   date: string;
   items: number;
+  itemDetails?: OrderItem[];
   total: number;
   status: 'Completado' | 'En preparación' | 'Pendiente de pago' | 'Cancelado';
   payment: 'Tarjeta' | 'Transferencia';
+}
+
+export interface OrderItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
 }
 
 export interface InPersonSaleItem {
@@ -110,6 +120,8 @@ export interface InPersonSale {
   id: string;
   date: string;
   seller: string;
+  customerName?: string;
+  nit?: string;
   paymentMethod: PaymentMethod;
   paymentStatus: 'Simulada' | 'Pendiente de verificación';
   items: InPersonSaleItem[];
