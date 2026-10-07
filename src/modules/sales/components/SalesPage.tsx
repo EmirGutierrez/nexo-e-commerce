@@ -1,138 +1,237 @@
-import { useEffect, useMemo, useState } from 'react';
-import { ArrowDownToLine, Check, CreditCard, Eye, Plus, Printer, ReceiptText, Trash2, X } from 'lucide-react';
+'use client';
+
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Banknote, Barcode, Check, ChevronDown, CreditCard, Minus, Plus, Printer, Search, ShoppingBag, Trash2, UserRound, X } from 'lucide-react';
 import { formatQ } from '../../../data/mockData';
-import { orderService, productInventoryService, salesService } from '../../../services';
+import { productInventoryService } from '../../../services';
 import { useApp } from '../../../contexts/AppContext';
 import { roleService } from '../../../services/roleService';
-import type { InPersonSale, Order, PaymentMethod, Product } from '../../../types';
+import type { Product } from '../../../types';
 
-type SaleDraftItem = { productId: string; quantity: number };
+type PosItem = { productId: string; name: string; sku: string; unitPrice: number; quantity: number; stock: number; image: string };
+type LocalSale = {
+  id: string;
+  date: string;
+  seller: string;
+  customerName: string;
+  nit: string;
+  paymentMethod: 'cash' | 'card';
+  total: number;
+  amountReceived?: number;
+  change?: number;
+  items: PosItem[];
+};
+const sessionSalesKey = 'nexo.pos.sales.v1';
+const MAX_RESULTS = 8;
 
 export default function SalesPage() {
-  const { user, role, paymentMethods, notifyAdmin, reportLowStock } = useApp();
+  const { user, role, paymentMethods } = useApp();
   const canCreateSale = Boolean(role && roleService.can(role, 'sales', 'create'));
-  const canApproveOrders = Boolean(role && roleService.can(role, 'orders', 'approve'));
-  const [sales, setSales] = useState<InPersonSale[]>([]);
   const [catalog, setCatalog] = useState<Product[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [showForm, setShowForm] = useState(false);
-  const [draftItems, setDraftItems] = useState<SaleDraftItem[]>([]);
-  const [payment, setPayment] = useState<PaymentMethod>('card');
-  const [busy, setBusy] = useState(false);
-  const [formError, setFormError] = useState('');
-  const [feedback, setFeedback] = useState('');
-  const [selectedSale, setSelectedSale] = useState<InPersonSale | null>(null);
-  const [webOrders, setWebOrders] = useState<Order[]>([]);
-  const [confirmOrderCancel, setConfirmOrderCancel] = useState<Order | null>(null);
-  const [orderError, setOrderError] = useState('');
-  const availableMethods = (['card', 'transfer'] as const).filter((method) => paymentMethods[method]);
+  const [catalogLoading, setCatalogLoading] = useState(true);
+  const [catalogError, setCatalogError] = useState('');
+  const [search, setSearch] = useState('');
+  const [cart, setCart] = useState<PosItem[]>([]);
+  const [stage, setStage] = useState<'sale' | 'checkout'>('sale');
+  const [customerName, setCustomerName] = useState('');
+  const [nit, setNit] = useState('');
+  const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
+  const [amountReceived, setAmountReceived] = useState('');
+  const [checkoutError, setCheckoutError] = useState('');
+  const [receipt, setReceipt] = useState<LocalSale | null>(null);
+  const [localSales, setLocalSales] = useState<LocalSale[]>([]);
+  const [sessionSalesLoaded, setSessionSalesLoaded] = useState(false);
+  const [historyError, setHistoryError] = useState('');
+  const [saving, setSaving] = useState(false);
+  const searchRef = useRef<HTMLInputElement>(null);
+  const nitRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
-    Promise.all([salesService.listInPerson(), productInventoryService.list()])
-      .then(([saleRows, products]) => { setSales(saleRows); setCatalog(products); })
-      .finally(() => setLoading(false));
-    orderService.list().then(setWebOrders).catch((cause) => setOrderError(cause instanceof Error ? cause.message : 'No se pudieron cargar los pedidos desde PostgreSQL.'));
+    let active = true;
+    productInventoryService.list()
+      .then((rows) => { if (active) setCatalog(rows); })
+      .catch((cause) => { if (active) setCatalogError(cause instanceof Error ? cause.message : 'No se pudo cargar el catálogo.'); })
+      .finally(() => { if (active) setCatalogLoading(false); });
+    try {
+      const saved = sessionStorage.getItem(sessionSalesKey);
+      const parsed: unknown = saved ? JSON.parse(saved) : [];
+      if (active && Array.isArray(parsed)) setLocalSales(parsed as LocalSale[]);
+    } catch {
+      if (active) setHistoryError('No se pudieron recuperar las ventas temporales de esta pestaña.');
+    } finally {
+      if (active) setSessionSalesLoaded(true);
+    }
+    return () => { active = false; };
   }, []);
 
   useEffect(() => {
-    if (!paymentMethods[payment]) setPayment(availableMethods[0] || 'card');
-  }, [paymentMethods, payment, availableMethods]);
+    if (!sessionSalesLoaded) return;
+    try { sessionStorage.setItem(sessionSalesKey, JSON.stringify(localSales)); }
+    catch { setHistoryError('No se pudo guardar la venta temporal en esta pestaña.'); }
+  }, [localSales, sessionSalesLoaded]);
 
   useEffect(() => {
-    if (!showForm && !selectedSale && !confirmOrderCancel) return;
-    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape' && !busy) { setShowForm(false); setSelectedSale(null); setConfirmOrderCancel(null); } };
+    if (stage === 'sale' && canCreateSale) searchRef.current?.focus();
+    if (stage === 'checkout') nitRef.current?.focus();
+  }, [stage, canCreateSale]);
+
+  useEffect(() => {
+    if (!receipt) return;
+    const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') setReceipt(null); };
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
-  }, [showForm, selectedSale, confirmOrderCancel, busy]);
+  }, [receipt]);
 
-  const saveOrderStatus = async (order: Order, nextStatus: Order['status']) => {
-    setOrderError('');
-    try {
-      await orderService.updateStatus(order.id, nextStatus);
-      setWebOrders((current) => current.map((entry) => entry.id === order.id ? { ...entry, status: nextStatus } : entry));
-      setConfirmOrderCancel(null);
-      notifyAdmin({ dedupeKey: `order-status:${order.id}:${nextStatus}:${Date.now()}`, type: nextStatus === 'Cancelado' ? 'warning' : nextStatus === 'Completado' ? 'success' : 'info', title: 'Estado del pedido actualizado', entity: `${order.id} · ${order.customer}`, message: `El estado cambió de “${order.status}” a “${nextStatus}”.`, nextAction: 'Revisar el pedido y continuar su seguimiento.', actionTo: '/admin/sales' });
-    } catch (cause) { setOrderError(cause instanceof Error ? cause.message : 'No se pudo actualizar el estado del pedido.'); }
-  };
-  const applyOrderStatus = (order: Order, nextStatus: Order['status']) => {
-    if (nextStatus === order.status) return;
-    if (nextStatus === 'Cancelado') { setConfirmOrderCancel(order); return; }
-    void saveOrderStatus(order, nextStatus);
+  const availableProducts = useMemo(() => {
+    const sold = new Map<string, number>();
+    localSales.forEach((sale) => sale.items.forEach((item) => sold.set(item.productId, (sold.get(item.productId) || 0) + item.quantity)));
+    return catalog.map((product) => {
+      const stock = Math.max(0, product.stock - (sold.get(product.id) || 0));
+      return { ...product, stock, status: stock === 0 && product.status !== 'Inactivo' ? 'Agotado' as const : stock < 10 && product.status !== 'Inactivo' ? 'Bajo stock' as const : product.status };
+    }).filter((product) => product.status !== 'Inactivo' && product.stock > 0);
+  }, [catalog, localSales]);
+  const filteredProducts = useMemo(() => {
+    const query = search.trim().toLocaleLowerCase('es-GT');
+    if (!query) return availableProducts.slice(0, MAX_RESULTS);
+    return availableProducts.filter((product) => [product.sku, product.name, product.category].some((value) => value.toLocaleLowerCase('es-GT').includes(query))).slice(0, MAX_RESULTS);
+  }, [availableProducts, search]);
+  const total = cart.reduce((sum, item) => sum + item.unitPrice * item.quantity, 0);
+  const paid = Number(amountReceived);
+  const change = Math.max(0, paid - total);
+  const exactMatch = useMemo(() => {
+    const code = search.trim().toLocaleUpperCase('es-GT');
+    return code ? availableProducts.find((product) => product.sku.trim().toLocaleUpperCase('es-GT') === code) : undefined;
+  }, [availableProducts, search]);
+  const saleHistory = useMemo(() => localSales.map((sale) => ({
+    ...sale,
+    local: true as const,
+    paymentLabel: sale.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta',
+  })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [localSales]);
+
+  const addProduct = useCallback((product: Product) => {
+    if (product.status === 'Inactivo' || product.stock < 1) return;
+    setCart((current) => {
+      const existing = current.find((item) => item.productId === product.id);
+      if (existing) return current.map((item) => item.productId === product.id && item.quantity < product.stock ? { ...item, quantity: item.quantity + 1, stock: product.stock } : item);
+      return [...current, { productId: product.id, name: product.name, sku: product.sku, unitPrice: product.price, quantity: 1, stock: product.stock, image: product.image }];
+    });
+    setSearch('');
+    setCheckoutError('');
+    searchRef.current?.focus();
+  }, []);
+
+  const submitProductSearch = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (exactMatch) { addProduct(exactMatch); return; }
+    if (filteredProducts.length === 1) { addProduct(filteredProducts[0]); return; }
+    if (!filteredProducts.length) setCatalogError('No encontramos un producto disponible con ese código o búsqueda.');
   };
 
-  const productById = useMemo(() => new Map(catalog.map((product) => [product.id, product])), [catalog]);
-  const lineSubtotal = (line: SaleDraftItem) => (productById.get(line.productId)?.price || 0) * line.quantity;
-  const total = draftItems.reduce((sum, line) => sum + lineSubtotal(line), 0);
-  const validationMessage = useMemo(() => {
-    if (!draftItems.length) return 'Agrega al menos un producto para continuar.';
-    const totalsByProduct = new Map<string, number>();
-    for (const line of draftItems) {
-      if (!line.productId) return 'Selecciona un producto en cada renglón.';
-      if (!Number.isInteger(line.quantity) || line.quantity < 1) return 'Las cantidades deben ser números enteros mayores que cero.';
-      totalsByProduct.set(line.productId, (totalsByProduct.get(line.productId) || 0) + line.quantity);
+  const setQuantity = (productId: string, requested: number) => {
+    setCart((current) => current.flatMap((item) => {
+      if (item.productId !== productId) return [item];
+      const quantity = Math.min(item.stock, Math.max(0, Math.floor(requested)));
+      return quantity ? [{ ...item, quantity }] : [];
+    }));
+  };
+
+  const openCheckout = () => {
+    if (!cart.length) return;
+    setCheckoutError('');
+    setAmountReceived('');
+    setStage('checkout');
+  };
+
+  const validateCheckout = () => {
+    const cleanNit = nit.trim().toLocaleUpperCase('es-GT');
+    if (cleanNit.length < 2 || cleanNit.length > 20 || !/^[A-Z0-9-]+$/.test(cleanNit)) return 'Ingresa un NIT válido (letras, números o guion).';
+    if (paymentMethod === 'card' && !paymentMethods.card) return 'El pago con tarjeta está desactivado en la configuración.';
+    if (paymentMethod === 'cash' && (!Number.isFinite(paid) || paid < total)) return 'El monto recibido debe cubrir el total de la venta.';
+    for (const item of cart) {
+      const current = availableProducts.find((product) => product.id === item.productId);
+      if (!current || current.status === 'Inactivo' || item.quantity > current.stock) return `No hay existencias suficientes de ${item.name}. Actualiza el carrito.`;
     }
-    for (const [productId, quantity] of totalsByProduct) {
-      const product = productById.get(productId);
-      if (!product || product.status === 'Inactivo' || quantity > product.stock) return `Stock insuficiente o producto inactivo: ${product?.name || 'producto'}.`;
-    }
-    if (!paymentMethods[payment]) return 'Selecciona un método de pago activo.';
     return '';
-  }, [draftItems, productById, paymentMethods, payment]);
-
-  const openForm = () => {
-    setDraftItems([]); setPayment(availableMethods[0] || 'card'); setFormError(''); setFeedback(''); setShowForm(true);
-  };
-  const addLine = () => {
-    const nextProduct = catalog.find((product) => product.status !== 'Inactivo' && product.stock > 0 && !draftItems.some((line) => line.productId === product.id));
-    if (!nextProduct) { setFormError('No hay más productos con stock disponibles para agregar.'); return; }
-    setFormError(''); setDraftItems((current) => [...current, { productId: nextProduct.id, quantity: 1 }]);
-  };
-  const updateLine = (index: number, patch: Partial<SaleDraftItem>) => setDraftItems((current) => current.map((line, row) => row === index ? { ...line, ...patch } : line));
-  const removeLine = (index: number) => setDraftItems((current) => current.filter((_, row) => row !== index));
-
-  const submitSale = async (event: React.FormEvent) => {
-    event.preventDefault(); setFormError('');
-    if (validationMessage) { setFormError(validationMessage); return; }
-    setBusy(true);
-    try {
-      const sale = await salesService.createInPerson({ seller: user?.name || '', paymentMethod: payment, items: draftItems });
-      const [updatedProducts, updatedSales] = await Promise.all([productInventoryService.list(), salesService.listInPerson()]);
-      reportLowStock(updatedProducts);
-      setCatalog(updatedProducts); setSales(updatedSales); setShowForm(false); setSelectedSale(sale);
-      setFeedback(`Venta ${sale.id} registrada. Se generó su comprobante interno.`);
-    } catch (error) {
-      setFormError(error instanceof Error ? error.message : 'No se pudo registrar la venta. Revisa el inventario e inténtalo de nuevo.');
-    } finally { setBusy(false); }
   };
 
-  const physicalTotal = sales.reduce((sum, sale) => sum + sale.total, 0);
-  return <div className="sales-page">
-    <div className="admin-page-heading"><div><span className="eyebrow">Ventas presenciales · PostgreSQL</span><h1>Ventas</h1><p>Registra compras realizadas en el negocio. Los pedidos web y las compras a proveedores se muestran por separado.</p></div><div className="heading-actions">{canCreateSale && <button className="button button-primary" onClick={openForm}><Plus size={17} /> Registrar venta presencial</button>}</div></div>
-    {feedback && <div className="sale-feedback" role="status">{feedback}<button type="button" aria-label="Cerrar mensaje" onClick={() => setFeedback('')}><X size={15} /></button></div>}
-    <div className="sales-stats"><article><span>Ventas presenciales</span><strong>{sales.length}</strong><small>Registradas en PostgreSQL</small></article><article><span>Total vendido</span><strong>{formatQ(physicalTotal)}</strong><small>Solo ventas presenciales</small></article><article><span>Pedidos web</span><strong>{webOrders.length}</strong><small>Historial persistente</small></article></div>
-    <section className="panel sales-panel"><div className="panel-heading"><div><h2>Historial de ventas presenciales</h2><span>{sales.length} comprobantes internos</span></div></div>
-      {loading ? <div className="sales-empty">Cargando ventas…</div> : sales.length ? <div className="data-table sales-table"><div className="table-head"><span>Venta</span><span>Fecha</span><span>Vendedor</span><span>Productos</span><span>Pago</span><span>Total</span><span>Detalle</span></div>{sales.map((sale) => <div className="table-row" key={sale.id}><strong>{sale.id}</strong><span>{new Date(sale.date).toLocaleString('es-GT')}</span><span>{sale.seller}</span><span>{sale.items.reduce((sum, item) => sum + item.quantity, 0)}</span><span className="sale-payment-status">{sale.paymentStatus}</span><strong>{formatQ(sale.total)}</strong><div className="table-actions"><button type="button" className="icon-button" title="Ver comprobante" aria-label={`Ver venta ${sale.id}`} onClick={() => setSelectedSale(sale)}><Eye size={15} /></button></div></div>)}</div> : <div className="sales-empty"><ReceiptText size={30} /><strong>Aún no hay ventas presenciales</strong><span>Las ventas registradas aparecerán aquí y permanecerán guardadas en PostgreSQL.</span>{canCreateSale && <button className="button button-outline" onClick={openForm}><Plus size={15} /> Registrar venta</button>}</div>}
+  const completeSale = (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    const error = validateCheckout();
+    if (error) { setCheckoutError(error); return; }
+    setSaving(true);
+    const sale: LocalSale = {
+      id: `POS-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`,
+      date: new Date().toISOString(),
+      seller: user?.name || 'Personal',
+      customerName: customerName.trim() || 'Cliente',
+      nit: nit.trim().toLocaleUpperCase('es-GT'),
+      paymentMethod,
+      total,
+      ...(paymentMethod === 'cash' ? { amountReceived: paid, change } : {}),
+      items: cart.map((item) => ({ ...item })),
+    };
+    setLocalSales((current) => [sale, ...current]);
+    setReceipt(sale);
+    setCart([]);
+    setStage('sale');
+    setCustomerName(''); setNit(''); setPaymentMethod('cash'); setAmountReceived(''); setSearch(''); setCheckoutError('');
+    setSaving(false);
+  };
+
+  const closeReceipt = () => { setReceipt(null); window.setTimeout(() => searchRef.current?.focus(), 0); };
+  const changePaymentMethod = (method: 'cash' | 'card') => { setPaymentMethod(method); setCheckoutError(''); };
+
+  if (!canCreateSale) return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Punto de venta</span><h1>Ventas</h1><p>Tu rol no tiene permiso para registrar ventas presenciales.</p></div></div></div>;
+
+  return <div className="sales-page pos-page">
+    <div className="admin-page-heading pos-heading"><div><span className="eyebrow"><ShoppingBag size={14} /> Punto de venta</span><h1>Nueva venta</h1><p>Busca por código o nombre, agrega productos y cobra en mostrador.</p></div><div className="pos-seller"><span>Atiende</span><strong>{user?.name || 'Personal'}</strong></div></div>
+    <div className="pos-demo-notice" role="note"><span className="pos-demo-dot" /><p><strong>Modo de demostración:</strong> estas ventas y existencias son temporales en esta pestaña. No se envían a PostgreSQL ni se procesa ningún cobro.</p></div>
+    <div className="pos-layout">
+      <section className="pos-catalog panel" aria-label="Buscar productos">
+        <div className="pos-section-heading"><div><span className="eyebrow">Catálogo</span><h2>Agrega productos</h2><p>Escanea el SKU o escribe el nombre del producto.</p></div><span className="pos-product-count">{availableProducts.length} disponibles</span></div>
+        <form className="pos-search-form" onSubmit={submitProductSearch} role="search"><Barcode size={20} aria-hidden="true" /><label className="sr-only" htmlFor="pos-product-search">Código SKU o nombre del producto</label><input id="pos-product-search" ref={searchRef} value={search} onChange={(event) => { setSearch(event.target.value); setCatalogError(''); }} placeholder="Escanea un código o busca un producto…" autoComplete="off" /><button type="submit" aria-label="Agregar producto buscado"><Plus size={18} /><span>Agregar</span></button></form>
+        <div className="pos-search-hint"><span>Usa el lector de código y presiona Enter</span><kbd>↵</kbd></div>
+        {catalogError && <div className="sale-form-error" role="alert">{catalogError}</div>}
+        {catalogLoading ? <div className="pos-catalog-state">Cargando catálogo…</div> : filteredProducts.length ? <div className="pos-product-results" aria-live="polite">{filteredProducts.map((product) => {
+          const inCart = cart.find((item) => item.productId === product.id)?.quantity || 0;
+          return <button type="button" className="pos-product-option" key={product.id} onClick={() => addProduct(product)} aria-label={`Agregar ${product.name}, ${formatQ(product.price)}, SKU ${product.sku}`}>
+            <span className="pos-product-thumb">{product.image ? <img src={product.image} alt="" loading="lazy" /> : <ShoppingBag size={17} />}</span><span className="pos-product-description"><strong>{product.name}</strong><small>SKU {product.sku} · {product.stock} disponibles</small></span><span className="pos-product-price">{formatQ(product.price)}</span>{inCart > 0 ? <span className="pos-product-in-cart">{inCart} en cuenta</span> : <span className="pos-product-add"><Plus size={17} /></span>}
+          </button>;
+        })}</div> : <div className="pos-catalog-state"><Search size={21} /><strong>{search ? 'Sin resultados' : 'Catálogo vacío'}</strong><span>{search ? 'Prueba otro código o término de búsqueda.' : 'No hay productos disponibles para vender.'}</span></div>}
+      </section>
+
+      <aside className="pos-ticket panel" aria-label="Cuenta de la venta">
+        <div className="pos-ticket-heading"><div><span className="eyebrow">Cuenta actual</span><h2>Detalle de venta</h2></div><span className="pos-ticket-count">{cart.reduce((sum, item) => sum + item.quantity, 0)} uds.</span></div>
+        {cart.length ? <div className="pos-cart-list">{cart.map((item) => <article className="pos-cart-item" key={item.productId}>
+          <div className="pos-cart-item-top"><div><strong>{item.name}</strong><small>SKU {item.sku} · {formatQ(item.unitPrice)} c/u</small></div><button type="button" className="pos-remove-item" aria-label={`Eliminar ${item.name} de la cuenta`} title="Eliminar producto" onClick={() => setQuantity(item.productId, 0)}><Trash2 size={16} /></button></div>
+          <div className="pos-cart-item-bottom"><div className="pos-quantity-control"><button type="button" aria-label={`Restar una unidad de ${item.name}`} disabled={item.quantity <= 1} onClick={() => setQuantity(item.productId, item.quantity - 1)}><Minus size={13} /></button><label><span className="sr-only">Cantidad de {item.name}</span><input type="number" min="1" max={item.stock} step="1" value={item.quantity} onChange={(event) => setQuantity(item.productId, Number(event.target.value))} /></label><button type="button" aria-label={`Agregar una unidad de ${item.name}`} disabled={item.quantity >= item.stock} onClick={() => setQuantity(item.productId, item.quantity + 1)}><Plus size={13} /></button></div><strong>{formatQ(item.unitPrice * item.quantity)}</strong></div>
+        </article>)}</div> : <div className="pos-cart-empty"><span><ShoppingBag size={22} /></span><strong>Tu cuenta está vacía</strong><p>Escanea o busca un producto para comenzar la venta.</p></div>}
+        <div className="pos-total-row"><span>Total</span><strong>{formatQ(total)}</strong></div>
+        {stage === 'sale' ? <button type="button" className="button button-primary pos-checkout-button" disabled={!cart.length} onClick={openCheckout}>Continuar al cobro <ChevronDown size={17} /></button> : <form className="pos-checkout" onSubmit={completeSale} noValidate>
+          <div className="pos-checkout-title"><div><span className="eyebrow">Finalizar venta</span><h3>Datos del cliente</h3></div><button type="button" className="pos-back-button" onClick={() => { setStage('sale'); setCheckoutError(''); }} aria-label="Volver a la cuenta"><X size={16} /></button></div>
+          <label className="pos-field"><span><UserRound size={14} /> Nombre del cliente <small>Opcional</small></span><input value={customerName} onChange={(event) => setCustomerName(event.target.value)} maxLength={120} placeholder="Nombre para el comprobante" /></label>
+          <label className="pos-field"><span>NIT <b>Requerido</b></span><input ref={nitRef} value={nit} onChange={(event) => setNit(event.target.value.toLocaleUpperCase('es-GT'))} maxLength={20} autoCapitalize="characters" placeholder="Ej. 1234567-8 o CF" /></label>
+          <fieldset className="pos-payment-options"><legend>Método de pago</legend><div className="pos-payment-choice-row">
+            <button type="button" className={paymentMethod === 'cash' ? 'pos-payment-choice selected' : 'pos-payment-choice'} onClick={() => changePaymentMethod('cash')} aria-pressed={paymentMethod === 'cash'}><Banknote size={18} /><span><strong>Efectivo</strong><small>Calcula el cambio</small></span></button>
+            <button type="button" className={paymentMethod === 'card' ? 'pos-payment-choice selected' : 'pos-payment-choice'} onClick={() => changePaymentMethod('card')} aria-pressed={paymentMethod === 'card'} disabled={!paymentMethods.card}><CreditCard size={18} /><span><strong>Tarjeta</strong><small>{paymentMethods.card ? 'Pago simulado' : 'Desactivada'}</small></span></button>
+          </div></fieldset>
+          {paymentMethod === 'cash' ? <><label className="pos-field"><span>Efectivo recibido</span><div className="pos-money-input"><span>Q</span><input type="number" min={total} step="0.01" inputMode="decimal" value={amountReceived} onChange={(event) => { setAmountReceived(event.target.value); setCheckoutError(''); }} placeholder="0.00" /></div></label><div className="pos-change-row"><span>Cambio</span><strong className={paid >= total && paid > 0 ? 'ready' : ''}>{formatQ(change)}</strong></div></> : <div className="pos-card-note">El pago se simula para esta demostración. No se pedirán datos de tarjeta ni se realizará un cargo.</div>}
+          {checkoutError && <div className="sale-form-error" role="alert">{checkoutError}</div>}
+          <button type="submit" className="button button-primary pos-complete-button" disabled={saving}>{saving ? 'Registrando…' : 'Registrar venta y comprobante'} <Check size={16} /></button>
+        </form>}
+        <p className="pos-ticket-footnote">Verifica cantidades y existencias antes de confirmar.</p>
+      </aside>
+    </div>
+
+    <section className="panel pos-history"><div className="pos-section-heading"><div><span className="eyebrow">Actividad reciente</span><h2>Ventas de esta sesión</h2><p>Comprobantes temporales creados en esta pestaña.</p></div><span className="pos-product-count">{saleHistory.length} registros</span></div>
+      {historyError && <p className="pos-history-note" role="status">{historyError}</p>}
+      {saleHistory.length ? <div className="pos-history-scroll"><table className="pos-history-table"><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente / NIT</th><th>Pago</th><th>Total</th><th><span className="sr-only">Comprobante</span></th></tr></thead><tbody>{saleHistory.slice(0, 20).map((sale) => <tr key={sale.id}><td><strong>{sale.id}</strong>{sale.local && <small className="pos-session-tag">Esta sesión</small>}</td><td>{new Date(sale.date).toLocaleString('es-GT', { dateStyle: 'short', timeStyle: 'short' })}</td><td>{sale.nit ? <>{sale.customerName || 'Cliente'}<small>{sale.nit}</small></> : '—'}</td><td>{sale.paymentLabel}</td><td><strong>{formatQ(sale.total)}</strong></td><td>{sale.local && <button type="button" className="pos-view-receipt" onClick={() => setReceipt(sale as LocalSale)} aria-label={`Abrir comprobante ${sale.id}`}><Printer size={16} /> Ver</button>}</td></tr>)}</tbody></table></div> : <div className="pos-history-empty">Las ventas que registres en esta pestaña aparecerán aquí.</div>}
     </section>
-    <section className="panel web-orders-panel"><div className="panel-heading"><div><h2>Pedidos de tienda en línea</h2><span>Son pedidos web; no forman parte de las ventas presenciales.</span></div></div>{orderError && <div className="sale-form-error" role="alert">{orderError}</div>}<div className="data-table web-orders-table"><div className="table-head"><span>Pedido web</span><span>Cliente</span><span>Fecha</span><span>Método de pago</span><span>Estado</span><span>Total</span></div>{webOrders.map((order) => <div className="table-row" key={order.id}><strong>{order.id}</strong><span>{order.customer}</span><span>{order.date}</span><span>{order.payment}</span>{canApproveOrders && ['Pendiente de pago', 'En preparación'].includes(order.status) ? <label className="order-status-select"><span className="sr-only">Estado de {order.id}</span><select value={order.status} onChange={(event) => applyOrderStatus(order, event.target.value as Order['status'])}>{order.status === 'Pendiente de pago' && <option>Pendiente de pago</option>}{order.status === 'Pendiente de pago' && order.payment === 'Tarjeta' && <option>En preparación</option>}{order.status === 'En preparación' && <><option>En preparación</option><option>Completado</option></>}<option>Cancelado</option></select></label> : <span>{order.status}</span>}<strong>{formatQ(order.total)}</strong></div>)}</div></section>
 
-    {confirmOrderCancel && <div className="modal-backdrop" onClick={() => setConfirmOrderCancel(null)}><section className="modal order-cancel-confirm" role="alertdialog" aria-modal="true" aria-labelledby="order-cancel-title"><div className="modal-header"><div><span className="eyebrow">Confirmación destructiva</span><h2 id="order-cancel-title">Cancelar pedido {confirmOrderCancel.id}</h2></div><button type="button" className="icon-button" aria-label="Cerrar confirmación" onClick={() => setConfirmOrderCancel(null)}><X size={18} /></button></div><p>Esta acción cambia el estado del pedido de {confirmOrderCancel.status} a Cancelado. La advertencia informativa aparecerá después de confirmar.</p><div className="modal-actions"><button className="button button-outline" onClick={() => setConfirmOrderCancel(null)}>Volver</button><button className="button button-primary" onClick={() => void saveOrderStatus(confirmOrderCancel, 'Cancelado')}>Confirmar cancelación</button></div></section></div>}    {showForm && <div className="modal-backdrop" onClick={() => { if (!busy) setShowForm(false); }}><div className="modal sale-modal" role="dialog" aria-modal="true" aria-labelledby="sale-form-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">Venta presencial</span><h2 id="sale-form-title">Registrar venta</h2></div><button type="button" className="icon-button" aria-label="Cerrar" disabled={busy} onClick={() => setShowForm(false)}><X size={18} /></button></div>
-      <form className="sale-form" onSubmit={submitSale} noValidate><div className="sale-meta-grid"><div><span>Vendedor</span><strong>{user?.name || 'Personal'}</strong></div><div><span>Fecha</span><strong>{new Date().toLocaleString('es-GT')}</strong></div></div>
-        <div className="sale-items-heading"><div><strong>Productos vendidos</strong><span>El total y el inventario se validan al confirmar.</span></div><button type="button" className="button button-outline" onClick={addLine} disabled={busy || !catalog.some((product) => product.status !== 'Inactivo' && product.stock > 0 && !draftItems.some((line) => line.productId === product.id))}><Plus size={15} /> Añadir producto</button></div>
-        {draftItems.length ? <div className="sale-items-list">{draftItems.map((line, index) => {
-          const product = productById.get(line.productId);
-          const otherSelected = draftItems.filter((_, row) => row !== index).map((item) => item.productId);
-          return <div className="sale-line-row" key={`${index}-${line.productId}`}><label className="field sale-product-field"><span>Producto</span><select value={line.productId} onChange={(event) => updateLine(index, { productId: event.target.value })}><option value="">Seleccionar producto</option>{catalog.map((item) => <option key={item.id} value={item.id} disabled={item.status === 'Inactivo' || item.stock < 1 || otherSelected.includes(item.id)}>{item.name} · {item.stock} disp.{item.status === 'Inactivo' ? ' · Inactivo' : ''}</option>)}</select></label><label className="field"><span>Cantidad</span><input type="number" min="1" max={product?.stock || 1} step="1" value={line.quantity} onChange={(event) => updateLine(index, { quantity: Number(event.target.value) })} /></label><div className="sale-line-stock"><span>Disponible</span><strong>{product?.stock ?? 0}</strong></div><div className="sale-line-subtotal"><span>Subtotal</span><strong>{formatQ(lineSubtotal(line))}</strong></div><button type="button" className="icon-button danger sale-remove" aria-label={`Quitar ${product?.name || 'producto'}`} onClick={() => removeLine(index)}><Trash2 size={16} /></button></div>;
-        })}</div> : <div className="sale-no-items">Añade al menos un producto para calcular la venta.</div>}
-        <div className="sale-payment-select"><label className="field"><span>Método de pago habilitado</span><select value={payment} onChange={(event) => setPayment(event.target.value as PaymentMethod)} disabled={!availableMethods.length}>{availableMethods.map((method) => <option key={method} value={method}>{method === 'card' ? 'Tarjeta simulada' : 'Transferencia bancaria · pendiente de verificación'}</option>)}</select></label><p>{payment === 'transfer' ? 'El pago quedará pendiente de verificación; no se procesa una transferencia real.' : 'La tarjeta solo se simula. No se solicitan ni guardan datos financieros.'}</p></div>
-        <div className="sale-grand-total"><span>Total de venta</span><strong>{formatQ(total)}</strong></div>
-        {formError && <div className="sale-form-error" role="alert">{formError}</div>}{!formError && validationMessage && <p className="sale-validation-hint">{validationMessage}</p>}
-        <div className="modal-actions"><button type="button" className="button button-outline" disabled={busy} onClick={() => setShowForm(false)}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy || Boolean(validationMessage)}><Check size={16} /> {busy ? 'Registrando…' : 'Confirmar venta'}</button></div>
-      </form></div></div>}
-
-    {selectedSale && <div className="modal-backdrop" onClick={() => setSelectedSale(null)}><div className="modal sale-receipt-modal" role="dialog" aria-modal="true" aria-labelledby="sale-receipt-title" onClick={(event) => event.stopPropagation()}><div className="modal-header receipt-modal-header"><div><span className="eyebrow">Comprobante interno · no es factura fiscal</span><h2 id="sale-receipt-title">{selectedSale.id}</h2></div><div className="receipt-actions"><button type="button" className="button button-outline" onClick={() => window.print()}><Printer size={15} /> Imprimir</button><button type="button" className="icon-button" aria-label="Cerrar comprobante" onClick={() => setSelectedSale(null)}><X size={18} /></button></div></div><SaleReceipt sale={selectedSale} /></div></div>}
+    {receipt && <div className="modal-backdrop pos-receipt-backdrop" onClick={closeReceipt}><section className="modal sale-receipt-modal pos-receipt-modal" role="dialog" aria-modal="true" aria-labelledby="pos-receipt-title" onClick={(event) => event.stopPropagation()}><div className="modal-header receipt-modal-header"><div><span className="eyebrow">Comprobante digital de venta</span><h2 id="pos-receipt-title">{receipt.id}</h2></div><div className="receipt-actions"><button type="button" className="button button-outline" onClick={() => window.print()}><Printer size={15} /> Imprimir</button><button type="button" className="icon-button" aria-label="Cerrar comprobante" onClick={closeReceipt}><X size={18} /></button></div></div><PosReceipt sale={receipt} /></section></div>}
   </div>;
 }
 
-function SaleReceipt({ sale }: { sale: InPersonSale }) {
-  return <div className="sale-receipt-print"><div className="receipt-brand"><span className="brand-mark"><span /></span><strong>NEXO</strong></div><p className="receipt-kind">VENTA PRESENCIAL · COMPROBANTE INTERNO</p><div className="receipt-not-tax">Este comprobante es interno; no es una factura fiscal. El pago de tarjeta se simula y no genera cargos.</div><dl className="receipt-meta"><div><dt>Folio</dt><dd>{sale.id}</dd></div><div><dt>Fecha</dt><dd>{new Date(sale.date).toLocaleString('es-GT')}</dd></div><div><dt>Vendedor</dt><dd>{sale.seller}</dd></div><div><dt>Pago</dt><dd>{sale.paymentMethod === 'card' ? 'Tarjeta simulada' : 'Transferencia bancaria'}</dd></div><div><dt>Estado</dt><dd>{sale.paymentStatus}</dd></div></dl><div className="receipt-lines"><div className="receipt-line receipt-table-head"><span>Producto</span><span>Cant.</span><span>Precio</span><span>Subtotal</span></div>{sale.items.map((item) => <div className="receipt-line" key={item.productId}><span>{item.productName}<small>{item.sku}</small></span><span>{item.quantity}</span><span>{formatQ(item.unitPrice)}</span><strong>{formatQ(item.subtotal)}</strong></div>)}</div><div className="receipt-total"><span>Total</span><strong>{formatQ(sale.total)}</strong></div><p className="receipt-thanks">Gracias por tu compra.</p></div>;
+function PosReceipt({ sale }: { sale: LocalSale }) {
+  return <div className="sale-receipt-print pos-receipt-print"><div className="receipt-brand"><span className="brand-mark"><span /></span><strong>NEXO</strong></div><p className="receipt-kind">COMPROBANTE DE VENTA PRESENCIAL</p><div className="receipt-not-tax">Comprobante generado por la interfaz de demostración. No es factura FEL ni comprobante fiscal autorizado.</div><dl className="receipt-meta"><div><dt>Folio</dt><dd>{sale.id}</dd></div><div><dt>Fecha</dt><dd>{new Date(sale.date).toLocaleString('es-GT')}</dd></div><div><dt>Cliente</dt><dd>{sale.customerName}</dd></div><div><dt>NIT</dt><dd>{sale.nit}</dd></div><div><dt>Vendedor</dt><dd>{sale.seller}</dd></div><div><dt>Pago</dt><dd>{sale.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta simulada'}</dd></div></dl><div className="receipt-lines"><div className="receipt-line receipt-table-head"><span>Producto</span><span>Cant.</span><span>Precio</span><span>Subtotal</span></div>{sale.items.map((item) => <div className="receipt-line" key={item.productId}><span>{item.name}<small>SKU {item.sku}</small></span><span>{item.quantity}</span><span>{formatQ(item.unitPrice)}</span><strong>{formatQ(item.unitPrice * item.quantity)}</strong></div>)}</div><div className="receipt-total"><span>Total</span><strong>{formatQ(sale.total)}</strong></div>{sale.paymentMethod === 'cash' && <div className="pos-receipt-cash"><div><span>Efectivo recibido</span><strong>{formatQ(sale.amountReceived || 0)}</strong></div><div><span>Cambio</span><strong>{formatQ(sale.change || 0)}</strong></div></div>}<p className="receipt-thanks">Gracias por tu compra.</p></div>;
 }
