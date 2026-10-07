@@ -52,6 +52,12 @@ public class UserAccountService {
                 .filter(account -> account.getStatus() == UserStatus.ACTIVE)
                 .orElseThrow(() -> new UsernameNotFoundException("The authenticated account is unavailable"));
         user.changeDisplayName(name);
+        if ("customer".equals(user.getRole().getCode())) {
+            jdbc.update("UPDATE business_records SET data = jsonb_set(data, '{name}', to_jsonb(?::text)), updated_at = CURRENT_TIMESTAMP WHERE resource_code = 'customers' AND LOWER(data ->> 'email') = LOWER(?)", name, user.getEmail());
+            jdbc.update("UPDATE business_records SET data = jsonb_set(data, '{customer}', to_jsonb(?::text)), updated_at = CURRENT_TIMESTAMP WHERE resource_code = 'orders' AND LOWER(data ->> 'customerEmail') = LOWER(?)", name, user.getEmail());
+            jdbc.update("UPDATE customers SET name = ? WHERE LOWER(email) = LOWER(?)", name, user.getEmail());
+            jdbc.update("UPDATE commerce_orders SET customer_name = ? WHERE customer_user_id = ?", name, id);
+        }
         return response(user);
     }
 
