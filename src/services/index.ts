@@ -226,14 +226,16 @@ export const salesService = {
   },
   listInPerson: async (): Promise<InPersonSale[]> => (await business.list('sales')).map((record) => {
     const data = record.data;
-    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as PaymentMethod,
-      paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
+    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
+      paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], ...(data.amountReceived === undefined ? {} : { amountReceived: numberValue(data, 'amountReceived') }),
+      ...(data.change === undefined ? {} : { change: numberValue(data, 'change') }), items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
   }),
-  createInPerson: async (input: { seller: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[] }): Promise<InPersonSale> => {
+  createInPerson: async (input: { customerName: string; nit: string; paymentMethod: 'cash' | 'card'; amountReceived?: number; items: { productId: string; quantity: number }[] }): Promise<InPersonSale> => {
     const record = await apiClient.post<ApiRecord>('/api/business/sales/record', input);
     const data = record.data;
-    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), paymentMethod: stringValue(data, 'paymentMethod') as PaymentMethod,
-      paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], items: data.items as InPersonSale['items'], total: numberValue(data, 'total') };
+    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
+      paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], ...(data.amountReceived === undefined ? {} : { amountReceived: numberValue(data, 'amountReceived') }),
+      ...(data.change === undefined ? {} : { change: numberValue(data, 'change') }), items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
   },
 };
 
@@ -395,7 +397,10 @@ export const adminTableService = {
         Rol: roleLabels[role], 'Último acceso': 'Nunca', Estado: 'Pendiente' } };
     }
     if (section === 'roles-permissions') throw new Error('Los roles disponibles se administran desde la matriz de permisos.');
-    const record = await business.create(resourceFor(section), toDomainData(section, row));
+    const domainData = toDomainData(section, row);
+    const record = section === 'inventory'
+      ? await apiClient.post<ApiRecord>('/api/business/inventory/products', domainData)
+      : await business.create(resourceFor(section), domainData);
     return { id: record.id, data: toAdminRow(section, dataWithId(record)) };
   },
   update: async (section: string, id: string, row: AdminTableRecord): Promise<{ id: string; data: AdminTableRecord }> => {

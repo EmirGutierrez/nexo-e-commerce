@@ -9,21 +9,8 @@ import { roleService } from '../../../services/roleService';
 import type { InPersonSale, Order, Product } from '../../../types';
 
 type PosItem = { productId: string; name: string; sku: string; unitPrice: number; quantity: number; stock: number; image: string };
-type LocalSale = {
-  id: string;
-  date: string;
-  seller: string;
-  customerName: string;
-  nit: string;
-  paymentMethod: 'cash' | 'card';
-  total: number;
-  amountReceived?: number;
-  change?: number;
-  items: PosItem[];
-};
 type HistoryItem = { productId: string; productName: string; sku: string; quantity: number; unitPrice: number; subtotal: number };
-type HistoryRow = { id: string; kind: string; date: string; customer: string; nit: string; products: string; items: HistoryItem[]; payment: string; status: string; total: number; order?: Order; inPersonSale?: InPersonSale; localSale?: LocalSale };
-const sessionSalesKey = 'nexo.pos.sales.v1';
+type HistoryRow = { id: string; kind: string; date: string; customer: string; nit: string; products: string; items: HistoryItem[]; payment: string; status: string; total: number; order?: Order; inPersonSale?: InPersonSale };
 const MAX_RESULTS = 8;
 const historyDateLabel = (value: string, includeTime = true) => {
   if (!value) return '—';
@@ -49,9 +36,7 @@ export default function SalesPage() {
   const [paymentMethod, setPaymentMethod] = useState<'cash' | 'card'>('cash');
   const [amountReceived, setAmountReceived] = useState('');
   const [checkoutError, setCheckoutError] = useState('');
-  const [receipt, setReceipt] = useState<LocalSale | null>(null);
-  const [localSales, setLocalSales] = useState<LocalSale[]>([]);
-  const [sessionSalesLoaded, setSessionSalesLoaded] = useState(false);
+  const [receipt, setReceipt] = useState<InPersonSale | null>(null);
   const [historyError, setHistoryError] = useState('');
   const [salesHistory, setSalesHistory] = useState<InPersonSale[]>([]);
   const [webOrders, setWebOrders] = useState<Order[]>([]);
@@ -90,23 +75,8 @@ export default function SalesPage() {
         else setHistoryError((previous) => [previous, ordersResult.reason instanceof Error ? ordersResult.reason.message : 'No se pudieron cargar los pedidos en línea.'].filter(Boolean).join(' '));
       })
       .finally(() => { if (active) setHistoryLoading(false); });
-    try {
-      const saved = sessionStorage.getItem(sessionSalesKey);
-      const parsed: unknown = saved ? JSON.parse(saved) : [];
-      if (active && Array.isArray(parsed)) setLocalSales(parsed as LocalSale[]);
-    } catch {
-      if (active) setHistoryError('No se pudieron recuperar las ventas temporales de esta pestaña.');
-    } finally {
-      if (active) setSessionSalesLoaded(true);
-    }
     return () => { active = false; };
   }, []);
-
-  useEffect(() => {
-    if (!sessionSalesLoaded) return;
-    try { sessionStorage.setItem(sessionSalesKey, JSON.stringify(localSales)); }
-    catch { setHistoryError('No se pudo guardar la venta temporal en esta pestaña.'); }
-  }, [localSales, sessionSalesLoaded]);
 
   useEffect(() => {
     if (stage === 'sale' && canCreateSale) searchRef.current?.focus();
@@ -137,13 +107,8 @@ export default function SalesPage() {
   useEffect(() => { setHistoryPage(1); }, [historyQuery, historyTypeFilter, historyStatusFilter, historyPeriodFilter, historyPageSize]);
 
   const availableProducts = useMemo(() => {
-    const sold = new Map<string, number>();
-    localSales.forEach((sale) => sale.items.forEach((item) => sold.set(item.productId, (sold.get(item.productId) || 0) + item.quantity)));
-    return catalog.map((product) => {
-      const stock = Math.max(0, product.stock - (sold.get(product.id) || 0));
-      return { ...product, stock, status: stock === 0 && product.status !== 'Inactivo' ? 'Agotado' as const : stock < 10 && product.status !== 'Inactivo' ? 'Bajo stock' as const : product.status };
-    }).filter((product) => product.status !== 'Inactivo' && product.stock > 0);
-  }, [catalog, localSales]);
+    return catalog.filter((product) => product.status !== 'Inactivo' && product.stock > 0);
+  }, [catalog]);
   const filteredProducts = useMemo(() => {
     const query = search.trim().toLocaleLowerCase('es-GT');
     if (!query) return availableProducts.slice(0, MAX_RESULTS);
@@ -156,12 +121,6 @@ export default function SalesPage() {
     const code = search.trim().toLocaleUpperCase('es-GT');
     return code ? availableProducts.find((product) => product.sku.trim().toLocaleUpperCase('es-GT') === code) : undefined;
   }, [availableProducts, search]);
-  const saleHistory = useMemo(() => localSales.map((sale) => ({
-    ...sale,
-    local: true as const,
-    paymentLabel: sale.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta',
-  })).sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [localSales]);
-
   const addProduct = useCallback((product: Product) => {
     if (product.status === 'Inactivo' || product.stock < 1) return;
     setCart((current) => {
@@ -214,37 +173,40 @@ export default function SalesPage() {
     return '';
   };
 
-  const completeSale = (event: React.FormEvent<HTMLFormElement>) => {
+  const completeSale = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     const error = validateCheckout();
     if (error) { setCheckoutError(error); return; }
     setSaving(true);
-    const sale: LocalSale = {
-      id: `POS-${new Date().toISOString().slice(0, 10).replaceAll('-', '')}-${crypto.randomUUID().slice(0, 6).toUpperCase()}`,
-      date: new Date().toISOString(),
-      seller: user?.name || 'Personal',
-      customerName: customerName.trim() || 'Cliente',
-      nit: nit.trim().toLocaleUpperCase('es-GT'),
-      paymentMethod,
-      total,
-      ...(paymentMethod === 'cash' ? { amountReceived: paid, change } : {}),
-      items: cart.map((item) => ({ ...item })),
-    };
-    setLocalSales((current) => [sale, ...current]);
-    setReceipt(sale);
-    setCart([]);
-    setStage('sale');
-    setCustomerName(''); setNit(''); setPaymentMethod('cash'); setAmountReceived(''); setSearch(''); setCheckoutError('');
-    setSaving(false);
+    setCheckoutError('');
+    try {
+      const sale = await salesService.createInPerson({
+        customerName: customerName.trim(),
+        nit: nit.trim().toLocaleUpperCase('es-GT'),
+        paymentMethod,
+        ...(paymentMethod === 'cash' ? { amountReceived: paid } : {}),
+        items: cart.map(({ productId, quantity }) => ({ productId, quantity })),
+      });
+      setSalesHistory((current) => [sale, ...current.filter((existing) => existing.id !== sale.id)]);
+      setCatalog((current) => current.map((product) => {
+        const sold = sale.items.find((item) => item.productId === product.id)?.quantity || 0;
+        return sold ? { ...product, stock: Math.max(0, product.stock - sold) } : product;
+      }));
+      setReceipt(sale);
+      setCart([]); setStage('sale'); setCustomerName(''); setNit(''); setPaymentMethod('cash'); setAmountReceived(''); setSearch('');
+    } catch (cause) {
+      setCheckoutError(cause instanceof Error ? cause.message : 'No se pudo registrar la venta en PostgreSQL. Verifica la conexión e inténtalo de nuevo.');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeReceipt = () => { setReceipt(null); window.setTimeout(() => searchRef.current?.focus(), 0); };
   const changePaymentMethod = (method: 'cash' | 'card') => { setPaymentMethod(method); setCheckoutError(''); };
   const historyRows: HistoryRow[] = useMemo(() => [
     ...webOrders.map((order) => ({ id: order.id, kind: 'Pedido en línea', date: order.date, customer: order.customer || 'Cliente', nit: '—', products: (order.itemDetails || []).map((item) => `${item.productName} × ${item.quantity}`).join('; '), items: order.itemDetails || [], payment: order.payment, status: order.status, total: order.total, order })),
-    ...salesHistory.map((sale) => ({ id: sale.id, kind: 'Venta presencial', date: sale.date, customer: sale.customerName || 'No registrado', nit: sale.nit || '—', products: sale.items.map((item) => `${item.productName} × ${item.quantity}`).join('; '), items: sale.items, payment: sale.paymentMethod === 'card' ? 'Tarjeta simulada' : 'Transferencia', status: 'Completado', total: sale.total, inPersonSale: sale })),
-    ...localSales.map((sale) => ({ id: sale.id, kind: 'Venta presencial · sesión', date: sale.date, customer: sale.customerName, nit: sale.nit, products: sale.items.map((item) => `${item.name} × ${item.quantity}`).join('; '), items: sale.items.map((item) => ({ productId: item.productId, productName: item.name, sku: item.sku, quantity: item.quantity, unitPrice: item.unitPrice, subtotal: item.unitPrice * item.quantity })), payment: sale.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta simulada', status: 'Completado', total: sale.total, localSale: sale })),
-  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [webOrders, salesHistory, localSales]);
+    ...salesHistory.map((sale) => ({ id: sale.id, kind: 'Venta presencial', date: sale.date, customer: sale.customerName || 'No registrado', nit: sale.nit || '—', products: sale.items.map((item) => `${item.productName} × ${item.quantity}`).join('; '), items: sale.items, payment: sale.paymentMethod === 'card' ? 'Tarjeta simulada' : sale.paymentMethod === 'cash' ? 'Efectivo' : 'Transferencia', status: 'Completado', total: sale.total, inPersonSale: sale })),
+  ].sort((a, b) => new Date(b.date).getTime() - new Date(a.date).getTime()), [webOrders, salesHistory]);
 
   const filteredHistory = useMemo(() => {
     const now = new Date();
@@ -363,9 +325,9 @@ export default function SalesPage() {
       </aside>
     </div>
 
-    <section className="panel pos-history"><div className="pos-section-heading"><div><span className="eyebrow">Actividad reciente</span><h2>Ventas de esta sesión</h2><p>Comprobantes temporales creados en esta pestaña.</p></div><span className="pos-product-count">{saleHistory.length} registros</span></div>
+    <section className="panel pos-history"><div className="pos-section-heading"><div><span className="eyebrow">Actividad reciente</span><h2>Ventas registradas</h2><p>Comprobantes persistidos en PostgreSQL y compartidos entre sesiones.</p></div><span className="pos-product-count">{salesHistory.length} registros</span></div>
       {historyError && <p className="pos-history-note" role="status">{historyError}</p>}
-      {saleHistory.length ? <div className="pos-history-scroll"><table className="pos-history-table"><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente / NIT</th><th>Pago</th><th>Total</th><th><span className="sr-only">Comprobante</span></th></tr></thead><tbody>{saleHistory.slice(0, 20).map((sale) => <tr key={sale.id}><td><strong>{sale.id}</strong>{sale.local && <small className="pos-session-tag">Esta sesión</small>}</td><td>{new Date(sale.date).toLocaleString('es-GT', { dateStyle: 'short', timeStyle: 'short' })}</td><td>{sale.nit ? <>{sale.customerName || 'Cliente'}<small>{sale.nit}</small></> : '—'}</td><td>{sale.paymentLabel}</td><td><strong>{formatQ(sale.total)}</strong></td><td>{sale.local && <button type="button" className="pos-view-receipt" onClick={() => setReceipt(sale as LocalSale)} aria-label={`Abrir comprobante ${sale.id}`}><Printer size={16} /> Ver</button>}</td></tr>)}</tbody></table></div> : <div className="pos-history-empty">Las ventas que registres en esta pestaña aparecerán aquí.</div>}
+      {historyLoading ? <div className="pos-history-empty">Cargando ventas guardadas…</div> : salesHistory.length ? <div className="pos-history-scroll"><table className="pos-history-table"><thead><tr><th>Folio</th><th>Fecha</th><th>Cliente / NIT</th><th>Pago</th><th>Total</th><th><span className="sr-only">Comprobante</span></th></tr></thead><tbody>{salesHistory.slice(0, 20).map((sale) => <tr key={sale.id}><td><strong>{sale.id}</strong></td><td>{new Date(sale.date).toLocaleString('es-GT', { dateStyle: 'short', timeStyle: 'short' })}</td><td>{sale.nit ? <>{sale.customerName || 'Cliente'}<small>{sale.nit}</small></> : sale.customerName || '—'}</td><td>{sale.paymentMethod === 'cash' ? 'Efectivo' : sale.paymentMethod === 'card' ? 'Tarjeta simulada' : 'Transferencia'}</td><td><strong>{formatQ(sale.total)}</strong></td><td><button type="button" className="pos-view-receipt" onClick={() => setReceipt(sale)} aria-label={`Abrir comprobante ${sale.id}`}><Printer size={16} /> Ver</button></td></tr>)}</tbody></table></div> : <div className="pos-history-empty">Las ventas que registres aparecerán aquí para todos los equipos conectados a la misma base de datos.</div>}
     </section>
 
     {confirmCancelSale && <div className="modal-backdrop" onClick={() => setConfirmCancelSale(false)}><section className="modal order-cancel-confirm" role="alertdialog" aria-modal="true" aria-labelledby="cancel-sale-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">Cancelar venta</span><h2 id="cancel-sale-title">¿Deseas cancelar esta venta?</h2></div><button type="button" className="icon-button" aria-label="Cerrar confirmación" onClick={() => setConfirmCancelSale(false)}><X size={18} /></button></div><p>Se eliminarán de esta venta los productos seleccionados y los datos ingresados del cliente y del pago.</p><div className="modal-actions"><button type="button" className="button button-outline" onClick={() => setConfirmCancelSale(false)}>Mantener venta</button><button type="button" className="button button-primary" onClick={cancelSaleDraft}>Sí, cancelar venta</button></div></section></div>}
@@ -373,6 +335,6 @@ export default function SalesPage() {
   </div>;
 }
 
-function PosReceipt({ sale }: { sale: LocalSale }) {
-  return <div className="sale-receipt-print pos-receipt-print"><div className="receipt-brand"><span className="brand-mark"><span /></span><strong>NEXO</strong></div><p className="receipt-kind">COMPROBANTE DE VENTA PRESENCIAL</p><div className="receipt-not-tax">Comprobante generado por la interfaz de demostración. No es factura FEL ni comprobante fiscal autorizado.</div><dl className="receipt-meta"><div><dt>Folio</dt><dd>{sale.id}</dd></div><div><dt>Fecha</dt><dd>{new Date(sale.date).toLocaleString('es-GT')}</dd></div><div><dt>Cliente</dt><dd>{sale.customerName}</dd></div><div><dt>NIT</dt><dd>{sale.nit}</dd></div><div><dt>Vendedor</dt><dd>{sale.seller}</dd></div><div><dt>Pago</dt><dd>{sale.paymentMethod === 'cash' ? 'Efectivo' : 'Tarjeta simulada'}</dd></div></dl><div className="receipt-lines"><div className="receipt-line receipt-table-head"><span>Producto</span><span>Cant.</span><span>Precio</span><span>Subtotal</span></div>{sale.items.map((item) => <div className="receipt-line" key={item.productId}><span>{item.name}<small>SKU {item.sku}</small></span><span>{item.quantity}</span><span>{formatQ(item.unitPrice)}</span><strong>{formatQ(item.unitPrice * item.quantity)}</strong></div>)}</div><div className="receipt-total"><span>Total</span><strong>{formatQ(sale.total)}</strong></div>{sale.paymentMethod === 'cash' && <div className="pos-receipt-cash"><div><span>Efectivo recibido</span><strong>{formatQ(sale.amountReceived || 0)}</strong></div><div><span>Cambio</span><strong>{formatQ(sale.change || 0)}</strong></div></div>}<p className="receipt-thanks">Gracias por tu compra.</p></div>;
+function PosReceipt({ sale }: { sale: InPersonSale }) {
+  return <div className="sale-receipt-print pos-receipt-print"><div className="receipt-brand"><span className="brand-mark"><span /></span><strong>NEXO</strong></div><p className="receipt-kind">COMPROBANTE DE VENTA PRESENCIAL</p><div className="receipt-not-tax">Comprobante generado por la interfaz de demostración. No es factura FEL ni comprobante fiscal autorizado.</div><dl className="receipt-meta"><div><dt>Folio</dt><dd>{sale.id}</dd></div><div><dt>Fecha</dt><dd>{new Date(sale.date).toLocaleString('es-GT')}</dd></div><div><dt>Cliente</dt><dd>{sale.customerName}</dd></div><div><dt>NIT</dt><dd>{sale.nit}</dd></div><div><dt>Vendedor</dt><dd>{sale.seller}</dd></div><div><dt>Pago</dt><dd>{sale.paymentMethod === 'cash' ? 'Efectivo' : sale.paymentMethod === 'card' ? 'Tarjeta simulada' : 'Transferencia'}</dd></div></dl><div className="receipt-lines"><div className="receipt-line receipt-table-head"><span>Producto</span><span>Cant.</span><span>Precio</span><span>Subtotal</span></div>{sale.items.map((item) => <div className="receipt-line" key={item.productId}><span>{item.productName}<small>SKU {item.sku}</small></span><span>{item.quantity}</span><span>{formatQ(item.unitPrice)}</span><strong>{formatQ(item.subtotal)}</strong></div>)}</div><div className="receipt-total"><span>Total</span><strong>{formatQ(sale.total)}</strong></div>{sale.paymentMethod === 'cash' && <div className="pos-receipt-cash"><div><span>Efectivo recibido</span><strong>{formatQ(sale.amountReceived || 0)}</strong></div><div><span>Cambio</span><strong>{formatQ(sale.change || 0)}</strong></div></div>}<p className="receipt-thanks">Gracias por tu compra.</p></div>;
 }

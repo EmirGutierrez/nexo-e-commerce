@@ -10,6 +10,7 @@ export interface AdminModuleConfig {
   title: string;
   description: string;
   action?: string;
+  formColumns?: string[];
   columns: string[];
   stats: { label: string; value: string; detail: string; tone?: string }[];
   rows: AdminTableRecord[];
@@ -146,6 +147,10 @@ export default function AdminCrudModule({ section, config }: { section: string; 
 
   const saveRecord = async (event: React.FormEvent) => {
     event.preventDefault(); setError('');
+    if (section === 'inventory' && mode === 'create' && !draft.Imagen) {
+      setError('Selecciona una imagen JPG, PNG o WEBP para el producto.');
+      return;
+    }
     const nextRecord: AdminTableRecord = {};
     for (const column of formColumns) {
       const value = (draft[column] ?? '').trim();
@@ -181,6 +186,33 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     finally { setBusy(false); }
   };
 
+  const selectProductImage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setError('La imagen debe ser JPG, PNG o WEBP.');
+      event.currentTarget.value = '';
+      return;
+    }
+    if (file.size > 140 * 1024) {
+      setError('La imagen debe pesar como máximo 140 KB.');
+      event.currentTarget.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string' || !reader.result.startsWith(`data:${file.type};base64,`)) {
+        setError('No se pudo leer la imagen. Intenta seleccionar el archivo nuevamente.');
+        return;
+      }
+      setDraft((current) => ({ ...current, Imagen: reader.result as string }));
+      setError('');
+    };
+    reader.onerror = () => setError('No se pudo leer la imagen. Intenta seleccionar el archivo nuevamente.');
+    reader.readAsDataURL(file);
+  };
+
   const confirmAction = async () => {
     const entry = entries.find((item) => item.id === activeId); if (!entry) return;
     setBusy(true); setError('');
@@ -214,7 +246,8 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     : section === 'customers' ? 'customers'
     : section === 'suppliers' ? 'suppliers'
     : section === 'settings' || section === 'profile' ? 'settings' : 'dashboard';
-  const canCreate = Boolean(config.action && !readOnly && !editOnly && role && roleService.can(role, permissionModule, 'create'));
+  const createPermissionModule = section === 'inventory' ? 'inventory' : permissionModule;
+  const canCreate = Boolean(config.action && !readOnly && !editOnly && role && roleService.can(role, createPermissionModule, 'create'));
   const approvalOnly = ['orders', 'transfers', 'payments', 'invoices'].includes(section);
   const canEdit = Boolean(!readOnly && !isTransactional && role && roleService.can(role, permissionModule, approvalOnly ? 'approve' : 'edit'));
   const canDelete = Boolean(!readOnly && !isTransactional && !editOnly && section !== 'products' && section !== 'suppliers' && section !== 'inventory/alerts' && section !== 'users'

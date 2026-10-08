@@ -40,6 +40,13 @@ public class BusinessRecordController {
         return service.create(resource, data);
     }
 
+    @PostMapping("/inventory/products")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "Registra un producto desde inventario con sus existencias iniciales e imagen.")
+    public BusinessRecordResponse createInventoryProduct(@RequestBody Map<String, Object> data) {
+        return service.createInventoryProduct(data);
+    }
+
     @PutMapping("/{resource}/{id}")
     @Operation(summary = "Actualiza un registro autorizado y registra ajustes de existencias.")
     public BusinessRecordResponse update(@PathVariable String resource, @PathVariable UUID id,

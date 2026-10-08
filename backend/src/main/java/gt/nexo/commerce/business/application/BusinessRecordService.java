@@ -81,6 +81,16 @@ public class BusinessRecordService {
     public BusinessRecordResponse create(String resource, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "create");
+        return createAuthorized(normalized, input);
+    }
+
+    @Transactional
+    public BusinessRecordResponse createInventoryProduct(Map<String, Object> input) {
+        authorize("inventory", "create");
+        return createAuthorized("products", input);
+    }
+
+    private BusinessRecordResponse createAuthorized(String normalized, Map<String, Object> input) {
         if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);
@@ -219,11 +229,18 @@ public class BusinessRecordService {
     @Transactional
     public BusinessRecordResponse createInPersonSale(Map<String, Object> input) {
         authorize("sales", "create");
+        if (input == null) throw invalid("Debes enviar los datos de la venta.");
         List<?> rawItems = input.get("items") instanceof List<?> list ? list : List.of();
         if (rawItems.isEmpty()) throw invalid("Agrega al menos un producto para registrar la venta.");
         String method = String.valueOf(input.getOrDefault("paymentMethod", ""));
-        if (!Set.of("card", "transfer").contains(method)) throw invalid("El método de pago no es válido.");
-        if (!paymentEnabled(method)) throw conflict("El método de pago seleccionado está desactivado.");
+        if (!Set.of("cash", "card").contains(method)) throw invalid("El método de pago no es válido para una venta presencial.");
+        if (method.equals("card") && !paymentEnabled(method)) throw conflict("El pago con tarjeta está desactivado.");
+        String customerName = defaultText(input.get("customerName"), "Cliente");
+        String customerNit = text(input.get("nit")).toUpperCase(Locale.ROOT);
+        if (customerName.length() > 160) throw invalid("El nombre del cliente no puede superar 160 caracteres.");
+        if (customerNit.length() < 2 || customerNit.length() > 20 || !customerNit.matches("[A-Z0-9-]+")) {
+            throw invalid("Ingresa un NIT válido (letras, números o guion).");
+        }
 
         Map<UUID, Integer> quantities = new LinkedHashMap<>();
         for (Object item : rawItems) {
@@ -256,15 +273,28 @@ public class BusinessRecordService {
             items.add(item);
             total = total.add(line);
         }
+        BigDecimal amountReceived = null;
+        BigDecimal changeAmount = null;
+        if (method.equals("cash")) {
+            amountReceived = decimal(input.get("amountReceived")).setScale(2, java.math.RoundingMode.HALF_UP);
+            if (amountReceived.compareTo(total) < 0) throw invalid("El efectivo recibido debe cubrir el total de la venta.");
+            changeAmount = amountReceived.subtract(total);
+        }
         Instant now = Instant.now();
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("date", now.toString());
         data.put("seller", principalName());
+        data.put("customerName", customerName);
+        data.put("nit", customerNit);
         data.put("paymentMethod", method);
-        data.put("paymentStatus", method.equals("card") ? "Simulada" : "Pendiente de verificación");
+        data.put("paymentStatus", method.equals("cash") ? "Completada" : "Simulada");
         data.put("status", "Completado");
         data.put("items", items);
         data.put("total", total);
+        if (amountReceived != null) {
+            data.put("amountReceived", amountReceived);
+            data.put("change", changeAmount);
+        }
         jdbc.update("INSERT INTO business_records (id, resource_code, data, status_code, created_by) VALUES (?, 'sales', ?::jsonb, ?, ?)",
                 saleId, writeJson(data), data.get("paymentStatus"), actor);
         syncProjection(saleId, "sales", data, actor);
@@ -996,11 +1026,17 @@ public class BusinessRecordService {
         String paymentStatus = defaultText(data.get("paymentStatus"), "Simulada");
         BigDecimal total = decimal(data.get("total"));
         jdbc.update("""
-                INSERT INTO in_person_sales (record_id, seller_user_id, seller_name, sale_date, payment_method, payment_status, total, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET seller_name = EXCLUDED.seller_name,
-                payment_status = EXCLUDED.payment_status, total = EXCLUDED.total, status = EXCLUDED.status
+                INSERT INTO in_person_sales (record_id, seller_user_id, seller_name, sale_date, payment_method, payment_status,
+                    total, status, customer_name, customer_nit, cash_received, cash_change)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET
+                seller_name = EXCLUDED.seller_name, payment_method = EXCLUDED.payment_method,
+                payment_status = EXCLUDED.payment_status, total = EXCLUDED.total, status = EXCLUDED.status,
+                customer_name = EXCLUDED.customer_name, customer_nit = EXCLUDED.customer_nit,
+                cash_received = EXCLUDED.cash_received, cash_change = EXCLUDED.cash_change
         """, id, actor, seller, parseInstant(data.get("date")), method, paymentStatus, total,
-                defaultText(field(data, "status", "Estado"), "Completado"));
+                defaultText(field(data, "status", "Estado"), "Completado"),
+                defaultText(data.get("customerName"), "Cliente"), optionalText(data.get("nit")),
+                optionalDecimal(data.get("amountReceived")), optionalDecimal(data.get("change")));
         jdbc.update("DELETE FROM in_person_sale_items WHERE sale_record_id = ?", id);
         for (Map<String, Object> item : items(data)) jdbc.update("""
                 INSERT INTO in_person_sale_items (sale_record_id, product_record_id, product_name_snapshot, sku_snapshot, quantity, unit_price, line_total)
