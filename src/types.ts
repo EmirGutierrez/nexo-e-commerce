@@ -122,8 +122,10 @@ export interface InPersonSale {
   seller: string;
   customerName?: string;
   nit?: string;
-  paymentMethod: PaymentMethod;
-  paymentStatus: 'Simulada' | 'Pendiente de verificación';
+  paymentMethod: 'cash' | 'card' | 'transfer';
+  paymentStatus: 'Completada' | 'Simulada' | 'Pendiente de verificación';
+  amountReceived?: number;
+  change?: number;
   items: InPersonSaleItem[];
   total: number;
 }

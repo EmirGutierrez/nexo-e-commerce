@@ -6,11 +6,28 @@ Monolito modular con Spring Boot, PostgreSQL, Flyway y sesiones HTTP administrad
 
 - Java 21 o superior
 - Maven 3.6.3 o superior
-- Docker Desktop con Compose
+- Docker Desktop con Docker Compose v2.30 o superior
+
+## Arranque completo con Docker Compose
+
+Desde la raíz del repositorio, copia `backend/.env.example` a `backend/.env`, completa usuario y contraseña de PostgreSQL y ejecuta:
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+Compose construye la API con Maven, crea PostgreSQL, espera a que la base esté lista, inicia Spring para aplicar Flyway y luego levanta Next.js cuando la API responda. La web queda en `http://localhost:13000`, Swagger en `http://localhost:18080/swagger-ui.html` y PostgreSQL en `127.0.0.1:15432`. Para DBeaver usa ese host y puerto, la base `nexo_commerce` y el usuario/contraseña definidos en `backend/.env`.
+
+Los puertos de este proyecto se eligieron para evitar el puerto 5432, que ya estaba ocupado en la computadora donde se preparó esta configuración. Están publicados solo en loopback. Si alguno de esos tres puertos ya estuviera ocupado en otra computadora, cambia el lado izquierdo de su mapeo en `compose.yaml` y actualiza el origen CORS en `backend`; los puertos internos de los contenedores no cambian.
+
+La base usa el volumen persistente `nexo-commerce-dev-data`. `docker compose down` detiene los servicios y conserva los datos. `docker compose down -v` elimina también el volumen y borra la base local: úsalo únicamente si quieres reiniciarla desde cero.
+
+Para revisar los registros usa `docker compose logs -f postgres backend frontend`; para detener todo, `docker compose down`. No necesitas ejecutar Maven ni `npm run dev` aparte cuando uses este Compose: Maven compila el backend durante la construcción de su imagen y Next.js se inicia como servicio del mismo archivo.
 
 ## Desarrollo local
 
-1. Copia `.env.example` a `.env` dentro de `backend/` y define `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_USERNAME` y `DATABASE_PASSWORD`. Usa una contraseña local propia; los valores de `.env` quedan ignorados por Git.
+1. Copia `backend/.env.example` a `backend/.env` y define `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_USERNAME` y `DATABASE_PASSWORD`. Usa los mismos valores de usuario y contraseña para PostgreSQL y Spring; `.env` queda ignorado por Git.
 2. Desde `backend/`, inicia PostgreSQL con `docker compose up -d`. El puerto de PostgreSQL queda accesible solo desde el propio equipo.
 3. Inicia la API con `mvn spring-boot:run`. El perfil `local` se selecciona por defecto y Flyway aplica las migraciones al arrancar.
 4. Swagger UI estará disponible en `http://localhost:8080/swagger-ui.html`.
@@ -18,6 +35,24 @@ Monolito modular con Spring Boot, PostgreSQL, Flyway y sesiones HTTP administrad
 Next.js actúa como BFF: el navegador solicita `/api/...` al mismo origen y la ruta servidora reenvía la cookie de sesión y el token CSRF a Spring. Copia el `.env.example` de la raíz a `.env.local` y configura `SPRING_BACKEND_URL` con el origen interno de Spring; esta variable solo está disponible en el servidor de Next.js. El uso de HTTP se limita a localhost para desarrollo; utiliza HTTPS entre Next.js y Spring en producción y mantén Spring en una red privada.
 
 El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` y `CORS_ALLOWED_ORIGINS`. Usa HTTPS para navegador → Next.js y Next.js → Spring, y conserva `SESSION_COOKIE_SECURE=true`. La cookie que Next.js entrega al navegador es `HttpOnly`, `Secure` para orígenes de producción y `SameSite=Lax`; en localhost sobre HTTP se omite `Secure` para poder probar el flujo. Spring valida cada solicitud protegida. OpenAPI queda deshabilitado en producción por defecto; puede habilitarse con `OPENAPI_ENABLED=true`.
+
+## PostgreSQL compartido por el equipo
+
+`docker compose up -d` crea una base local persistente en la computadora actual; no comparte datos con otras computadoras. Para que el grupo consulte los mismos registros, el equipo debe provisionar **una sola instancia PostgreSQL administrada y accesible por Internet**. El repositorio deja listo el perfil para conectarse a esa instancia, pero no crea la cuenta ni el recurso del proveedor.
+
+1. La persona responsable crea la instancia y una base vacía, obtiene host, puerto, base, usuario y contraseña, y comparte esos valores por un canal privado. Habilita TLS y restringe el acceso de red a los integrantes cuando el proveedor lo permita.
+2. Cada integrante copia `backend/env.team.example` como `backend/.env.team` (PowerShell: `Copy-Item backend/env.team.example backend/.env.team`; Git Bash: `cp backend/env.team.example backend/.env.team`) y reemplaza los valores de ejemplo. `.env.team` está ignorado por Git; no lo subas ni lo envíes dentro del repositorio.
+3. Para levantar toda la aplicación con Docker usando la base compartida, ejecuta desde la raíz:
+
+   ```powershell
+   docker compose --env-file backend/.env.team up --build -d
+   docker compose ps
+   ```
+
+   `--env-file` selecciona el perfil `team` y entrega la URL remota a Spring; Compose también carga el archivo privado como entorno del backend. El servicio PostgreSQL local seguirá levantado en `127.0.0.1:15432`, pero Spring usará la URL administrada compartida. Para conectarte con DBeaver en este modo, usa el host, puerto, base y credenciales del proveedor, no los del PostgreSQL local.
+4. Como alternativa sin Docker, desde `backend/` cada integrante inicia Spring con `mvn spring-boot:run -Dspring-boot.run.profiles=team`. Desde la raíz inicia Next.js con `npm run dev`; `.env.local` debe apuntar `SPRING_BACKEND_URL` a `http://localhost:8080`. Todas las APIs se conectarán al mismo PostgreSQL remoto y Flyway aplicará las migraciones pendientes al iniciar Spring.
+
+Cuentas, productos, pedidos, ventas, permisos, imágenes y demás filas persistidas en PostgreSQL serán comunes; el carrito guardado en cada navegador seguirá siendo local. La instancia debe partir vacía o tener el historial Flyway compatible con esta versión. Configura copias de seguridad automáticas en el proveedor antes de guardar datos importantes. Las credenciales y la URL completa de conexión nunca deben guardarse en Git ni compartirse en canales públicos.
 
 ## Primer administrador
 
