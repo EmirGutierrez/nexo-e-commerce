@@ -81,6 +81,16 @@ public class BusinessRecordService {
     public BusinessRecordResponse create(String resource, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "create");
+        return createAuthorized(normalized, input);
+    }
+
+    @Transactional
+    public BusinessRecordResponse createInventoryProduct(Map<String, Object> input) {
+        authorize("inventory", "create");
+        return createAuthorized("products", input);
+    }
+
+    private BusinessRecordResponse createAuthorized(String normalized, Map<String, Object> input) {
         if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);

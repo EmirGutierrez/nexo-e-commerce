@@ -343,7 +343,7 @@ function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
   if (section === 'products' || section === 'inventory' || section === 'inventory/alerts') return {
     Producto: stringValue(data, 'name', 'Producto'), Marca: stringValue(data, 'brandId', 'Marca'), Categoría: stringValue(data, 'category', 'Categoría'),
     SKU: stringValue(data, 'sku', 'SKU'), Valor: numberValue(data, 'price', 'Valor'), Existencias: numberValue(data, 'stock', 'Existencias'),
-    Imagen: stringValue(data, 'image', 'Imagen'), Estado: section === 'inventory' && stringValue(data, 'status', 'Estado') === 'Activo' ? 'En stock' : stringValue(data, 'status', 'Estado'),
+    Imagen: stringValue(data, 'image', 'Imagen'), Descripción: stringValue(data, 'description', 'Descripción'), Estado: section === 'inventory' && stringValue(data, 'status', 'Estado') === 'Activo' ? 'En stock' : stringValue(data, 'status', 'Estado'),
     Ubicación: stringValue(data, 'Ubicación') || 'Bodega central',
   };
   if (section === 'categories') return { Nombre: stringValue(data, 'name'), Productos: numberValue(data, 'products'), 'Ventas del mes': numberValue(data, 'monthlySales'), Estado: stringValue(data, 'status') };
@@ -384,7 +384,10 @@ export const adminTableService = {
         Rol: roleLabels[role], 'Último acceso': 'Nunca', Estado: 'Pendiente' } };
     }
     if (section === 'roles-permissions') throw new Error('Los roles disponibles se administran desde la matriz de permisos.');
-    const record = await business.create(resourceFor(section), toDomainData(section, row));
+    const domainData = toDomainData(section, row);
+    const record = section === 'inventory'
+      ? await apiClient.post<ApiRecord>('/api/business/inventory/products', domainData)
+      : await business.create(resourceFor(section), domainData);
     return { id: record.id, data: toAdminRow(section, dataWithId(record)) };
   },
   update: async (section: string, id: string, row: AdminTableRecord): Promise<{ id: string; data: AdminTableRecord }> => {

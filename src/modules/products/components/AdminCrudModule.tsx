@@ -10,6 +10,7 @@ export interface AdminModuleConfig {
   title: string;
   description: string;
   action?: string;
+  formColumns?: string[];
   columns: string[];
   stats: { label: string; value: string; detail: string; tone?: string }[];
   rows: AdminTableRecord[];
@@ -23,7 +24,7 @@ const statusChoices = (section: string) => section === 'products' || section ===
   : section === 'brands' ? ['Activa', 'Inactiva'] : section === 'purchases' ? ['Pendiente', 'Registrada', 'Anulada']
   : section === 'accounting' ? ['Registrado', 'Pendiente', 'Anulado'] : ['Activo', 'Inactivo'];
 const viewOnlySections = new Set(['inventory/history']);
-const updateOnlySections = new Set(['inventory', 'settings', 'profile']);
+const updateOnlySections = new Set(['settings', 'profile']);
 const numericColumns = new Set(['Valor', 'Ventas del mes', 'Total comprado', 'Pedidos', 'Usuarios', 'Productos', 'Existencias']);
 
 export default function AdminCrudModule({ section, config }: { section: string; config: AdminModuleConfig }) {
@@ -61,8 +62,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const isTransactional = transactionSections.has(section);
   const readOnly = viewOnlySections.has(section);
   const editOnly = updateOnlySections.has(section);
-  const formColumns = config.columns.filter((column) => {
-    if (isProductSection && mode === 'create' && column === 'Marca') return false;
+  const formColumns = (config.formColumns || config.columns).filter((column) => {
     if (mode === 'create' && section === 'users' && ['Último acceso', 'Estado'].includes(column)) return false;
     if (section === 'categories' && ['Productos', 'Ventas del mes'].includes(column)) return false;
     if (section === 'customers' && ['Pedidos', 'Total comprado'].includes(column)) return false;
@@ -93,14 +93,15 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const replaceEntries = (change: (current: Entry[]) => Entry[]) => setEntries(change);
   const closeDialog = () => { setMode(null); setError(''); setConfirmMessage(''); setActiveId(''); };
   const openCreate = () => {
-    const initialDraft = Object.fromEntries(config.columns.map((column) => [column, ''])) as Record<string, string>;
+    const initialDraft = Object.fromEntries((config.formColumns || config.columns).map((column) => [column, ''])) as Record<string, string>;
+    if (isProductSection) initialDraft.Imagen = '';
     if (config.columns.includes('Estado')) {
       initialDraft.Estado = section === 'accounting' ? 'Registrado' : section === 'purchases' ? 'Registrada' : 'Activo';
     }
     if (config.columns.includes('Estado de pago')) initialDraft['Estado de pago'] = 'Pendiente';
     setActiveId(''); setDraft(initialDraft); setError(''); setFeedback(''); setInviteLink(''); setMode('create');
   };
-  const openEdit = (entry: Entry) => { setActiveId(entry.id); setDraft(Object.fromEntries(config.columns.map((column) => [column, String(entry.data[column] ?? '')]))); setError(''); setMode('edit'); };
+  const openEdit = (entry: Entry) => { setActiveId(entry.id); setDraft({ ...Object.fromEntries((config.formColumns || config.columns).map((column) => [column, String(entry.data[column] ?? '')])), ...(isProductSection ? { Imagen: String(entry.data.Imagen || '') } : {}) }); setError(''); setMode('edit'); };
   const openView = (entry: Entry) => { setActiveId(entry.id); setMode('view'); };
   const openConfirm = (entry: Entry, action: 'delete' | 'annul' | 'archive') => {
     setActiveId(entry.id); setConfirmMessage(action); setError(''); setMode('confirm');
@@ -115,10 +116,15 @@ export default function AdminCrudModule({ section, config }: { section: string; 
 
   const saveRecord = async (event: React.FormEvent) => {
     event.preventDefault(); setError('');
+    if (section === 'inventory' && mode === 'create' && !draft.Imagen) {
+      setError('Selecciona una imagen JPG, PNG o WEBP para el producto.');
+      return;
+    }
     const nextRecord: AdminTableRecord = {};
     for (const column of formColumns) {
       const value = (draft[column] ?? '').trim();
       if (!value && column === 'Marca') { nextRecord[column] = ''; continue; }
+      if (!value && ['Descripción', 'Descripcion'].includes(column)) { nextRecord[column] = ''; continue; }
       if (!value) { setError(`Completa el campo «${column}».`); return; }
       const original = entries.find((entry) => entry.id === activeId)?.data[column];
       if (typeof original === 'number' || numericColumns.has(column)) {
@@ -127,7 +133,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
         nextRecord[column] = parsed;
       } else nextRecord[column] = value;
     }
-    if (mode === 'edit') nextRecord.Imagen = entries.find((entry) => entry.id === activeId)?.data.Imagen || '';
+    if (isProductSection) nextRecord.Imagen = draft.Imagen || '';
     setBusy(true);
     try {
       if (mode === 'create') {
@@ -143,6 +149,33 @@ export default function AdminCrudModule({ section, config }: { section: string; 
       closeDialog();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar el registro. Intenta nuevamente.'); }
     finally { setBusy(false); }
+  };
+
+  const selectProductImage = (event: React.ChangeEvent<HTMLInputElement>) => {
+    const file = event.currentTarget.files?.[0];
+    if (!file) return;
+    const allowedTypes = ['image/jpeg', 'image/png', 'image/webp'];
+    if (!allowedTypes.includes(file.type)) {
+      setError('La imagen debe ser JPG, PNG o WEBP.');
+      event.currentTarget.value = '';
+      return;
+    }
+    if (file.size > 140 * 1024) {
+      setError('La imagen debe pesar como máximo 140 KB.');
+      event.currentTarget.value = '';
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== 'string' || !reader.result.startsWith(`data:${file.type};base64,`)) {
+        setError('No se pudo leer la imagen. Intenta seleccionar el archivo nuevamente.');
+        return;
+      }
+      setDraft((current) => ({ ...current, Imagen: reader.result as string }));
+      setError('');
+    };
+    reader.onerror = () => setError('No se pudo leer la imagen. Intenta seleccionar el archivo nuevamente.');
+    reader.readAsDataURL(file);
   };
 
   const confirmAction = async () => {
@@ -178,10 +211,11 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     : section === 'customers' ? 'customers'
     : section === 'suppliers' ? 'suppliers'
     : section === 'settings' || section === 'profile' ? 'settings' : 'dashboard';
-  const canCreate = Boolean(config.action && !readOnly && !editOnly && role && roleService.can(role, permissionModule, 'create'));
+  const createPermissionModule = section === 'inventory' ? 'inventory' : permissionModule;
+  const canCreate = Boolean(config.action && !readOnly && !editOnly && role && roleService.can(role, createPermissionModule, 'create'));
   const approvalOnly = ['orders', 'transfers', 'payments', 'invoices'].includes(section);
   const canEdit = Boolean(!readOnly && !isTransactional && role && roleService.can(role, permissionModule, approvalOnly ? 'approve' : 'edit'));
-  const canDelete = Boolean(!readOnly && !isTransactional && !editOnly && section !== 'suppliers' && section !== 'inventory/alerts' && section !== 'users'
+  const canDelete = Boolean(!readOnly && !isTransactional && !editOnly && section !== 'suppliers' && section !== 'inventory' && section !== 'inventory/alerts' && section !== 'users'
     && role && roleService.can(role, permissionModule, 'delete'));
   const actionLabel = confirmMessage === 'delete' ? 'eliminar' : confirmMessage === 'archive' ? 'archivar' : 'anular';
   const activeEntry = entries.find((entry) => entry.id === activeId);
@@ -196,7 +230,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     </section>
     {mode && <div className="modal-backdrop" onClick={closeDialog}><div className={`modal crud-modal${mode === 'view' && isProductSection ? ' product-preview-modal' : ''}`} role="dialog" aria-modal="true" aria-labelledby="crud-dialog-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">{mode === 'view' ? 'Detalle' : mode === 'edit' ? 'Actualizar registro' : mode === 'create' ? 'Nuevo registro' : 'Confirmar acción'}</span><h2 id="crud-dialog-title">{mode === 'view' ? config.title : mode === 'confirm' ? `Confirmar ${actionLabel}` : mode === 'edit' ? `Editar ${config.title}` : config.action || `Crear ${config.title}`}</h2></div><button type="button" className="icon-button" aria-label="Cerrar" onClick={closeDialog}><X size={18} /></button></div>
       {mode === 'view' && activeEntry && isProductSection ? <ProductPreview entry={activeEntry.data} brandName={brandOptions.find((brand) => brand.id === activeEntry.data.Marca)?.name || 'Sin marca'} onClose={closeDialog} /> : mode === 'view' && activeEntry && <div className="crud-detail-list">{config.columns.map((column) => <div key={column}><span>{column}</span><strong>{String(activeEntry.data[column] ?? '—')}</strong></div>)}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Cerrar</button></div></div>}
-      {(mode === 'create' || mode === 'edit') && <form className="crud-form" onSubmit={saveRecord} noValidate><div className="crud-fields">{formColumns.map((column) => <label className={column === 'Descripción' || column === 'Descripcion' ? 'field crud-field-wide' : 'field'} key={column}><span>{column}</span>{column === 'Rol' && section === 'users' ? <select value={draft.Rol ?? ''} onChange={(event) => setDraft({ ...draft, Rol: event.target.value })}><option value="">Selecciona un rol</option>{(Object.keys(roleLabels) as Role[]).filter((role) => role !== 'customer' && (mode !== 'create' || role !== 'superadmin')).map((role) => <option key={role} value={roleLabels[role]}>{roleLabels[role]}</option>)}</select> : column === 'Marca' && isProductSection && mode === 'edit' ? <select value={draft.Marca ?? ''} onChange={(event) => setDraft({ ...draft, Marca: event.target.value })}><option value=''>Sin marca</option>{brandOptions.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}{brand.status === 'Inactiva' ? ' · Inactiva' : ''}</option>)}</select> : column === 'Estado' || column === 'Estado de pago' ? <select value={draft[column] || (column === 'Estado de pago' ? 'Pendiente' : 'Activo')} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })}>{Array.from(new Set([...statusChoices(section), draft[column]].filter(Boolean))).map((value) => <option key={value}>{value}</option>)}</select> : <input type={column === 'Correo' ? 'email' : typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? 'number' : 'text'} min={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? '0' : undefined} step="any" value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={`Ingresa ${column.toLowerCase()}`} />}</label>)}</div>{error && <div className="crud-error" role="alert">{error}</div>}<div className="crud-form-note">{section === 'users' && mode === 'create' ? 'El enlace se muestra una sola vez. La persona definirá su propia contraseña al aceptar la invitación.' : 'Los cambios se guardarán en PostgreSQL.'}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeDialog}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy}><Check size={16} /> Guardar</button></div></form>}
+      {(mode === 'create' || mode === 'edit') && <form className="crud-form" onSubmit={saveRecord} noValidate><div className="crud-fields">{formColumns.map((column) => <label className={column === 'Descripción' || column === 'Descripcion' ? 'field crud-field-wide' : 'field'} key={column}><span>{column}</span>{column === 'Rol' && section === 'users' ? <select value={draft.Rol ?? ''} onChange={(event) => setDraft({ ...draft, Rol: event.target.value })}><option value="">Selecciona un rol</option>{(Object.keys(roleLabels) as Role[]).filter((role) => role !== 'customer' && (mode !== 'create' || role !== 'superadmin')).map((role) => <option key={role} value={roleLabels[role]}>{roleLabels[role]}</option>)}</select> : column === 'Marca' && isProductSection ? <select value={draft.Marca ?? ''} onChange={(event) => setDraft({ ...draft, Marca: event.target.value })}><option value=''>Sin marca</option>{brandOptions.map((brand) => <option key={brand.id} value={brand.id}>{brand.name}{brand.status === 'Inactiva' ? ' · Inactiva' : ''}</option>)}</select> : column === 'Estado' || column === 'Estado de pago' ? <select value={draft[column] || (column === 'Estado de pago' ? 'Pendiente' : 'Activo')} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })}>{Array.from(new Set([...statusChoices(section), draft[column]].filter(Boolean))).map((value) => <option key={value}>{value}</option>)}</select> : <input type={column === 'Correo' ? 'email' : typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? 'number' : 'text'} min={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? '0' : undefined} step="any" value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={`Ingresa ${column.toLowerCase()}`} />}</label>)}</div>{section === 'inventory' && <label className="field crud-field-wide image-upload-field"><span>Imagen del producto</span><div className="product-image-upload"><ProductImage src={draft.Imagen || ''} alt="Vista previa del producto" className="product-upload-preview" /><div className="product-image-upload-controls"><input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Seleccionar imagen del producto" onChange={selectProductImage} /><small>JPG, PNG o WEBP · máximo 140 KB. La imagen se guardará junto al producto.</small>{draft.Imagen && <button type="button" className="text-link" onClick={() => setDraft((current) => ({ ...current, Imagen: '' }))}>Quitar imagen</button>}</div></div></label>}{error && <div className="crud-error" role="alert">{error}</div>}<div className="crud-form-note">{section === 'users' && mode === 'create' ? 'El enlace se muestra una sola vez. La persona definirá su propia contraseña al aceptar la invitación.' : 'Los cambios se guardarán en PostgreSQL.'}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeDialog}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy}><Check size={16} /> Guardar</button></div></form>}
       {mode === 'confirm' && <div className="crud-confirm"><p>¿Confirmas {actionLabel} este registro? La acción se validará y guardará en PostgreSQL.</p>{error && <div className="crud-error" role="alert">{error}</div>}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Volver</button><button className="button button-primary" disabled={busy} onClick={confirmAction}>{busy ? 'Procesando...' : `Confirmar ${actionLabel}`}</button></div></div>}
       </div></div>}
   </div>;
