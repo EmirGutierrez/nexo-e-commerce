@@ -3,6 +3,9 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 
 const SESSION_COOKIE = 'NEXOSESSION';
+const TAB_SESSION_COOKIE_PREFIX = `${SESSION_COOKIE}_`;
+const TAB_SESSION_HEADER = 'x-nexo-tab-session';
+const TAB_SESSION_ID_PATTERN = /^[a-f0-9]{48}$/;
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 const DOCKER_BACKEND_HOST = 'backend';
 
@@ -34,7 +37,30 @@ function backendOrigin(request: NextRequest): string {
   return url.origin;
 }
 
-function relaySessionCookie(upstream: Response, outgoing: NextResponse, request: NextRequest) {
+function sessionCookieName(tabSessionId: string | null): string | null {
+  return tabSessionId && TAB_SESSION_ID_PATTERN.test(tabSessionId)
+    ? `${TAB_SESSION_COOKIE_PREFIX}${tabSessionId}`
+    : null;
+}
+
+function setSessionCookie(outgoing: NextResponse, request: NextRequest, name: string, value: string, expired: boolean) {
+  outgoing.cookies.set(name, expired ? '' : value, {
+    httpOnly: true,
+    secure: secureCookie(request),
+    sameSite: 'lax',
+    path: '/',
+    ...(expired ? { maxAge: 0 } : {}),
+  });
+}
+
+function clearLegacySessionCookie(outgoing: NextResponse, request: NextRequest) {
+  // La cookie compartida anterior no identifica una pestaña; ya no debe autorizar solicitudes.
+  setSessionCookie(outgoing, request, SESSION_COOKIE, '', true);
+}
+
+function relaySessionCookie(upstream: Response, outgoing: NextResponse, request: NextRequest, tabCookieName: string | null) {
+  if (!tabCookieName) return;
+
   for (const header of upstream.headers.getSetCookie()) {
     const [pair, ...attributes] = header.split(';');
     const separator = pair.indexOf('=');
@@ -46,13 +72,7 @@ function relaySessionCookie(upstream: Response, outgoing: NextResponse, request:
     const expired = !value || (maxAge && Number(maxAge.split('=')[1]) <= 0) ||
       (expires && Date.parse(expires.split('=').slice(1).join('=')) <= Date.now());
 
-    outgoing.cookies.set(SESSION_COOKIE, expired ? '' : value, {
-      httpOnly: true,
-      secure: secureCookie(request),
-      sameSite: 'lax',
-      path: '/',
-      ...(expired ? { maxAge: 0 } : {}),
-    });
+    setSessionCookie(outgoing, request, tabCookieName, value, Boolean(expired));
   }
 }
 
@@ -68,7 +88,8 @@ async function forward(request: NextRequest, context: RouteContext<'/api/[...pat
   const headers = new Headers({ Accept: request.headers.get('accept') || 'application/json' });
   const contentType = request.headers.get('content-type');
   const csrfToken = request.headers.get('x-csrf-token');
-  const session = request.cookies.get(SESSION_COOKIE)?.value;
+  const tabCookieName = sessionCookieName(request.headers.get(TAB_SESSION_HEADER));
+  const session = tabCookieName ? request.cookies.get(tabCookieName)?.value : undefined;
   if (contentType) headers.set('Content-Type', contentType);
   if (csrfToken) headers.set('X-CSRF-TOKEN', csrfToken);
   if (session) headers.set('Cookie', `${SESSION_COOKIE}=${session}`);
@@ -89,15 +110,10 @@ async function forward(request: NextRequest, context: RouteContext<'/api/[...pat
         ...(upstream.headers.get('content-type') ? { 'Content-Type': upstream.headers.get('content-type')! } : {}),
       },
     });
-    relaySessionCookie(upstream, outgoing, request);
+    relaySessionCookie(upstream, outgoing, request, tabCookieName);
+    clearLegacySessionCookie(outgoing, request);
     if (request.method === 'POST' && path.join('/') === 'auth/logout' && upstream.ok) {
-      outgoing.cookies.set(SESSION_COOKIE, '', {
-        httpOnly: true,
-        secure: secureCookie(request),
-        sameSite: 'lax',
-        path: '/',
-        maxAge: 0,
-      });
+      if (tabCookieName) setSessionCookie(outgoing, request, tabCookieName, '', true);
     }
     return outgoing;
   } catch {
