@@ -12,6 +12,8 @@ This block is written and re-added by `next dev` — verify at `node_modules/nex
 
 Guía de entrada para asistentes de IA y colaboradores que continúen el trabajo en este repositorio. Para las reglas de ramas y revisión del equipo, consulta también [CONTRIBUTING.md](./CONTRIBUTING.md).
 
+Para el estado funcional, la arquitectura, la persistencia y las formas de ejecución actuales, consulta [docs/contexto-proyecto.md](./docs/contexto-proyecto.md).
+
 ## Propósito
 
 NEXO es una tienda de demostración y un panel administrativo para un negocio minorista. La interfaz está en español, los precios se muestran en quetzales (`Q`) y la experiencia pública prioriza catálogo, carrito y checkout.

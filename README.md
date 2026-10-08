@@ -28,6 +28,8 @@ Las instrucciones completas de colaboración, ramas, revisión y merges están e
 
 El contexto técnico para asistentes de IA y colaboradores está en [AGENTS.md](./AGENTS.md).
 
+La descripción del estado actual, la arquitectura y la evolución técnica está en [docs/contexto-proyecto.md](./docs/contexto-proyecto.md).
+
 El flujo oficial es `origin/develop → feature/* → revisión → merge directo a develop → master`. No se utilizan Pull Requests, `main` ni cambios directos sobre `develop` o `master`.
 
 ## Estructura y alcance actual
