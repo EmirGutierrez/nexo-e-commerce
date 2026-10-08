@@ -42,14 +42,14 @@ El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWOR
 
 1. La persona responsable crea la instancia y una base vacía, obtiene host, puerto, base, usuario y contraseña, y comparte esos valores por un canal privado. Habilita TLS y restringe el acceso de red a los integrantes cuando el proveedor lo permita.
 2. Cada integrante copia `backend/env.team.example` como `backend/.env.team` (PowerShell: `Copy-Item backend/env.team.example backend/.env.team`; Git Bash: `cp backend/env.team.example backend/.env.team`) y reemplaza los valores de ejemplo. `.env.team` está ignorado por Git; no lo subas ni lo envíes dentro del repositorio.
-3. Para levantar toda la aplicación con Docker usando la base compartida, ejecuta desde la raíz:
+3. Si ya están levantados los servicios locales, detenlos desde la raíz con `docker compose down`. Esto conserva el volumen y los datos locales. Para levantar la aplicación usando la base compartida, ejecuta desde la raíz:
 
    ```powershell
-   docker compose --env-file backend/.env.team up --build -d
-   docker compose ps
+   docker compose -f compose.team.yaml up --build -d
+   docker compose -f compose.team.yaml ps
    ```
 
-   `--env-file` selecciona el perfil `team` y entrega la URL remota a Spring; Compose también carga el archivo privado como entorno del backend. El servicio PostgreSQL local seguirá levantado en `127.0.0.1:15432`, pero Spring usará la URL administrada compartida. Para conectarte con DBeaver en este modo, usa el host, puerto, base y credenciales del proveedor, no los del PostgreSQL local.
+   Este archivo Compose inicia Spring y Next.js y toma `DATABASE_URL`, `DATABASE_USERNAME` y `DATABASE_PASSWORD` de `backend/.env.team`; no inicia PostgreSQL local ni necesita `backend/.env`. Para detenerlo usa `docker compose -f compose.team.yaml down`. Para conectarte con DBeaver usa el host, puerto, base y credenciales del proveedor.
 4. Como alternativa sin Docker, desde `backend/` cada integrante inicia Spring con `mvn spring-boot:run -Dspring-boot.run.profiles=team`. Desde la raíz inicia Next.js con `npm run dev`; `.env.local` debe apuntar `SPRING_BACKEND_URL` a `http://localhost:8080`. Todas las APIs se conectarán al mismo PostgreSQL remoto y Flyway aplicará las migraciones pendientes al iniciar Spring.
 
 Cuentas, productos, pedidos, ventas, permisos, imágenes y demás filas persistidas en PostgreSQL serán comunes; el carrito guardado en cada navegador seguirá siendo local. La instancia debe partir vacía o tener el historial Flyway compatible con esta versión. Configura copias de seguridad automáticas en el proveedor antes de guardar datos importantes. Las credenciales y la URL completa de conexión nunca deben guardarse en Git ni compartirse en canales públicos.
