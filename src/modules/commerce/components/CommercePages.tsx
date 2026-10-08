@@ -3,14 +3,15 @@
 import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
-import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, CreditCard, Gift, Menu, Minus, Plus, Search, ShieldCheck, ShoppingCart, SlidersHorizontal, Sparkles, Tag, Trash2, Truck, Wallet, X } from 'lucide-react';
+import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, CreditCard, Gift, Heart, Menu, Minus, Plus, Search, ShieldCheck, ShoppingCart, SlidersHorizontal, Sparkles, Tag, Trash2, Truck, Wallet, X } from 'lucide-react';
 import { formatQ, products } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
 import { fetchCatalogFromApi } from '../../products/services/productService';
-import { checkoutService } from '../../../services';
+import { checkoutService, customerPortalService } from '../../../services';
 import type { PaymentMethod, Product } from '../../../types';
 import { applyPromotion, emptyPromotionData, isPromotionActive, loadPromotionData, loadRecentlyViewed, recordRecentlyViewed, validateDiscountCode } from '../services/commerceDataService';
 import PublicAccountControls from '../../app/components/PublicAccountControls';
+import CustomerNotificationBell from './CustomerNotificationBell';
 
 function SafeImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
   if (!src?.trim()) return null;
@@ -33,19 +34,25 @@ function PublicShell({ children }: { children: React.ReactNode }) {
   }, [menuOpen]);
   const closeMenu = () => setMenuOpen(false);
 
-  return <div className="public-app"><header className="public-header"><Link href="/" className="brand"><span className="brand-mark"><span /></span><span>NEXO</span></Link><nav id="commerce-navigation" className={`public-nav${menuOpen ? ' is-open' : ''}`} aria-label="Navegación principal"><Link href="/store" onClick={closeMenu}>Tienda</Link><Link href="/#benefits" onClick={closeMenu}>Beneficios</Link><Link href="/#about" onClick={closeMenu}>Nosotros</Link><div className="public-nav-account"><PublicAccountControls onAction={closeMenu} /></div></nav><div className="header-actions"><PublicAccountControls onAction={closeMenu} /><button type="button" className="public-menu-toggle" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={menuOpen} aria-controls="commerce-navigation" onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</button><Link href="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link></div></header>{children}</div>;
+  return <div className="public-app"><header className="public-header"><Link href="/" className="brand"><span className="brand-mark"><span /></span><span>NEXO</span></Link><nav id="commerce-navigation" className={`public-nav${menuOpen ? ' is-open' : ''}`} aria-label="Navegación principal"><Link href="/store" onClick={closeMenu}>Tienda</Link><Link href="/#benefits" onClick={closeMenu}>Beneficios</Link><Link href="/#about" onClick={closeMenu}>Nosotros</Link><div className="public-nav-account"><PublicAccountControls onAction={closeMenu} /></div></nav><div className="header-actions"><CustomerNotificationBell /><PublicAccountControls onAction={closeMenu} /><button type="button" className="public-menu-toggle" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={menuOpen} aria-controls="commerce-navigation" onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</button><Link href="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link></div></header>{children}</div>;
 }
 
 function ProductCard({ product }: { product: Product }) {
-  const { addToCart } = useApp();
+  const { addToCart, userType } = useApp();
   const [added, setAdded] = useState(false);
+  const [saved, setSaved] = useState(false);
+  const [saveMessage, setSaveMessage] = useState('');
   const add = () => {
     if (!product.stock) return;
     addToCart(product);
     setAdded(true);
     window.setTimeout(() => setAdded(false), 1200);
   };
-  return <article className="product-card"><Link href={`/product/${product.id}`} className="product-image-wrap"><SafeImage src={product.image} alt={product.name} />{product.compareAt && <span className="sale-tag">Oferta</span>}{product.status === 'Bajo stock' && <span className="stock-tag">Últimas unidades</span>}<span className="quick-view">Ver producto <ArrowRight size={14} /></span></Link><div className="product-info"><span className="product-category">{product.category}</span><Link href={`/product/${product.id}`}><h3>{product.name}</h3></Link><div className="product-bottom"><div><strong>{formatQ(product.price)}</strong>{product.compareAt && <del>{formatQ(product.compareAt)}</del>}</div><button type="button" className={added ? 'add-button added' : 'add-button'} disabled={!product.stock} onClick={add} aria-label={`Agregar ${product.name} al carrito`}>{added ? <Check size={17} /> : <Plus size={18} />}</button></div></div></article>;
+  const save = async () => {
+    try { await customerPortalService.addWishlist(product.id); setSaved(true); setSaveMessage('Guardado en Mi wishlist'); }
+    catch (issue) { setSaveMessage(issue instanceof Error ? issue.message : 'No se pudo guardar.'); }
+  };
+  return <article className="product-card"><Link href={`/product/${product.id}`} className="product-image-wrap"><SafeImage src={product.image} alt={product.name} />{product.compareAt && <span className="sale-tag">Oferta</span>}{product.status === 'Bajo stock' && <span className="stock-tag">Últimas unidades</span>}<span className="quick-view">Ver producto <ArrowRight size={14} /></span></Link><div className="product-info"><span className="product-category">{product.category}</span><Link href={`/product/${product.id}`}><h3>{product.name}</h3></Link>{userType === 'customer' && <button type="button" className="wishlist-save" onClick={() => void save()} disabled={saved} aria-label={`Guardar ${product.name} en wishlist`}>{saved ? <Check size={14} /> : <Heart size={14} />}{saved ? 'Guardado' : 'Guardar favorito'}</button>}{saveMessage && <span className="wishlist-message" role="status">{saveMessage}</span>}<div className="product-bottom"><div><strong>{formatQ(product.price)}</strong>{product.compareAt && <del>{formatQ(product.compareAt)}</del>}</div><button type="button" className={added ? 'add-button added' : 'add-button'} disabled={!product.stock} onClick={add} aria-label={`Agregar ${product.name} al carrito`}>{added ? <Check size={17} /> : <Plus size={18} />}</button></div></div></article>;
 }
 
 export function Storefront() {
