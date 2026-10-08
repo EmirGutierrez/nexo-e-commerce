@@ -66,6 +66,8 @@ export interface Product {
   category: string;
   price: number;
   compareAt?: number;
+  cost?: number;
+  location?: string;
   stock: number;
   status: 'Activo' | 'Bajo stock' | 'Agotado' | 'Inactivo';
   image: string;
