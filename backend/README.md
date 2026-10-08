@@ -38,21 +38,20 @@ El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWOR
 
 ## PostgreSQL compartido por el equipo
 
-`docker compose up -d` crea una base local persistente en la computadora actual; no comparte datos con otras computadoras. Para que el grupo consulte los mismos registros, el equipo debe provisionar **una sola instancia PostgreSQL administrada y accesible por Internet**. El repositorio deja listo el perfil para conectarse a esa instancia, pero no crea la cuenta ni el recurso del proveedor.
+`docker compose up -d` crea una base local persistente en la computadora actual; no comparte datos con otras computadoras. El equipo dispone de una instancia PostgreSQL compartida en Neon (proyecto `fancy-wind-65283432`, base `neondb`). La copia inicial de los datos locales y las 17 migraciones Flyway ya están aplicadas allí. La API se conecta por TLS con verificación del certificado.
 
-1. La persona responsable crea la instancia y una base vacía, obtiene host, puerto, base, usuario y contraseña, y comparte esos valores por un canal privado. Habilita TLS y restringe el acceso de red a los integrantes cuando el proveedor lo permita.
-2. Cada integrante copia `backend/env.team.example` como `backend/.env.team` (PowerShell: `Copy-Item backend/env.team.example backend/.env.team`; Git Bash: `cp backend/env.team.example backend/.env.team`) y reemplaza los valores de ejemplo. `.env.team` está ignorado por Git; no lo subas ni lo envíes dentro del repositorio.
-3. Si ya están levantados los servicios locales, detenlos desde la raíz con `docker compose down`. Esto conserva el volumen y los datos locales. Para levantar la aplicación usando la base compartida, ejecuta desde la raíz:
+1. Danny comparte por un canal privado el archivo `backend/.env.team` de la instancia Neon. Cada integrante lo coloca en `backend/.env.team` dentro de su copia del repositorio. Si hay que reconstruirlo, copia `backend/env.team.example` como `backend/.env.team` y completa las credenciales recibidas. `.env.team` está ignorado por Git; no lo subas ni lo envíes dentro del repositorio.
+2. Si ya están levantados los servicios locales, detenlos desde la raíz con `docker compose down`. Esto conserva el volumen y los datos locales. Para levantar la aplicación usando la base compartida, ejecuta desde la raíz:
 
    ```powershell
    docker compose -f compose.team.yaml up --build -d
    docker compose -f compose.team.yaml ps
    ```
 
-   Este archivo Compose inicia Spring y Next.js y toma `DATABASE_URL`, `DATABASE_USERNAME` y `DATABASE_PASSWORD` de `backend/.env.team`; no inicia PostgreSQL local ni necesita `backend/.env`. Para detenerlo usa `docker compose -f compose.team.yaml down`. Para conectarte con DBeaver usa el host, puerto, base y credenciales del proveedor.
-4. Como alternativa sin Docker, desde `backend/` cada integrante inicia Spring con `mvn spring-boot:run -Dspring-boot.run.profiles=team`. Desde la raíz inicia Next.js con `npm run dev`; `.env.local` debe apuntar `SPRING_BACKEND_URL` a `http://localhost:8080`. Todas las APIs se conectarán al mismo PostgreSQL remoto y Flyway aplicará las migraciones pendientes al iniciar Spring.
+   Este archivo Compose inicia Spring y Next.js y toma `DATABASE_URL`, `DATABASE_USERNAME` y `DATABASE_PASSWORD` de `backend/.env.team`; no inicia PostgreSQL local ni necesita `backend/.env`. La web queda en `http://localhost:13000` y Swagger en `http://localhost:18080/swagger-ui.html`. Para detenerlo usa `docker compose -f compose.team.yaml down`. Para DBeaver usa el host directo `ep-fancy-firefly-b5jrgfbt.c-7.us-east-2.aws.neon.tech`, puerto `5432`, base `neondb`, usuario `neondb_owner`, la contraseña recibida por privado y SSL activado.
+3. Como alternativa sin Docker, desde `backend/` cada integrante inicia Spring con `mvn spring-boot:run -Dspring-boot.run.profiles=team`. Desde la raíz inicia Next.js con `npm run dev`; `.env.local` debe apuntar `SPRING_BACKEND_URL` a `http://localhost:8080`. Todas las APIs se conectarán al mismo PostgreSQL remoto y Flyway aplicará las migraciones pendientes al iniciar Spring.
 
-Cuentas, productos, pedidos, ventas, permisos, imágenes y demás filas persistidas en PostgreSQL serán comunes; el carrito guardado en cada navegador seguirá siendo local. La instancia debe partir vacía o tener el historial Flyway compatible con esta versión. Configura copias de seguridad automáticas en el proveedor antes de guardar datos importantes. Las credenciales y la URL completa de conexión nunca deben guardarse en Git ni compartirse en canales públicos.
+Cuentas, productos, pedidos, ventas, permisos, imágenes y demás filas persistidas en PostgreSQL serán comunes; el carrito guardado en cada navegador seguirá siendo local. Usa el mismo archivo privado en cada computadora para apuntar a la misma base. Configura copias de seguridad automáticas en el proveedor antes de guardar datos importantes. Las credenciales y la URL completa de conexión nunca deben guardarse en Git ni compartirse en canales públicos.
 
 ## Primer administrador
 
