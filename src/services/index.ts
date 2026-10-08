@@ -31,6 +31,8 @@ function mapProduct(record: ApiRecord): Product {
     category: stringValue(data, 'category', 'Categoría'),
     price: numberValue(data, 'price', 'Valor'),
     compareAt: value(data, 'compareAt', 'Precio anterior') === undefined ? undefined : numberValue(data, 'compareAt', 'Precio anterior'),
+    cost: value(data, 'cost', 'Costo unitario') === undefined ? undefined : numberValue(data, 'cost', 'Costo unitario'),
+    location: stringValue(data, 'location', 'Ubicación') || undefined,
     stock,
     status: statusValue === 'Inactivo' || statusValue === 'Inactiva' ? 'Inactivo' : statusValue === 'Agotado' || stock === 0 ? 'Agotado' : stock < 10 ? 'Bajo stock' : 'Activo',
     image: stringValue(data, 'image', 'Imagen'),
@@ -42,7 +44,8 @@ function mapProduct(record: ApiRecord): Product {
 function productData(product: Product): JsonRecord {
   return { name: product.name, brandId: product.brandId || null, category: product.category, price: product.price,
     compareAt: product.compareAt ?? null, stock: product.stock, status: product.status, image: product.image,
-    description: product.description, featured: Boolean(product.featured), sku: product.sku };
+    description: product.description, featured: Boolean(product.featured), sku: product.sku,
+    ...(product.cost === undefined ? {} : { cost: product.cost }), ...(product.location === undefined ? {} : { location: product.location }) };
 }
 
 interface ApiUser { id: string; name: string; email: string; role: string; status: string; lastLoginAt?: string | null; permissions?: string[] }
@@ -316,8 +319,13 @@ export const accountingService = {
 const resourceFor = (section: string) => section === 'inventory' || section === 'inventory/alerts' ? 'products' : ['transfers', 'payments', 'invoices'].includes(section) ? 'orders' : section;
 function toDomainData(section: string, row: AdminTableRecord): JsonRecord {
   if (section === 'products' || section === 'inventory' || section === 'inventory/alerts') return {
-    name: row.Producto, brandId: row.Marca || null, category: row.Categoría || '', sku: row.SKU || '', price: row.Valor ?? 0,
-    stock: row.Existencias ?? 0, status: row.Estado === 'En stock' ? 'Activo' : row.Estado || 'Activo', image: row.Imagen || '',
+    name: row.Producto, brandId: row.Marca || null, category: row.Categoría || '', sku: row.SKU || '',
+    ...(row['Precio de venta'] !== undefined || row.Valor !== undefined ? { price: row['Precio de venta'] ?? row.Valor } : {}),
+    ...(row['Costo unitario'] !== undefined ? { cost: row['Costo unitario'] } : {}),
+    stock: row.Existencias ?? 0,
+    status: row.Estado === 'Inactivo' ? 'Inactivo' : 'Activo',
+    ...(row.Imagen !== undefined ? { image: row.Imagen } : {}),
+    ...(row.Ubicación !== undefined ? { location: row.Ubicación } : {}),
     ...(row.Descripción === undefined ? {} : { description: row.Descripción }),
   };
   if (section === 'categories') return { name: row.Nombre, status: row.Estado || 'Activo' };
@@ -340,9 +348,14 @@ function toDomainData(section: string, row: AdminTableRecord): JsonRecord {
 function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
   if (section === 'products' || section === 'inventory' || section === 'inventory/alerts') return {
     Producto: stringValue(data, 'name', 'Producto'), Marca: stringValue(data, 'brandId', 'Marca'), Categoría: stringValue(data, 'category', 'Categoría'),
-    SKU: stringValue(data, 'sku', 'SKU'), Valor: numberValue(data, 'price', 'Valor'), Existencias: numberValue(data, 'stock', 'Existencias'),
-    Imagen: stringValue(data, 'image', 'Imagen'), Estado: section === 'inventory' && stringValue(data, 'status', 'Estado') === 'Activo' ? 'En stock' : stringValue(data, 'status', 'Estado'),
-    Ubicación: stringValue(data, 'Ubicación') || 'Bodega central',
+    SKU: stringValue(data, 'sku', 'SKU'), Valor: numberValue(data, 'price', 'Valor'),
+    'Costo unitario': value(data, 'cost', 'Costo unitario') === undefined ? '' : numberValue(data, 'cost', 'Costo unitario'),
+    'Precio de venta': numberValue(data, 'price', 'Precio de venta'),
+    Existencias: numberValue(data, 'stock', 'Existencias'), Imagen: stringValue(data, 'image', 'Imagen'),
+    Estado: section === 'inventory'
+      ? stringValue(data, 'status', 'Estado') === 'Inactivo' ? 'Inactivo' : numberValue(data, 'stock', 'Existencias') > 0 ? 'En stock' : 'Sin stock'
+      : stringValue(data, 'status', 'Estado'),
+    Ubicación: stringValue(data, 'location', 'Ubicación'),
   };
   if (section === 'categories') return { Nombre: stringValue(data, 'name'), Productos: numberValue(data, 'products'), 'Ventas del mes': numberValue(data, 'monthlySales'), Estado: stringValue(data, 'status') };
   if (section === 'customers') return { Nombre: stringValue(data, 'name'), Correo: stringValue(data, 'email'), Pedidos: numberValue(data, 'orders'), 'Total comprado': numberValue(data, 'totalPurchased'), Favoritos: numberValue(data, 'wishlistItems'), Estado: stringValue(data, 'status') };
@@ -364,7 +377,7 @@ export const adminTableService = {
       Producto: String(movement.productName), SKU: String(movement.sku), Existencias: Number(movement.quantity), Ubicación: String(movement.reason), Estado: String(movement.type),
     } }));
     if (section === 'inventory/alerts') return (await productInventoryService.list()).filter((product) => product.status !== 'Inactivo' && product.stock < 10).map((product) => ({ id: product.id,
-      data: { Producto: product.name, SKU: product.sku, Existencias: product.stock, Ubicación: 'Bodega central', Estado: product.status } }));
+      data: { Producto: product.name, SKU: product.sku, Existencias: product.stock, Ubicación: product.location || '', Estado: product.status } }));
     if (['transfers', 'payments', 'invoices'].includes(section)) {
       const orders = await business.list('orders');
       const filtered = section === 'transfers' ? orders.filter((record) => stringValue(record.data, 'paymentMethod', 'payment') === 'transfer' || stringValue(record.data, 'payment') === 'Transferencia') : orders;

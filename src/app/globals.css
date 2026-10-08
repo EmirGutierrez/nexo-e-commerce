@@ -458,6 +458,19 @@
 .crud-detail-list > div { display: flex; justify-content: space-between; align-items: flex-start; gap: 20px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 13px; }
 .crud-detail-list > div span { color: var(--muted); }
 .crud-detail-list > div strong { text-align: right; }
+.product-image-upload-preview { display: flex; align-items: center; gap: 12px; padding-top: 8px; }
+.product-image-upload-preview .product-table-thumb { width: 58px; height: 58px; }
+.table-page-size, .table-pagination-actions { display: inline-flex; align-items: center; gap: 8px; white-space: nowrap; }
+.table-page-size select { min-width: 54px; padding: 5px 21px 5px 3px !important; color: var(--ink); font-size: 10px; }
+.table-pagination-actions { gap: 9px; }
+.table-pagination-actions .icon-button { display: grid; width: 28px; height: 28px; place-items: center; border: 1px solid var(--border); border-radius: 7px; background: white; color: var(--navy); font: 18px 'Manrope', sans-serif; }
+.table-pagination-actions .icon-button:disabled { color: #aeb6c3; background: #f4f6f9; }
+.product-image-upload-preview .image-fallback { width: 58px; height: 58px; }
+@media (max-width: 700px) {
+  .pagination { flex-wrap: wrap; justify-content: center; gap: 12px; }
+  .pagination > span { flex-basis: 100%; text-align: center; }
+  .table-pagination-actions { flex: 1; justify-content: center; }
+}
 .crud-confirm p { color: var(--muted); line-height: 1.6; font-size: 13px; }
 .crud-purchase-items { display: grid; gap: 0; margin-top: 15px; border-top: 1px solid var(--border); }
 .crud-purchase-items > div { display: flex; justify-content: space-between; gap: 12px; padding: 11px 0; border-bottom: 1px solid var(--border); font-size: 12px; }
@@ -1175,6 +1188,56 @@ select:disabled {
   cursor: not-allowed;
   opacity: .6;
 }
+
+/* Los controles de los formularios modales comparten el marco de los campos de texto. */
+.modal form input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="file"]),
+.modal form select,
+.modal form textarea {
+  box-sizing: border-box;
+  width: 100%;
+  min-width: 0;
+  min-height: 42px;
+  padding: 10px 12px !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 9px !important;
+  background-color: #fff !important;
+  color: var(--ink);
+  font: 400 12px 'Manrope', sans-serif !important;
+  box-shadow: none;
+}
+.modal form select {
+  appearance: none;
+  -webkit-appearance: none;
+  padding-right: 34px !important;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='14' height='14' viewBox='0 0 24 24' fill='none' stroke='%2368738a' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='m6 9 6 6 6-6'/%3E%3C/svg%3E") !important;
+  background-repeat: no-repeat;
+  background-position: right 10px center;
+}
+.modal form input[type="number"] { appearance: textfield; -moz-appearance: textfield; }
+.modal form input[type="number"]::-webkit-inner-spin-button,
+.modal form input[type="number"]::-webkit-outer-spin-button { margin: 0; -webkit-appearance: none; }
+.modal form input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):focus,
+.modal form select:focus,
+.modal form textarea:focus {
+  border-color: var(--navy) !important;
+  outline: none;
+  box-shadow: 0 0 0 3px rgba(61, 86, 143, .12);
+}
+
+/* Anchos idénticos para encabezados y filas: cada registro comparte las mismas columnas. */
+.data-table > .table-head,
+.data-table > .table-row { width: 100%; }
+.crud-table > .table-head > *,
+.crud-table > .table-row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.accounting-table .table-head, .accounting-table .table-row { grid-template-columns: 112px 220px 150px 90px 135px 145px 90px; }
+.purchases-table .table-head, .purchases-table .table-row { min-width: 990px; grid-template-columns: 110px 185px 140px 185px 135px 135px 100px; }
+.sales-table .table-head, .sales-table .table-row { grid-template-columns: 110px 180px 150px 75px 150px 125px 70px; }
+.web-orders-table .table-head, .web-orders-table .table-row { grid-template-columns: 110px 155px 130px 145px 170px 110px; }
+.brand-table .table-head, .brand-table .table-row { grid-template-columns: minmax(130px, 1.1fr) minmax(180px, 1.45fr) minmax(180px, 1.45fr) minmax(80px, .65fr) minmax(95px, .75fr) 125px; }
+.brand-linked-products .table-head, .brand-linked-products .table-row,
+.supplier-associated .table-head, .supplier-associated .table-row { grid-template-columns: 210px 120px 150px 100px 70px; }
+.supplier-table .table-head, .supplier-table .table-row { min-width: 980px; grid-template-columns: 155px 210px 205px 140px 100px 140px; }
+.all-sales-table .table-head, .all-sales-table .table-row { grid-template-columns: 145px 105px 170px 110px 150px 130px 180px 145px 100px; }
 
 /* Los selectores que ya tienen una flecha del componente conservan una sola. */
 .sort-select select,
