@@ -18,7 +18,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class RoleManagementService {
-    private static final Set<String> LOCKED_ROLES = Set.of("superadmin", "customer", "employee_buyer");
+    private static final Set<String> LOCKED_ROLES = Set.of("superadmin", "customer");
     private final JdbcTemplate jdbc;
     private final PermissionAuthorizer authorizer;
 

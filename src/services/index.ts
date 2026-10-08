@@ -72,6 +72,25 @@ export const authService = {
   },
 };
 
+export interface CustomerOrder {
+  id: string; createdAt?: string;
+  data: { orderNumber?: string; customer?: string; date?: string; status?: string; paymentStatus?: string;
+    paymentMethod?: string; total?: number; items?: { productName?: string; quantity?: number; subtotal?: number }[] };
+}
+export interface CustomerNotification {
+  id: string; orderId?: string | null; type: string; title: string; message: string; read: boolean; createdAt: string;
+}
+export interface CustomerNotificationSummary { items: CustomerNotification[]; unreadCount: number }
+export const customerPortalService = {
+  orders: () => apiClient.get<CustomerOrder[]>('/api/catalog/my/orders'),
+  wishlist: () => apiClient.get<Product[]>('/api/catalog/my/wishlist'),
+  notifications: () => apiClient.get<CustomerNotificationSummary>('/api/catalog/my/notifications'),
+  markNotificationRead: (id: string) => apiClient.patch<void>(`/api/catalog/my/notifications/${encodeURIComponent(id)}/read`, {}),
+  markAllNotificationsRead: () => apiClient.patch<void>('/api/catalog/my/notifications/read-all', {}),
+  addWishlist: (productId: string) => apiClient.post<void>(`/api/catalog/my/wishlist/${encodeURIComponent(productId)}`),
+  removeWishlist: (productId: string) => apiClient.delete<void>(`/api/catalog/my/wishlist/${encodeURIComponent(productId)}`),
+};
+
 export const categoryService = {
   list: async (): Promise<string[]> => (await business.list('categories')).map((record) => String(value(record.data, 'name', 'Nombre') || '')).filter(Boolean),
 };
@@ -98,8 +117,14 @@ export const orderService = {
 function mapOrder(record: ApiRecord): Order {
   const data = record.data;
   const rawPayment = stringValue(data, 'payment', 'paymentMethod');
+  const itemDetails = Array.isArray(data.items) ? data.items.map((raw) => {
+    const item = raw as JsonRecord;
+    const quantity = numberValue(item, 'quantity');
+    const unitPrice = numberValue(item, 'unitPrice');
+    return { productId: stringValue(item, 'productId'), productName: stringValue(item, 'productName'), sku: stringValue(item, 'sku'), quantity, unitPrice, subtotal: numberValue(item, 'subtotal') || quantity * unitPrice };
+  }) : [];
   return { id: record.id, customer: stringValue(data, 'customer', 'Cliente'),
-    date: stringValue(data, 'date', 'Fecha').slice(0, 10), items: Array.isArray(data.items) ? data.items.length : numberValue(data, 'itemsCount'),
+    date: stringValue(data, 'date', 'Fecha').slice(0, 10), items: itemDetails.length || numberValue(data, 'itemsCount'), itemDetails,
     total: numberValue(data, 'total', 'Total'),
     status: stringValue(data, 'status', 'Estado') as Order['status'],
     payment: rawPayment === 'transfer' || rawPayment === 'Transferencia' ? 'Transferencia' : 'Tarjeta' };
@@ -198,14 +223,16 @@ export const salesService = {
   },
   listInPerson: async (): Promise<InPersonSale[]> => (await business.list('sales')).map((record) => {
     const data = record.data;
-    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), paymentMethod: stringValue(data, 'paymentMethod') as PaymentMethod,
-      paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
+    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
+      paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], ...(data.amountReceived === undefined ? {} : { amountReceived: numberValue(data, 'amountReceived') }),
+      ...(data.change === undefined ? {} : { change: numberValue(data, 'change') }), items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
   }),
-  createInPerson: async (input: { seller: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[] }): Promise<InPersonSale> => {
+  createInPerson: async (input: { customerName: string; nit: string; paymentMethod: 'cash' | 'card'; amountReceived?: number; items: { productId: string; quantity: number }[] }): Promise<InPersonSale> => {
     const record = await apiClient.post<ApiRecord>('/api/business/sales/record', input);
     const data = record.data;
-    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), paymentMethod: stringValue(data, 'paymentMethod') as PaymentMethod,
-      paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], items: data.items as InPersonSale['items'], total: numberValue(data, 'total') };
+    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
+      paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], ...(data.amountReceived === undefined ? {} : { amountReceived: numberValue(data, 'amountReceived') }),
+      ...(data.change === undefined ? {} : { change: numberValue(data, 'change') }), items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
   },
 };
 
@@ -296,7 +323,7 @@ function toDomainData(section: string, row: AdminTableRecord): JsonRecord {
     ...(row.Descripción === undefined ? {} : { description: row.Descripción }),
   };
   if (section === 'categories') return { name: row.Nombre, status: row.Estado || 'Activo' };
-  if (section === 'customers') return { name: row.Nombre, email: row.Correo, orders: row.Pedidos ?? 0, totalPurchased: row['Total comprado'] ?? 0, status: row.Estado || 'Activo' };
+  if (section === 'customers') return { name: row.Nombre, email: row.Correo, orders: row.Pedidos ?? 0, totalPurchased: row['Total comprado'] ?? 0, wishlistItems: row.Favoritos ?? 0, status: row.Estado || 'Activo' };
   if (section === 'orders' || section === 'payments' || section === 'transfers' || section === 'invoices') {
     const common: JsonRecord = {
     orderNumber: row.Pedido || row.Factura, customer: row.Cliente, date: row.Fecha || new Date().toISOString(), total: row.Total ?? row.Valor ?? 0,
@@ -309,7 +336,6 @@ function toDomainData(section: string, row: AdminTableRecord): JsonRecord {
   }
   if (section === 'users') return {};
   if (section === 'roles-permissions') return { name: row.Nombre, users: row.Usuarios ?? 0, permissions: row.Permisos || '', status: row.Estado || 'Activo' };
-  if (section === 'reports') return { name: row.Reporte, period: row.Periodo };
   if (section === 'settings' || section === 'profile') return { name: row.Configuración, description: row.Descripción, status: row.Estado };
   return Object.fromEntries(Object.entries(row).map(([key, item]) => [key, item]));
 }
@@ -318,12 +344,10 @@ function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
     Producto: stringValue(data, 'name', 'Producto'), Marca: stringValue(data, 'brandId', 'Marca'), Categoría: stringValue(data, 'category', 'Categoría'),
     SKU: stringValue(data, 'sku', 'SKU'), Valor: numberValue(data, 'price', 'Valor'), Existencias: numberValue(data, 'stock', 'Existencias'),
     Imagen: stringValue(data, 'image', 'Imagen'), Estado: section === 'inventory' && stringValue(data, 'status', 'Estado') === 'Activo' ? 'En stock' : stringValue(data, 'status', 'Estado'),
-    Descripción: stringValue(data, 'description', 'Descripción'),
     Ubicación: stringValue(data, 'Ubicación') || 'Bodega central',
   };
   if (section === 'categories') return { Nombre: stringValue(data, 'name'), Productos: numberValue(data, 'products'), 'Ventas del mes': numberValue(data, 'monthlySales'), Estado: stringValue(data, 'status') };
-  if (section === 'customers') return { Nombre: stringValue(data, 'name'), Correo: stringValue(data, 'email'), Pedidos: numberValue(data, 'orders'), 'Total comprado': numberValue(data, 'totalPurchased'), Estado: stringValue(data, 'status') };
-  if (section === 'reports') return { Reporte: stringValue(data, 'name'), Periodo: stringValue(data, 'period'), 'Generado por': stringValue(data, 'generatedBy'), Fecha: stringValue(data, 'date').slice(0, 10), Estado: stringValue(data, 'status') };
+  if (section === 'customers') return { Nombre: stringValue(data, 'name'), Correo: stringValue(data, 'email'), Pedidos: numberValue(data, 'orders'), 'Total comprado': numberValue(data, 'totalPurchased'), Favoritos: numberValue(data, 'wishlistItems'), Estado: stringValue(data, 'status') };
   if (section === 'orders' || section === 'sales') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };
   if (section === 'transfers' || section === 'payments') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Valor: numberValue(data, 'total'), 'Estado de pago': stringValue(data, 'paymentStatus') };
   if (section === 'invoices') return { Referencia: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };

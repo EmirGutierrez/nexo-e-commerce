@@ -6,11 +6,28 @@ Monolito modular con Spring Boot, PostgreSQL, Flyway y sesiones HTTP administrad
 
 - Java 21 o superior
 - Maven 3.6.3 o superior
-- Docker Desktop con Compose
+- Docker Desktop con Docker Compose v2.30 o superior
+
+## Arranque completo con Docker Compose
+
+Desde la raíz del repositorio, copia `backend/.env.example` a `backend/.env`, completa usuario y contraseña de PostgreSQL y ejecuta:
+
+```powershell
+docker compose up --build -d
+docker compose ps
+```
+
+Compose construye la API con Maven, crea PostgreSQL, espera a que la base esté lista, inicia Spring para aplicar Flyway y luego levanta Next.js cuando la API responda. La web queda en `http://localhost:13000`, Swagger en `http://localhost:18080/swagger-ui.html` y PostgreSQL en `127.0.0.1:15432`. Para DBeaver usa ese host y puerto, la base `nexo_commerce` y el usuario/contraseña definidos en `backend/.env`.
+
+Los puertos de este proyecto se eligieron para evitar el puerto 5432, que ya estaba ocupado en la computadora donde se preparó esta configuración. Están publicados solo en loopback. Si alguno de esos tres puertos ya estuviera ocupado en otra computadora, cambia el lado izquierdo de su mapeo en `compose.yaml` y actualiza el origen CORS en `backend`; los puertos internos de los contenedores no cambian.
+
+La base usa el volumen persistente `nexo-commerce-dev-data`. `docker compose down` detiene los servicios y conserva los datos. `docker compose down -v` elimina también el volumen y borra la base local: úsalo únicamente si quieres reiniciarla desde cero.
+
+Para revisar los registros usa `docker compose logs -f postgres backend frontend`; para detener todo, `docker compose down`. No necesitas ejecutar Maven ni `npm run dev` aparte cuando uses este Compose: Maven compila el backend durante la construcción de su imagen y Next.js se inicia como servicio del mismo archivo.
 
 ## Desarrollo local
 
-1. Copia `.env.example` a `.env` dentro de `backend/` y define `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_USERNAME` y `DATABASE_PASSWORD`. Usa una contraseña local propia; los valores de `.env` quedan ignorados por Git. La configuración inicial usa `nexo_commerce_restored` para coincidir con la base local que contiene los datos de trabajo.
+1. Copia `backend/.env.example` a `backend/.env` y define `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_USERNAME` y `DATABASE_PASSWORD`. Usa los mismos valores de usuario y contraseña para PostgreSQL y Spring; `.env` queda ignorado por Git.
 2. Desde `backend/`, inicia PostgreSQL con `docker compose up -d`. El puerto de PostgreSQL queda accesible solo desde el propio equipo.
 3. Inicia la API con `mvn spring-boot:run`. El perfil `local` se selecciona por defecto y Flyway aplica las migraciones al arrancar.
 4. Swagger UI estará disponible en `http://localhost:8080/swagger-ui.html`.
@@ -18,6 +35,23 @@ Monolito modular con Spring Boot, PostgreSQL, Flyway y sesiones HTTP administrad
 Next.js actúa como BFF: el navegador solicita `/api/...` al mismo origen y la ruta servidora reenvía la cookie de sesión y el token CSRF a Spring. Copia el `.env.example` de la raíz a `.env.local` y configura `SPRING_BACKEND_URL` con el origen interno de Spring; esta variable solo está disponible en el servidor de Next.js. El uso de HTTP se limita a localhost para desarrollo; utiliza HTTPS entre Next.js y Spring en producción y mantén Spring en una red privada.
 
 El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` y `CORS_ALLOWED_ORIGINS`. Usa HTTPS para navegador → Next.js y Next.js → Spring, y conserva `SESSION_COOKIE_SECURE=true`. La cookie que Next.js entrega al navegador es `HttpOnly`, `Secure` para orígenes de producción y `SameSite=Lax`; en localhost sobre HTTP se omite `Secure` para poder probar el flujo. Spring valida cada solicitud protegida. OpenAPI queda deshabilitado en producción por defecto; puede habilitarse con `OPENAPI_ENABLED=true`.
+
+## PostgreSQL compartido por el equipo
+
+`docker compose up -d` crea una base local persistente en la computadora actual; no comparte datos con otras computadoras. El equipo dispone de una instancia PostgreSQL compartida en Neon (proyecto `fancy-wind-65283432`, base **`nexo_commerce`**). Se restauraron allí los datos de demostración de la base local anterior y Spring aplicó las 17 migraciones Flyway. La API se conecta por TLS con verificación del certificado.
+
+1. Danny comparte por un canal privado el archivo `backend/.env.team` de la instancia Neon. Cada integrante lo coloca en `backend/.env.team` dentro de su copia del repositorio. Si hay que reconstruirlo, copia `backend/env.team.example` como `backend/.env.team` y completa las credenciales recibidas. `.env.team` está ignorado por Git; no lo subas ni lo envíes dentro del repositorio.
+2. Si ya están levantados los servicios locales, detenlos desde la raíz con `docker compose down`. Esto conserva el volumen y los datos locales. Para levantar la aplicación usando la base compartida, ejecuta desde la raíz:
+
+   ```powershell
+   docker compose -f compose.team.yaml up --build -d
+   docker compose -f compose.team.yaml ps
+   ```
+
+   Este archivo Compose inicia Spring y Next.js y toma `DATABASE_URL`, `DATABASE_USERNAME` y `DATABASE_PASSWORD` de `backend/.env.team`; no inicia PostgreSQL local ni necesita `backend/.env`. La web queda en `http://localhost:13000` y Swagger en `http://localhost:18080/swagger-ui.html`. Para detenerlo usa `docker compose -f compose.team.yaml down`. Para DBeaver usa el host directo `ep-fancy-firefly-b5jrgfbt.c-7.us-east-2.aws.neon.tech`, puerto `5432`, base `nexo_commerce`, usuario `neondb_owner`, la contraseña recibida por privado y SSL activado.
+3. Como alternativa sin Docker, desde `backend/` cada integrante inicia Spring con `mvn spring-boot:run -Dspring-boot.run.profiles=team`. Desde la raíz inicia Next.js con `npm run dev`; `.env.local` debe apuntar `SPRING_BACKEND_URL` a `http://localhost:8080`. Todas las APIs se conectarán al mismo PostgreSQL remoto y Flyway aplicará las migraciones pendientes al iniciar Spring.
+
+Cuentas, productos, pedidos, ventas, permisos, imágenes y demás filas persistidas en PostgreSQL serán comunes; el carrito guardado en cada navegador seguirá siendo local. Usa el mismo archivo privado en cada computadora para apuntar a la misma base. Configura copias de seguridad automáticas en el proveedor antes de guardar datos importantes. Las credenciales y la URL completa de conexión nunca deben guardarse en Git ni compartirse en canales públicos.
 
 ## Primer administrador
 
@@ -64,6 +98,4 @@ Para probar Expo Go en un teléfono físico dentro de la red local, inicia Sprin
 
 La app usa los mismos registros persistidos para productos, inventario, clientes, proveedores, ventas y pedidos que consulta el sitio web. `POST /api/business/orders` requiere el permiso `orders:create`; Spring valida los datos del cliente, disponibilidad de pago, promociones y stock, registra al usuario responsable y reserva existencias en una transacción. Las compras de proveedor admiten varios artículos y generan sus movimientos de inventario.
 
-El personal puede incluir en `image` un `data:image/jpeg;base64,...`, PNG o WEBP de hasta 140 KB al crear o editar un producto. Spring valida el formato, guarda el archivo en PostgreSQL mediante Flyway V11 y reemplaza el contenido recibido por una URL compartida (`GET /api/catalog/products/{id}/image`). Los formularios web y móvil comprimen y guardan las nuevas fotos en PostgreSQL; la base también conserva URLs externas existentes. El BFF de Next.js reenvía esa ruta de imagen junto con el resto de `/api/...`.
-
-Los formularios web y móvil reservan el SKU con `POST /api/business/products/sku` antes de crear el producto. Spring exige `products:create`, genera los códigos secuenciales `NEXO-000001` y completa uno en la creación si una integración omite ese campo. Flyway V13 vincula las categorías que ya estaban guardadas como texto con el catálogo normalizado. El rol `employee_buyer` (“Empleado comprador”) solo recibe `orders:create`; su pantalla abre la compra desde el catálogo y no permite consultar historial, inventario, ventas ni administración.
+El personal puede incluir en `image` un `data:image/jpeg;base64,...`, PNG o WEBP de hasta 140 KB al crear o editar un producto. Spring valida el formato, guarda el archivo en PostgreSQL mediante Flyway V11 y reemplaza el contenido recibido por una URL compartida (`GET /api/catalog/products/{id}/image`). También se pueden guardar URLs externas convencionales. El BFF de Next.js reenvía esa ruta de imagen junto con el resto de `/api/...`.

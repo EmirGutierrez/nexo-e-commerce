@@ -6,12 +6,11 @@ export const permissionModules: { id: PermissionModule; label: string; actions: 
   { id: 'dashboard', label: 'Dashboard', actions: ['view'] },
   { id: 'products', label: 'Productos', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'inventory', label: 'Inventario', actions: ['view', 'create', 'edit', 'approve'] },
-  { id: 'orders', label: 'Pedidos', actions: ['view', 'create', 'edit', 'approve'] },
+  { id: 'orders', label: 'Pedidos', actions: ['view', 'edit', 'approve'] },
   { id: 'sales', label: 'Ventas', actions: ['view', 'create', 'edit', 'approve'] },
   { id: 'customers', label: 'Clientes', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'suppliers', label: 'Proveedores', actions: ['view', 'create', 'edit', 'delete'] },
-  { id: 'reports', label: 'Reportes', actions: ['view', 'create'] },
-  { id: 'accounting', label: 'Contabilidad', actions: ['view', 'create', 'edit'] },
+  { id: 'accounting', label: 'Ingresos y egresos', actions: ['view', 'create', 'edit'] },
   { id: 'promotions', label: 'Promociones', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'settings', label: 'Configuración', actions: ['view', 'edit'] },
   { id: 'users', label: 'Usuarios y roles', actions: ['view', 'create', 'edit', 'delete'] },
@@ -22,11 +21,10 @@ const fullPermissions = (): RolePermissions => Object.fromEntries(permissionModu
 const defaults: Record<Role, RolePermissions> = {
   superadmin: fullPermissions(),
   admin: fullPermissions(),
-  sales: { dashboard: ['view'], products: ['view'], inventory: [], orders: ['view', 'edit', 'approve'], sales: ['view', 'create', 'edit'], customers: ['view', 'create', 'edit'], suppliers: [], reports: ['view', 'create'], accounting: [], promotions: [], settings: [], users: [] },
-  warehouse: { dashboard: ['view'], products: ['view'], inventory: ['view', 'create', 'edit'], orders: ['view'], sales: [], customers: [], suppliers: ['view', 'create', 'edit'], reports: ['view'], accounting: [], promotions: [], settings: [], users: [] },
-  employee: { dashboard: ['view'], products: ['view'], inventory: ['view'], orders: [], sales: ['view', 'create'], customers: [], suppliers: [], reports: [], accounting: [], promotions: [], settings: [], users: [] },
-  employee_buyer: { dashboard: [], products: [], inventory: [], orders: ['create'], sales: [], customers: [], suppliers: [], reports: [], accounting: [], promotions: [], settings: [], users: [] },
-  customer: { dashboard: [], products: [], inventory: [], orders: [], sales: [], customers: [], suppliers: [], reports: [], accounting: [], promotions: [], settings: [], users: [] },
+  sales: { dashboard: ['view'], products: ['view'], inventory: [], orders: ['view', 'edit', 'approve'], sales: ['view', 'create', 'edit'], customers: ['view', 'create', 'edit'], suppliers: [], accounting: [], promotions: [], settings: [], users: [] },
+  warehouse: { dashboard: ['view'], products: ['view'], inventory: ['view', 'create', 'edit'], orders: ['view'], sales: [], customers: [], suppliers: ['view', 'create', 'edit'], accounting: [], promotions: [], settings: [], users: [] },
+  employee: { dashboard: ['view'], products: ['view'], inventory: ['view'], orders: [], sales: ['view', 'create'], customers: [], suppliers: [], accounting: [], promotions: [], settings: [], users: [] },
+  customer: { dashboard: [], products: [], inventory: [], orders: [], sales: [], customers: [], suppliers: [], accounting: [], promotions: [], settings: [], users: [] },
 };
 const copy = (value: RolePermissions): RolePermissions => Object.fromEntries(permissionModules.map(({ id }) => [id, [...value[id]]])) as RolePermissions;
 type RoleDto = { code: string; displayName: string; users: number; permissions: Partial<RolePermissions> };
@@ -53,7 +51,7 @@ export const roleService = {
   getUserRole: (_userId: string, fallback: Role) => fallback,
   assignUserRole: async (userId: string, role: Role) => apiClient.patch<void>(`/api/users/${userId}/role`, { role }),
   save: async (role: Role, permissions: RolePermissions) => {
-    if (role === 'superadmin' || role === 'customer' || role === 'employee_buyer') throw new Error('Los permisos de este rol están protegidos.');
+    if (role === 'superadmin' || role === 'customer') throw new Error('Los permisos de este rol están protegidos.');
     const normalized = normalize(permissions);
     const saved = await apiClient.put<RoleDto>(`/api/roles/${role}/permissions`, normalized);
     current = { ...current, [role]: normalize(saved.permissions) };

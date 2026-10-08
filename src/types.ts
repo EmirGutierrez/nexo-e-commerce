@@ -1,6 +1,6 @@
-export type Role = 'superadmin' | 'admin' | 'sales' | 'warehouse' | 'employee' | 'employee_buyer' | 'customer';
+export type Role = 'superadmin' | 'admin' | 'sales' | 'warehouse' | 'employee' | 'customer';
 export type PermissionAction = 'view' | 'create' | 'edit' | 'delete' | 'approve';
-export type PermissionModule = 'dashboard' | 'products' | 'inventory' | 'orders' | 'sales' | 'customers' | 'suppliers' | 'reports' | 'accounting' | 'promotions' | 'settings' | 'users';
+export type PermissionModule = 'dashboard' | 'products' | 'inventory' | 'orders' | 'sales' | 'customers' | 'suppliers' | 'accounting' | 'promotions' | 'settings' | 'users';
 export type RolePermissions = Record<PermissionModule, PermissionAction[]>;
 export type PaymentMethod = 'card' | 'transfer';
 export type PaymentMethodSettings = Record<PaymentMethod, boolean>;
@@ -92,9 +92,19 @@ export interface Order {
   customer: string;
   date: string;
   items: number;
+  itemDetails?: OrderItem[];
   total: number;
   status: 'Completado' | 'En preparación' | 'Pendiente de pago' | 'Cancelado';
   payment: 'Tarjeta' | 'Transferencia';
+}
+
+export interface OrderItem {
+  productId: string;
+  productName: string;
+  sku: string;
+  quantity: number;
+  unitPrice: number;
+  subtotal: number;
 }
 
 export interface InPersonSaleItem {
@@ -110,8 +120,12 @@ export interface InPersonSale {
   id: string;
   date: string;
   seller: string;
-  paymentMethod: PaymentMethod;
-  paymentStatus: 'Simulada' | 'Pendiente de verificación';
+  customerName?: string;
+  nit?: string;
+  paymentMethod: 'cash' | 'card' | 'transfer';
+  paymentStatus: 'Completada' | 'Simulada' | 'Pendiente de verificación';
+  amountReceived?: number;
+  change?: number;
   items: InPersonSaleItem[];
   total: number;
 }
@@ -157,5 +171,5 @@ export interface AccountingMovement {
 }
 
 export const roleLabels: Record<Role, string> = {
-  superadmin: 'Súper Administrador', admin: 'Administrador', sales: 'Vendedor', warehouse: 'Personal de bodega', employee: 'Empleado', employee_buyer: 'Empleado comprador', customer: 'Cliente'
+  superadmin: 'Súper Administrador', admin: 'Administrador', sales: 'Vendedor', warehouse: 'Personal de bodega', employee: 'Empleado', customer: 'Cliente'
 };

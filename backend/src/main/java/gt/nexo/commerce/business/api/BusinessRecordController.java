@@ -32,10 +32,6 @@ public class BusinessRecordController {
     @Operation(summary = "Lista registros persistentes del módulo autorizado.")
     public List<BusinessRecordResponse> list(@PathVariable String resource) { return service.list(resource); }
 
-    @PostMapping("/products/sku")
-    @Operation(summary = "Reserva un SKU único para un producto nuevo autorizado.")
-    public Map<String, String> nextProductSku() { return Map.of("sku", service.nextProductSku()); }
-
     @PostMapping("/{resource}")
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Crea un registro de negocio con validaciones y auditoría de inventario.")

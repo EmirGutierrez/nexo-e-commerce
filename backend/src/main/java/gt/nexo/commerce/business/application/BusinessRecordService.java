@@ -28,7 +28,7 @@ import tools.jackson.databind.ObjectMapper;
 public class BusinessRecordService {
     private static final Set<String> RESOURCES = Set.of(
             "products", "brands", "categories", "customers", "suppliers", "orders", "purchases",
-            "sales", "accounting", "transfers", "payments", "invoices", "reports", "settings",
+            "sales", "accounting", "transfers", "payments", "invoices", "settings",
             "profile", "roles-permissions", "inventory-alerts");
 
     private final JdbcTemplate jdbc;
@@ -71,14 +71,10 @@ public class BusinessRecordService {
                     WHERE LOWER(COALESCE(customer_email, '')) = LOWER(?) AND status <> 'Cancelado'
                     """, rs -> { rs.next(); return Map.of("orders", rs.getLong("orders"), "totalPurchased", rs.getBigDecimal("purchased")); }, email);
             data.putAll(totals);
+            long wishlistItems = jdbc.queryForObject("SELECT COUNT(*) FROM customer_wishlist_items w JOIN app_user u ON u.id = w.customer_user_id WHERE LOWER(u.email) = LOWER(?)", Long.class, email);
+            data.put("wishlistItems", wishlistItems);
             return new BusinessRecordResponse(record.id(), record.resource(), data, record.createdAt(), record.updatedAt());
         }).toList();
-    }
-
-    @Transactional
-    public String nextProductSku() {
-        authorize("products", "create");
-        return allocateProductSku();
     }
 
     @Transactional
@@ -88,8 +84,6 @@ public class BusinessRecordService {
         if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);
-        if (normalized.equals("products") && text(field(data, "sku", "SKU")).isBlank()) data.put("sku", allocateProductSku());
-        if (normalized.equals("reports")) data = buildReport(data, actorId());
         validate(normalized, data);
         ensureUnique(normalized, data, null);
         UUID id = normalized.equals("customers") ? customerRecordId(data) : UUID.randomUUID();
@@ -119,15 +113,11 @@ public class BusinessRecordService {
     public BusinessRecordResponse update(String resource, UUID id, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "edit");
-        if (Set.of("reports", "transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
+        if (Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este registro no admite edición directa.");
         Map<String, Object> data = clean(input);
         ProductImageService.ImageUpload productImage = normalized.equals("products") ? decodeProductImage(data) : null;
         Map<String, Object> old = lockedRecord(normalized, id);
-        if (normalized.equals("products")) {
-            data.remove("SKU");
-            data.put("sku", text(field(old, "sku", "SKU")));
-        }
         String previousImage = text(old.get("image"));
         if (productImage != null) data.put("image", productImagePath(id));
         validate(normalized, data);
@@ -175,6 +165,9 @@ public class BusinessRecordService {
                 """, writeJson(data), statusOf(data), id, normalized);
         if (updated == 0) throw missing();
         syncProjection(id, normalized, data, actorId());
+        if (normalized.equals("orders") && !java.util.Objects.equals(old.get("status"), data.get("status"))) {
+            createOrderStatusNotification(id, text(data.get("status")));
+        }
         if (normalized.equals("products")) {
             if (productImage != null) productImages.save(id, productImage);
             else if (!java.util.Objects.equals(previousImage, text(data.get("image")))) productImages.delete(id);
@@ -190,7 +183,7 @@ public class BusinessRecordService {
     public void delete(String resource, UUID id) {
         String normalized = normalize(resource);
         authorize(normalized, "delete");
-        if (Set.of("orders", "purchases", "sales", "accounting", "reports", "transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
+        if (Set.of("orders", "purchases", "sales", "accounting", "transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw conflict("El historial de esta operación no se puede eliminar.");
         Map<String, Object> old = lockedRecord(normalized, id);
         if (normalized.equals("products") && jdbc.queryForObject(
@@ -226,11 +219,18 @@ public class BusinessRecordService {
     @Transactional
     public BusinessRecordResponse createInPersonSale(Map<String, Object> input) {
         authorize("sales", "create");
+        if (input == null) throw invalid("Debes enviar los datos de la venta.");
         List<?> rawItems = input.get("items") instanceof List<?> list ? list : List.of();
         if (rawItems.isEmpty()) throw invalid("Agrega al menos un producto para registrar la venta.");
         String method = String.valueOf(input.getOrDefault("paymentMethod", ""));
-        if (!Set.of("card", "transfer").contains(method)) throw invalid("El método de pago no es válido.");
-        if (!paymentEnabled(method)) throw conflict("El método de pago seleccionado está desactivado.");
+        if (!Set.of("cash", "card").contains(method)) throw invalid("El método de pago no es válido para una venta presencial.");
+        if (method.equals("card") && !paymentEnabled(method)) throw conflict("El pago con tarjeta está desactivado.");
+        String customerName = defaultText(input.get("customerName"), "Cliente");
+        String customerNit = text(input.get("nit")).toUpperCase(Locale.ROOT);
+        if (customerName.length() > 160) throw invalid("El nombre del cliente no puede superar 160 caracteres.");
+        if (customerNit.length() < 2 || customerNit.length() > 20 || !customerNit.matches("[A-Z0-9-]+")) {
+            throw invalid("Ingresa un NIT válido (letras, números o guion).");
+        }
 
         Map<UUID, Integer> quantities = new LinkedHashMap<>();
         for (Object item : rawItems) {
@@ -263,15 +263,28 @@ public class BusinessRecordService {
             items.add(item);
             total = total.add(line);
         }
+        BigDecimal amountReceived = null;
+        BigDecimal changeAmount = null;
+        if (method.equals("cash")) {
+            amountReceived = decimal(input.get("amountReceived")).setScale(2, java.math.RoundingMode.HALF_UP);
+            if (amountReceived.compareTo(total) < 0) throw invalid("El efectivo recibido debe cubrir el total de la venta.");
+            changeAmount = amountReceived.subtract(total);
+        }
         Instant now = Instant.now();
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("date", now.toString());
         data.put("seller", principalName());
+        data.put("customerName", customerName);
+        data.put("nit", customerNit);
         data.put("paymentMethod", method);
-        data.put("paymentStatus", method.equals("card") ? "Simulada" : "Pendiente de verificación");
+        data.put("paymentStatus", method.equals("cash") ? "Completada" : "Simulada");
         data.put("status", "Completado");
         data.put("items", items);
         data.put("total", total);
+        if (amountReceived != null) {
+            data.put("amountReceived", amountReceived);
+            data.put("change", changeAmount);
+        }
         jdbc.update("INSERT INTO business_records (id, resource_code, data, status_code, created_by) VALUES (?, 'sales', ?::jsonb, ?, ?)",
                 saleId, writeJson(data), data.get("paymentStatus"), actor);
         syncProjection(saleId, "sales", data, actor);
@@ -297,16 +310,21 @@ public class BusinessRecordService {
 
     @Transactional
     public BusinessRecordResponse createPublicOrder(Map<String, Object> input) {
-        return createOrder(input, null);
+        return createOrder(input, null, null);
+    }
+
+    @Transactional
+    public BusinessRecordResponse createCustomerOrder(Map<String, Object> input, UUID customerUserId) {
+        return createOrder(input, null, customerUserId);
     }
 
     @Transactional
     public BusinessRecordResponse createStaffOrder(Map<String, Object> input) {
         authorize("orders", "create");
-        return createOrder(input, actorId());
+        return createOrder(input, actorId(), null);
     }
 
-    private BusinessRecordResponse createOrder(Map<String, Object> input, UUID actor) {
+    private BusinessRecordResponse createOrder(Map<String, Object> input, UUID actor, UUID customerUserId) {
         String customerName = text(input.get("customerName"));
         String customerEmail = text(input.get("customerEmail")).toLowerCase(Locale.ROOT);
         String paymentMethod = text(input.get("paymentMethod"));
@@ -352,13 +370,121 @@ public class BusinessRecordService {
         data.put("paymentMethod", paymentMethod); data.put("payment", paymentMethod.equals("card") ? "Tarjeta" : "Transferencia");
         data.put("paymentStatus", paymentStatus); data.put("items", orderItems); data.put("subtotal", subtotal);
         data.put("discountAmount", discount); data.put("discountCode", discountCode); data.put("total", total);
+        if (customerUserId != null) data.put("customerUserId", customerUserId.toString());
         data.put("orderNumber", "NX-" + orderId.toString().substring(0, 8).toUpperCase(Locale.ROOT));
         ensureCustomer(customerName, customerEmail, optionalText(input.get("customerPhone")));
         jdbc.update("INSERT INTO business_records (id, resource_code, data, status_code, created_by) VALUES (?, 'orders', ?::jsonb, ?, ?)", orderId, writeJson(data), status, actor);
         syncProjection(orderId, "orders", data, actor);
         if (paymentMethod.equals("transfer")) saveTransferReceipt(orderId, input);
         for (var entry : quantities.entrySet()) changeStock(entry.getKey(), -entry.getValue(), "ORDER", "Reserva del pedido " + data.get("orderNumber"), orderId, actor);
+        if (customerUserId != null) createCustomerNotification(customerUserId, orderId, "ORDER_RECEIVED", "Pedido recibido",
+                "Recibimos " + data.get("orderNumber") + ". " + (paymentMethod.equals("transfer")
+                        ? "Tu comprobante está pendiente de revisión." : "El pago con tarjeta fue simulado."), "order-received:" + orderId);
         return new BusinessRecordResponse(orderId, "orders", data, now, now);
+    }
+
+    @Transactional(readOnly = true)
+    public List<BusinessRecordResponse> customerOrders(UUID customerUserId) {
+        return jdbc.query("""
+                SELECT b.id, b.resource_code, b.data::text AS data, b.created_at, b.updated_at
+                FROM business_records b JOIN commerce_orders o ON o.record_id = b.id
+                WHERE b.resource_code = 'orders' AND o.customer_user_id = ?
+                ORDER BY o.order_date DESC
+                """, (rs, row) -> new BusinessRecordResponse(rs.getObject("id", UUID.class), rs.getString("resource_code"),
+                readMap(rs.getString("data")), rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()), customerUserId);
+    }
+
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> customerWishlist(UUID customerUserId) {
+        return jdbc.query("""
+                SELECT p.record_id, p.name, p.category_name, p.price, p.compare_at, p.stock, p.status, p.image_url, p.description, p.featured, p.sku
+                FROM customer_wishlist_items w JOIN products p ON p.record_id = w.product_record_id
+                WHERE w.customer_user_id = ? AND p.status NOT IN ('Inactivo', 'Inactive', 'DISABLED')
+                ORDER BY w.created_at DESC
+                """, (rs, row) -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", rs.getObject("record_id", UUID.class).toString()); item.put("name", rs.getString("name"));
+            item.put("category", rs.getString("category_name")); item.put("price", rs.getBigDecimal("price"));
+            item.put("compareAt", rs.getBigDecimal("compare_at")); item.put("stock", rs.getInt("stock"));
+            item.put("status", rs.getString("status")); item.put("image", rs.getString("image_url"));
+            item.put("description", rs.getString("description")); item.put("featured", rs.getBoolean("featured")); item.put("sku", rs.getString("sku"));
+            return item;
+        }, customerUserId);
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> customerNotifications(UUID customerUserId) {
+        List<Map<String, Object>> items = jdbc.query("""
+                SELECT id, order_record_id, notification_type, title, message, read_at, created_at
+                FROM customer_notifications WHERE customer_user_id = ?
+                ORDER BY created_at DESC LIMIT 40
+                """, (rs, row) -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", rs.getObject("id", UUID.class).toString());
+            UUID orderId = rs.getObject("order_record_id", UUID.class);
+            item.put("orderId", orderId == null ? null : orderId.toString());
+            item.put("type", rs.getString("notification_type")); item.put("title", rs.getString("title"));
+            item.put("message", rs.getString("message")); item.put("read", rs.getTimestamp("read_at") != null);
+            item.put("createdAt", rs.getTimestamp("created_at").toInstant().toString());
+            return item;
+        }, customerUserId);
+        long unreadCount = jdbc.queryForObject("SELECT COUNT(*) FROM customer_notifications WHERE customer_user_id = ? AND read_at IS NULL", Long.class, customerUserId);
+        return Map.of("items", items, "unreadCount", unreadCount);
+    }
+
+    @Transactional
+    public void markCustomerNotificationRead(UUID customerUserId, UUID notificationId) {
+        jdbc.update("UPDATE customer_notifications SET read_at = COALESCE(read_at, CURRENT_TIMESTAMP) WHERE id = ? AND customer_user_id = ?", notificationId, customerUserId);
+    }
+
+    @Transactional
+    public void markAllCustomerNotificationsRead(UUID customerUserId) {
+        jdbc.update("UPDATE customer_notifications SET read_at = CURRENT_TIMESTAMP WHERE customer_user_id = ? AND read_at IS NULL", customerUserId);
+    }
+
+    private void createOrderStatusNotification(UUID orderId, String status) {
+        UUID customerUserId = orderCustomerId(orderId);
+        if (customerUserId == null) return;
+        String number = orderNumber(orderId);
+        String message = switch (status) {
+            case "En preparación" -> "Tu pedido " + number + " está en preparación.";
+            case "Completado" -> "Tu pedido " + number + " fue completado.";
+            case "Cancelado" -> "El pedido " + number + " fue cancelado.";
+            default -> "El estado de tu pedido " + number + " cambió a " + status + ".";
+        };
+        createCustomerNotification(customerUserId, orderId, "ORDER_STATUS", "Actualización de tu pedido", message,
+                "order-status:" + orderId + ":" + status);
+    }
+
+    private UUID orderCustomerId(UUID orderId) {
+        return jdbc.query("SELECT customer_user_id FROM commerce_orders WHERE record_id = ?",
+                rs -> rs.next() ? rs.getObject(1, UUID.class) : null, orderId);
+    }
+
+    private String orderNumber(UUID orderId) {
+        String number = jdbc.query("SELECT data ->> 'orderNumber' FROM business_records WHERE id = ?",
+                rs -> rs.next() ? rs.getString(1) : null, orderId);
+        return number == null || number.isBlank() ? "#" + orderId.toString().substring(0, 8).toUpperCase(Locale.ROOT) : number;
+    }
+
+    private void createCustomerNotification(UUID customerUserId, UUID orderId, String type, String title,
+                                            String message, String dedupeKey) {
+        jdbc.update("""
+                INSERT INTO customer_notifications (customer_user_id, order_record_id, notification_type, title, message, dedupe_key)
+                VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT (dedupe_key) DO NOTHING
+                """, customerUserId, orderId, type, title, message, dedupeKey);
+    }
+
+    @Transactional
+    public void addCustomerWishlistItem(UUID customerUserId, UUID productId) {
+        Boolean active = jdbc.queryForObject("SELECT EXISTS (SELECT 1 FROM products WHERE record_id = ? AND status NOT IN ('Inactivo', 'Inactive', 'DISABLED'))", Boolean.class, productId);
+        if (!Boolean.TRUE.equals(active)) throw missing();
+        jdbc.update("INSERT INTO customer_wishlist_items (customer_user_id, product_record_id) VALUES (?, ?) ON CONFLICT DO NOTHING", customerUserId, productId);
+    }
+
+    @Transactional
+    public void removeCustomerWishlistItem(UUID customerUserId, UUID productId) {
+        jdbc.update("DELETE FROM customer_wishlist_items WHERE customer_user_id = ? AND product_record_id = ?", customerUserId, productId);
     }
 
     private void saveTransferReceipt(UUID orderId, Map<String, Object> input) {
@@ -424,6 +550,15 @@ public class BusinessRecordService {
         syncOrder(id, data);
         jdbc.update("UPDATE transfer_receipts SET status = ?, reviewed_at = CURRENT_TIMESTAMP, reviewed_by = ? WHERE order_record_id = ?",
                 status, actorId(), id);
+        UUID customerUserId = orderCustomerId(id);
+        if (customerUserId != null) {
+            boolean approved = status.equals("Aprobada");
+            createCustomerNotification(customerUserId, id, approved ? "PAYMENT_APPROVED" : "PAYMENT_REJECTED",
+                    approved ? "Transferencia aprobada" : "Transferencia rechazada",
+                    approved ? "Tu pago para el pedido " + text(data.get("orderNumber")) + " fue aprobado. Ya estamos preparando tu compra."
+                            : "No pudimos aprobar el comprobante del pedido " + text(data.get("orderNumber")) + ". Revisa los detalles del pedido y contacta a la tienda si necesitas ayuda.",
+                    "payment-review:" + id + ":" + status);
+        }
         return Map.of("id", id, "status", status);
     }
 
@@ -763,17 +898,16 @@ public class BusinessRecordService {
             }
             case "products" -> {
                 String category = text(field(data, "category", "Categoría"));
-                UUID categoryId = ensureProductCategory(category, actor);
                 jdbc.update("""
                         INSERT INTO products (record_id, brand_record_id, category_record_id, sku, name, category_name,
                         price, compare_at, stock, status, image_url, description, featured)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                        VALUES (?, ?, (SELECT record_id FROM product_categories WHERE LOWER(name) = LOWER(?)), ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                         ON CONFLICT (record_id) DO UPDATE SET brand_record_id = EXCLUDED.brand_record_id,
                         category_record_id = EXCLUDED.category_record_id, sku = EXCLUDED.sku, name = EXCLUDED.name,
                         category_name = EXCLUDED.category_name, price = EXCLUDED.price, compare_at = EXCLUDED.compare_at,
                         stock = EXCLUDED.stock, status = EXCLUDED.status, image_url = EXCLUDED.image_url,
                         description = EXCLUDED.description, featured = EXCLUDED.featured, updated_at = CURRENT_TIMESTAMP
-                        """, id, parseOptionalUuid(field(data, "brandId", "Marca")), categoryId,
+                        """, id, parseOptionalUuid(field(data, "brandId", "Marca")), category,
                         text(field(data, "sku", "SKU")), text(field(data, "name", "Producto")), category,
                         decimal(field(data, "price", "Valor")), optionalDecimal(field(data, "compareAt", "Precio anterior")),
                         number(field(data, "stock", "Existencias"), 0), defaultText(field(data, "status", "Estado"), "Activo"),
@@ -823,45 +957,6 @@ public class BusinessRecordService {
                     text(field(data, "category", "Categoría")), defaultText(field(data, "type", "Tipo"), "Ingreso"),
                     decimal(field(data, "amount", "Monto")), defaultText(field(data, "status", "Estado"), "Registrado"), actor);
             default -> { }
-        }
-    }
-
-    private UUID ensureProductCategory(String name, UUID actor) {
-        String categoryName = name.trim();
-        jdbc.update("""
-                INSERT INTO business_records (id, resource_code, data, status_code, created_by)
-                SELECT ?, 'categories', jsonb_build_object('name', ?, 'status', 'Activo'), 'Activo', ?
-                WHERE NOT EXISTS (
-                    SELECT 1 FROM business_records WHERE resource_code = 'categories'
-                    AND LOWER(COALESCE(data ->> 'name', data ->> 'Nombre')) = LOWER(?)
-                )
-                ON CONFLICT DO NOTHING
-                """, UUID.randomUUID(), categoryName, actor, categoryName);
-        UUID recordId = jdbc.queryForObject("""
-                SELECT id FROM business_records WHERE resource_code = 'categories'
-                AND LOWER(COALESCE(data ->> 'name', data ->> 'Nombre')) = LOWER(?)
-                ORDER BY created_at, id LIMIT 1
-                """, UUID.class, categoryName);
-        jdbc.update("""
-                INSERT INTO product_categories (record_id, name, status) VALUES (?, ?, 'Activo')
-                ON CONFLICT DO NOTHING
-                """, recordId, categoryName);
-        return jdbc.queryForObject("SELECT record_id FROM product_categories WHERE LOWER(name) = LOWER(?)", UUID.class, categoryName);
-    }
-
-    private String allocateProductSku() {
-        while (true) {
-            Long value = jdbc.queryForObject("SELECT nextval('product_sku_number_seq')", Long.class);
-            String sku = "NEXO-%06d".formatted(value);
-            Boolean exists = jdbc.queryForObject("""
-                    SELECT EXISTS (
-                        SELECT 1 FROM products WHERE LOWER(sku) = LOWER(?)
-                        UNION ALL
-                        SELECT 1 FROM business_records WHERE resource_code = 'products'
-                        AND LOWER(COALESCE(data ->> 'sku', data ->> 'SKU', '')) = LOWER(?)
-                    )
-                    """, Boolean.class, sku, sku);
-            if (!Boolean.TRUE.equals(exists)) return sku;
         }
     }
 
@@ -921,11 +1016,17 @@ public class BusinessRecordService {
         String paymentStatus = defaultText(data.get("paymentStatus"), "Simulada");
         BigDecimal total = decimal(data.get("total"));
         jdbc.update("""
-                INSERT INTO in_person_sales (record_id, seller_user_id, seller_name, sale_date, payment_method, payment_status, total, status)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET seller_name = EXCLUDED.seller_name,
-                payment_status = EXCLUDED.payment_status, total = EXCLUDED.total, status = EXCLUDED.status
+                INSERT INTO in_person_sales (record_id, seller_user_id, seller_name, sale_date, payment_method, payment_status,
+                    total, status, customer_name, customer_nit, cash_received, cash_change)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET
+                seller_name = EXCLUDED.seller_name, payment_method = EXCLUDED.payment_method,
+                payment_status = EXCLUDED.payment_status, total = EXCLUDED.total, status = EXCLUDED.status,
+                customer_name = EXCLUDED.customer_name, customer_nit = EXCLUDED.customer_nit,
+                cash_received = EXCLUDED.cash_received, cash_change = EXCLUDED.cash_change
         """, id, actor, seller, parseInstant(data.get("date")), method, paymentStatus, total,
-                defaultText(field(data, "status", "Estado"), "Completado"));
+                defaultText(field(data, "status", "Estado"), "Completado"),
+                defaultText(data.get("customerName"), "Cliente"), optionalText(data.get("nit")),
+                optionalDecimal(data.get("amountReceived")), optionalDecimal(data.get("change")));
         jdbc.update("DELETE FROM in_person_sale_items WHERE sale_record_id = ?", id);
         for (Map<String, Object> item : items(data)) jdbc.update("""
                 INSERT INTO in_person_sale_items (sale_record_id, product_record_id, product_name_snapshot, sku_snapshot, quantity, unit_price, line_total)
@@ -940,12 +1041,12 @@ public class BusinessRecordService {
         String paymentStatus = defaultText(data.get("paymentStatus"), status.equals("Completado") ? "approved" : "pending_verification");
         BigDecimal total = decimal(field(data, "total", "Total"));
         jdbc.update("""
-                INSERT INTO commerce_orders (record_id, customer_name, customer_email, order_date, status, payment_method, payment_status, total, customer_phone, delivery_address, subtotal, discount_amount, discount_code)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET customer_name = EXCLUDED.customer_name,
+                INSERT INTO commerce_orders (record_id, customer_user_id, customer_name, customer_email, order_date, status, payment_method, payment_status, total, customer_phone, delivery_address, subtotal, discount_amount, discount_code)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?) ON CONFLICT (record_id) DO UPDATE SET customer_user_id = COALESCE(EXCLUDED.customer_user_id, commerce_orders.customer_user_id), customer_name = EXCLUDED.customer_name,
                 customer_email = EXCLUDED.customer_email, status = EXCLUDED.status, payment_method = EXCLUDED.payment_method,
                 payment_status = EXCLUDED.payment_status, total = EXCLUDED.total, customer_phone = EXCLUDED.customer_phone,
                 delivery_address = EXCLUDED.delivery_address
-                """, id, defaultText(field(data, "customer", "Cliente"), "Cliente"), optionalText(data.get("customerEmail")),
+                """, id, data.get("customerUserId") == null ? null : parseUuid(data.get("customerUserId")), defaultText(field(data, "customer", "Cliente"), "Cliente"), optionalText(data.get("customerEmail")),
                 parseInstant(field(data, "date", "Fecha")), status, payment, paymentStatus, total,
                 optionalText(data.get("customerPhone")), optionalText(data.get("address")),
                 data.containsKey("subtotal") ? decimal(data.get("subtotal")) : total,
@@ -1039,38 +1140,6 @@ public class BusinessRecordService {
         } + ".");
     }
 
-    private Map<String, Object> buildReport(Map<String, Object> input, UUID actor) {
-        String name = defaultText(field(input, "name", "Reporte"), "Ventas");
-        String period = defaultText(field(input, "period", "Periodo"), "Últimos 30 días");
-        LocalDate end = LocalDate.now(ZoneOffset.UTC);
-        LocalDate start = switch (period.toLowerCase(Locale.ROOT)) {
-            case "últimos 7 días", "ultimos 7 dias", "7d" -> end.minusDays(6);
-            case "este año", "este ano", "year" -> end.withDayOfYear(1);
-            case "hoy", "today" -> end;
-            default -> end.minusDays(29);
-        };
-        java.sql.Timestamp from = java.sql.Timestamp.from(start.atStartOfDay().toInstant(ZoneOffset.UTC));
-        java.sql.Timestamp until = java.sql.Timestamp.from(end.plusDays(1).atStartOfDay().toInstant(ZoneOffset.UTC));
-        Map<String, Object> metrics = new LinkedHashMap<>();
-        String lowerName = name.toLowerCase(Locale.ROOT);
-        if (lowerName.contains("inventario") || lowerName.contains("stock")) {
-            metrics.putAll(inventorySummaryWithoutAuthorization());
-            metrics.put("estimatedRetailValue", jdbc.queryForObject("SELECT COALESCE(SUM(price * stock), 0) FROM products WHERE status NOT IN ('Inactivo', 'Inactive', 'DISABLED')", BigDecimal.class));
-        } else if (lowerName.contains("cliente")) {
-            metrics.put("customers", jdbc.queryForObject("SELECT COUNT(*) FROM customers WHERE created_at >= ? AND created_at < ?", Long.class, from, until));
-            metrics.put("orders", jdbc.queryForObject("SELECT COUNT(*) FROM commerce_orders WHERE order_date >= ? AND order_date < ? AND status <> 'Cancelado'", Long.class, from, until));
-        } else {
-            metrics.put("inPersonSales", jdbc.queryForObject("SELECT COALESCE(SUM(total), 0) FROM in_person_sales WHERE sale_date >= ? AND sale_date < ? AND status <> 'Cancelado'", BigDecimal.class, from, until));
-            metrics.put("onlineOrders", jdbc.queryForObject("SELECT COUNT(*) FROM commerce_orders WHERE order_date >= ? AND order_date < ? AND status <> 'Cancelado'", Long.class, from, until));
-            metrics.put("onlineSales", jdbc.queryForObject("SELECT COALESCE(SUM(total), 0) FROM commerce_orders WHERE order_date >= ? AND order_date < ? AND status <> 'Cancelado'", BigDecimal.class, from, until));
-        }
-        Map<String, Object> report = new LinkedHashMap<>();
-        report.put("name", name); report.put("period", period); report.put("generatedBy", principalName());
-        report.put("date", Instant.now().toString()); report.put("status", "Completado"); report.put("metrics", metrics);
-        if (actor != null) report.put("generatedById", actor.toString());
-        return report;
-    }
-
     private Map<String, Object> lockedRecord(String resource, UUID id) {
         return jdbc.query("SELECT data::text FROM business_records WHERE id = ? AND resource_code = ? FOR UPDATE", rs -> {
             if (!rs.next()) throw missing();
@@ -1081,9 +1150,8 @@ public class BusinessRecordService {
     private void validate(String resource, Map<String, Object> data) {
         if (data.isEmpty()) throw invalid("El registro no puede estar vacío.");
         if (resource.equals("products")) {
-            required(data, "name", "Producto"); required(data, "sku", "SKU"); required(data, "category", "Categoría");
+            required(data, "name", "Producto"); required(data, "sku", "SKU");
             String image = text(data.get("image"));
-            if (image.isBlank()) throw invalid("Selecciona una imagen para el producto.");
             if (image.length() > 1000 && !image.startsWith("data:image/")) throw invalid("La dirección de imagen del producto es demasiado larga.");
             BigDecimal price = decimal(field(data, "price", "Valor"));
             if (price.signum() < 0) throw invalid("El precio no puede ser negativo.");
@@ -1186,7 +1254,6 @@ public class BusinessRecordService {
             case "brands", "categories", "products" -> "products";
             case "purchases" -> "inventory";
             case "accounting" -> "accounting";
-            case "reports" -> "reports";
             case "payments", "transfers", "invoices", "orders" -> "orders";
             case "profile", "settings" -> "settings";
             case "roles-permissions" -> "users";
