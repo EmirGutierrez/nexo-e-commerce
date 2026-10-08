@@ -593,6 +593,10 @@
 }
 
 .payment-settings { margin-bottom: 16px; }
+.settings-module-navigation { display:flex; gap:7px; width:max-content; max-width:100%; margin:0 0 17px; padding:5px; border:1px solid var(--border); border-radius:11px; background:#fff; }
+.settings-module-navigation a { display:inline-flex; align-items:center; min-height:35px; padding:0 13px; border-radius:8px; color:var(--muted); font-size:11px; font-weight:700; text-decoration:none; }
+.settings-module-navigation a:hover { color:var(--navy); background:#f5f7fb; }
+.settings-module-navigation a.active { color:#fff; background:var(--navy); }
 .payment-settings-list { display: grid; gap: 10px; margin-top: 18px; }
 .payment-setting { display: grid; grid-template-columns: 42px minmax(0, 1fr) auto 42px; gap: 13px; align-items: center; padding: 13px 15px; border: 1px solid var(--border); border-radius: 10px; background: #fff; }
 .payment-setting-icon { width: 40px; height: 40px; display: grid; place-items: center; border-radius: 10px; background: #edf2fb; color: var(--navy); }

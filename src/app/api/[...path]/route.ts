@@ -4,12 +4,16 @@ export const runtime = 'nodejs';
 
 const SESSION_COOKIE = 'NEXOSESSION';
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
+const DOCKER_BACKEND_HOST = 'backend';
 
 function isLocalHttp(request: NextRequest): boolean {
   return request.nextUrl.protocol === 'http:' && LOOPBACK_HOSTS.includes(request.nextUrl.hostname);
 }
 
 function secureCookie(request: NextRequest): boolean {
+  const configured = process.env.SESSION_COOKIE_SECURE;
+  if (configured === 'true') return true;
+  if (configured === 'false') return false;
   return !isLocalHttp(request) && (process.env.NODE_ENV === 'production' || request.nextUrl.protocol === 'https:');
 }
 
@@ -22,7 +26,9 @@ function backendOrigin(request: NextRequest): string {
       url.pathname !== '/' || url.search || url.hash) {
     throw new Error('SPRING_BACKEND_URL must be an origin');
   }
-  if (url.protocol !== 'https:' && !(isLocalHttp(request) && LOOPBACK_HOSTS.includes(url.hostname))) {
+  const localDockerBackend = process.env.SPRING_BACKEND_ALLOW_DOCKER_HTTP === 'true' &&
+    url.hostname === DOCKER_BACKEND_HOST;
+  if (url.protocol !== 'https:' && !(isLocalHttp(request) && LOOPBACK_HOSTS.includes(url.hostname) || localDockerBackend)) {
     throw new Error('SPRING_BACKEND_URL must use HTTPS outside localhost');
   }
   return url.origin;

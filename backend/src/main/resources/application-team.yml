@@ -1,0 +1,36 @@
+spring:
+  config:
+    import: optional:file:.env.team[.properties]
+  datasource:
+    url: ${DATABASE_URL}
+    username: ${DATABASE_USERNAME}
+    password: ${DATABASE_PASSWORD}
+    hikari:
+      maximum-pool-size: ${DATABASE_POOL_MAX_SIZE:4}
+      minimum-idle: 0
+      connection-timeout: 10000
+      data-source-properties:
+        sslmode: ${DATABASE_SSL_MODE:verify-full}
+  flyway:
+    enabled: true
+  session:
+    jdbc:
+      initialize-schema: never
+
+server:
+  address: ${SERVER_ADDRESS:127.0.0.1}
+  servlet:
+    session:
+      cookie:
+        secure: ${SESSION_COOKIE_SECURE:false}
+        same-site: ${SESSION_COOKIE_SAME_SITE:Lax}
+
+springdoc:
+  api-docs:
+    enabled: ${OPENAPI_ENABLED:true}
+  swagger-ui:
+    enabled: ${OPENAPI_ENABLED:true}
+
+nexo:
+  web:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
