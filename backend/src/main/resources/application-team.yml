@@ -11,6 +11,7 @@ spring:
       connection-timeout: 10000
       data-source-properties:
         sslmode: ${DATABASE_SSL_MODE:verify-full}
+        sslfactory: org.postgresql.ssl.DefaultJavaSSLFactory
   flyway:
     enabled: true
   session:
