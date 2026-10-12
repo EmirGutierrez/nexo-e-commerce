@@ -27,6 +27,7 @@ import { OffersAdminPage, TransferReceiptsPage } from '../../commerce/components
 import { SeasonalSpotlight } from '../../commerce/components/CommercePages';
 import PublicAccountControls from './PublicAccountControls';
 import CustomerNotificationBell from '../../commerce/components/CustomerNotificationBell';
+import FloatingCartButton from './FloatingCartButton';
 import { ApiError } from '../../../shared/services/http-client';
 
 const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
@@ -52,7 +53,7 @@ function PublicHeader() {
   }, [menuOpen]);
   const closeMenu = () => setMenuOpen(false);
 
-  return <header className="public-header">
+  return <><header className="public-header">
     <Brand />
     <nav id="public-navigation" className={`public-nav${menuOpen ? ' is-open' : ''}`} aria-label="Navegación principal">
       <Link href="/store" onClick={closeMenu}>Tienda</Link>
@@ -68,7 +69,7 @@ function PublicHeader() {
       </button>
       <Link href="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link>
     </div>
-  </header>;
+  </header><FloatingCartButton /></>;
 }
 
 export function Landing() {

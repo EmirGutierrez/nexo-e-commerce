@@ -21,12 +21,17 @@
 - Los productos inactivos, agotados o cuya existencia ya está completamente en el carrito muestran la acción deshabilitada.
 - El control espera a que el carrito local termine de cargar para evitar que la carga inicial desde `localStorage` sobrescriba una adición.
 - Al completar la acción se muestra una confirmación en la página de cuenta.
+- El precio se presenta en su propia línea, con separación visual antes del botón para evitar que ambos queden pegados o se lean como un solo control.
+- El botón cambia a **Agregar otro** cuando ya hay unidades de ese artículo en el carrito; el stock completo en carrito conserva su estado deshabilitado.
+- Se añadió un acceso flotante al carrito que acompaña el desplazamiento del cliente en las vistas públicas. Su indicador refleja el total de unidades y anima el cambio de cantidad; se oculta en carrito, checkout y confirmación para evitar duplicar la navegación del flujo.
 - Se aplicaron estilos responsive con botones, bordes y tipografía existentes en NEXO.
 
 ## Archivos modificados
 
 - `src/modules/commerce/components/CustomerAccountPage.tsx`: integración entre wishlist y carrito compartido, validación de disponibilidad y confirmación.
-- `src/app/globals.css`: estilos del botón y del área de información del producto en la wishlist.
+- `src/modules/app/components/FloatingCartButton.tsx`: acceso flotante compartido y contador accesible.
+- `src/modules/app/components/NexoPages.tsx`, `src/modules/commerce/components/CommercePages.tsx` y `src/app/(public)/account/page.tsx`: inclusión del acceso flotante en las vistas públicas.
+- `src/app/globals.css`: separación del precio y botón, y estilos responsive del acceso flotante.
 - `docs/contexto-wishlist-carrito.md`: alcance, decisiones y validación para la descripción del PR.
 
 ## Criterios de aceptación
@@ -40,8 +45,8 @@
 
 ## Validación
 
-- `npm run build`: completado correctamente; compilación, TypeScript y generación de rutas.
-- `git diff --check`: completado sin errores.
+- `npm run build`: pendiente de ejecutar tras este ajuste visual.
+- `git diff --check`: pendiente de ejecutar tras este ajuste visual.
 
 ## Descripción propuesta para el PR
 
