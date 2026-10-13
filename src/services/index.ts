@@ -77,8 +77,12 @@ export const authService = {
 
 export interface CustomerOrder {
   id: string; createdAt?: string;
-  data: { orderNumber?: string; customer?: string; date?: string; status?: string; paymentStatus?: string;
-    paymentMethod?: string; total?: number; items?: { productName?: string; quantity?: number; subtotal?: number }[] };
+  data: {
+    orderNumber?: string; customer?: string; customerEmail?: string; customerPhone?: string; address?: string;
+    date?: string; status?: string; paymentStatus?: string; paymentMethod?: string; payment?: string;
+    subtotal?: number; discountAmount?: number; discountCode?: string; total?: number;
+    items?: { productId?: string; productName?: string; sku?: string; quantity?: number; unitPrice?: number; subtotal?: number }[];
+  };
 }
 export interface CustomerNotification {
   id: string; orderId?: string | null; type: string; title: string; message: string; read: boolean; createdAt: string;
