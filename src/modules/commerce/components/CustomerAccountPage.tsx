@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { useEffect, useState, type FormEvent } from 'react';
-import { ArrowRight, Heart, PackageCheck, UserRound, X } from 'lucide-react';
+import { ArrowRight, Heart, PackageCheck, ShoppingCart, UserRound, X } from 'lucide-react';
 import { formatQ } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
 import { customerPortalService, type CustomerOrder } from '../../../services';
@@ -16,7 +16,7 @@ const navigation: { id: Section; label: string; icon: typeof UserRound }[] = [
 ];
 
 export default function CustomerAccountPage() {
-  const { user, userType, authLoading, updateProfile } = useApp();
+  const { user, userType, authLoading, updateProfile, cart, cartLoaded, addToCart } = useApp();
   const [section, setSection] = useState<Section>('profile');
   const [name, setName] = useState('');
   const [orders, setOrders] = useState<CustomerOrder[]>([]);
@@ -51,6 +51,21 @@ export default function CustomerAccountPage() {
     try { await customerPortalService.removeWishlist(id); setWishlist((current) => current.filter((product) => product.id !== id)); }
     catch (issue) { setError(issue instanceof Error ? issue.message : 'No se pudo actualizar tu wishlist.'); }
   };
+  const addWishlistProductToCart = (product: Product) => {
+    setError(''); setMessage('');
+    if (!cartLoaded) return;
+    if (product.status === 'Inactivo' || product.stock <= 0) {
+      setError(`${product.name} no está disponible actualmente.`);
+      return;
+    }
+    const currentQuantity = cart.find((item) => item.id === product.id)?.quantity || 0;
+    if (currentQuantity >= product.stock) {
+      setError(`Ya tienes todas las existencias disponibles de ${product.name} en el carrito.`);
+      return;
+    }
+    addToCart(product);
+    setMessage(`${product.name} se agregó al carrito. Puedes seguir guardándolo en tu wishlist.`);
+  };
 
   if (authLoading) return <main className="customer-account"><p role="status">Comprobando sesión…</p></main>;
   if (!user || userType !== 'customer') return <main className="customer-account customer-account-locked"><UserRound size={30} /><h1>Inicia sesión para ver tu cuenta</h1><p>Consulta tus pedidos, actualiza tu perfil y guarda tus productos favoritos.</p><Link className="button button-primary" href="/access">Ingresar a mi cuenta <ArrowRight size={16} /></Link></main>;
@@ -63,7 +78,7 @@ export default function CustomerAccountPage() {
         {error && <p role="alert" className="commerce-notice">{error}</p>}{message && <p role="status" className="commerce-notice">{message}</p>}
         {section === 'profile' && <div className="customer-panel"><div className="customer-panel-title"><span className="account-icon"><UserRound size={20} /></span><div><span className="eyebrow">Información personal</span><h2>Mi perfil</h2></div></div><form onSubmit={saveName} className="customer-profile-form"><label className="form-field">Nombre completo<input required minLength={2} maxLength={160} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="form-field">Correo electrónico<input value={user.email} readOnly disabled /></label><p>El correo identifica tu cuenta y se usa para relacionar tus compras.</p><button className="button button-primary" type="submit">Guardar cambios</button></form></div>}
         {section === 'orders' && <div className="customer-panel"><div className="customer-panel-title"><span className="account-icon"><PackageCheck size={20} /></span><div><span className="eyebrow">Historial de compras</span><h2>Mis compras</h2></div><strong className="customer-count">{orders.length}</strong></div>{loading ? <p className="customer-empty">Cargando tus pedidos…</p> : orders.length ? <div className="customer-order-list">{orders.map(({ id, data }) => <article className="customer-order-card" key={id}><div className="customer-order-top"><div><span className="eyebrow">{data.date ? new Date(data.date).toLocaleDateString('es-GT') : 'Pedido'}</span><h3>{data.orderNumber || `NX-${id.slice(0, 8).toUpperCase()}`}</h3></div><span className="customer-order-status">{data.status || 'Registrado'}</span></div><div className="customer-order-bottom"><span>{data.items?.reduce((sum, item) => sum + Number(item.quantity || 0), 0) || 0} productos · pago {data.paymentStatus || 'registrado'}</span><strong>{formatQ(Number(data.total || 0))}</strong></div></article>)}</div> : <div className="customer-empty"><PackageCheck size={26} /><h3>Aún no tienes compras</h3><p>Cuando realices un pedido, su estado aparecerá aquí.</p><Link className="text-link" href="/store">Explorar la tienda <ArrowRight size={15} /></Link></div>}</div>}
-        {section === 'wishlist' && <div className="customer-panel"><div className="customer-panel-title"><span className="account-icon"><Heart size={20} /></span><div><span className="eyebrow">Tus favoritos</span><h2>Mi wishlist</h2></div><strong className="customer-count">{wishlist.length}</strong></div>{loading ? <p className="customer-empty">Cargando tu wishlist…</p> : wishlist.length ? <div className="customer-wishlist">{wishlist.map((product) => <article key={product.id} className="customer-wishlist-item"><Link href={`/product/${product.id}`} className="customer-wishlist-image">{product.image && <img src={product.image} alt={product.name} />}</Link><div><span className="eyebrow">{product.category}</span><Link href={`/product/${product.id}`}><h3>{product.name}</h3></Link><strong>{formatQ(product.price)}</strong></div><button type="button" className="customer-remove" aria-label={`Quitar ${product.name} de wishlist`} onClick={() => void removeWishlist(product.id)}><X size={17} /></button></article>)}</div> : <div className="customer-empty"><Heart size={26} /><h3>Tu wishlist está vacía</h3><p>Guarda tus productos favoritos para encontrarlos fácilmente.</p><Link className="text-link" href="/store">Ver productos <ArrowRight size={15} /></Link></div>}</div>}
+        {section === 'wishlist' && <div className="customer-panel"><div className="customer-panel-title"><span className="account-icon"><Heart size={20} /></span><div><span className="eyebrow">Tus favoritos</span><h2>Mi wishlist</h2></div><strong className="customer-count">{wishlist.length}</strong></div>{loading ? <p className="customer-empty">Cargando tu wishlist…</p> : wishlist.length ? <div className="customer-wishlist">{wishlist.map((product) => { const quantityInCart = cart.find((item) => item.id === product.id)?.quantity || 0; const unavailable = product.status === 'Inactivo' || product.stock <= 0 || quantityInCart >= product.stock; return <article key={product.id} className="customer-wishlist-item"><Link href={`/product/${product.id}`} className="customer-wishlist-image">{product.image && <img src={product.image} alt={product.name} />}</Link><div className="customer-wishlist-info"><span className="eyebrow">{product.category}</span><Link href={`/product/${product.id}`}><h3>{product.name}</h3></Link><strong>{formatQ(product.price)}</strong><button type="button" className="button button-outline customer-wishlist-add" disabled={!cartLoaded || unavailable} onClick={() => addWishlistProductToCart(product)}><ShoppingCart size={14} />{!cartLoaded ? 'Cargando carrito…' : product.status === 'Inactivo' || product.stock <= 0 ? 'No disponible' : quantityInCart >= product.stock ? 'Stock en carrito' : quantityInCart > 0 ? 'Agregar otro' : 'Agregar al carrito'}</button></div><button type="button" className="customer-remove" aria-label={`Quitar ${product.name} de wishlist`} onClick={() => void removeWishlist(product.id)}><X size={17} /></button></article>; })}</div> : <div className="customer-empty"><Heart size={26} /><h3>Tu wishlist está vacía</h3><p>Guarda tus productos favoritos para encontrarlos fácilmente.</p><Link className="text-link" href="/store">Ver productos <ArrowRight size={15} /></Link></div>}</div>}
       </section>
     </div>
   </main>;

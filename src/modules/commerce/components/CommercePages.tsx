@@ -11,6 +11,7 @@ import { checkoutService, customerPortalService } from '../../../services';
 import type { PaymentMethod, Product } from '../../../types';
 import { applyPromotion, emptyPromotionData, isPromotionActive, loadPromotionData, loadRecentlyViewed, recordRecentlyViewed, validateDiscountCode } from '../services/commerceDataService';
 import PublicAccountControls from '../../app/components/PublicAccountControls';
+import FloatingCartButton from '../../app/components/FloatingCartButton';
 import CustomerNotificationBell from './CustomerNotificationBell';
 
 function SafeImage({ src, alt, className }: { src: string; alt: string; className?: string }) {
@@ -34,7 +35,7 @@ function PublicShell({ children }: { children: React.ReactNode }) {
   }, [menuOpen]);
   const closeMenu = () => setMenuOpen(false);
 
-  return <div className="public-app"><header className="public-header"><Link href="/" className="brand"><span className="brand-mark"><span /></span><span>NEXO</span></Link><nav id="commerce-navigation" className={`public-nav${menuOpen ? ' is-open' : ''}`} aria-label="Navegación principal"><Link href="/store" onClick={closeMenu}>Tienda</Link><Link href="/#benefits" onClick={closeMenu}>Beneficios</Link><Link href="/#about" onClick={closeMenu}>Nosotros</Link><div className="public-nav-account"><PublicAccountControls onAction={closeMenu} /></div></nav><div className="header-actions"><CustomerNotificationBell /><PublicAccountControls onAction={closeMenu} /><button type="button" className="public-menu-toggle" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={menuOpen} aria-controls="commerce-navigation" onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</button><Link href="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link></div></header>{children}</div>;
+  return <div className="public-app"><header className="public-header"><Link href="/" className="brand"><span className="brand-mark"><span /></span><span>NEXO</span></Link><nav id="commerce-navigation" className={`public-nav${menuOpen ? ' is-open' : ''}`} aria-label="Navegación principal"><Link href="/store" onClick={closeMenu}>Tienda</Link><Link href="/#benefits" onClick={closeMenu}>Beneficios</Link><Link href="/#about" onClick={closeMenu}>Nosotros</Link><div className="public-nav-account"><PublicAccountControls onAction={closeMenu} /></div></nav><div className="header-actions"><CustomerNotificationBell /><PublicAccountControls onAction={closeMenu} /><button type="button" className="public-menu-toggle" aria-label={menuOpen ? 'Cerrar menú' : 'Abrir menú'} aria-expanded={menuOpen} aria-controls="commerce-navigation" onClick={() => setMenuOpen((open) => !open)}>{menuOpen ? <X size={20} /> : <Menu size={20} />}</button><Link href="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link></div></header><FloatingCartButton />{children}</div>;
 }
 
 function ProductCard({ product }: { product: Product }) {

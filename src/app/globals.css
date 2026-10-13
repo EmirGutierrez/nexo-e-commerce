@@ -1326,8 +1326,20 @@ select:disabled {
 .customer-wishlist-image img { width:100%; height:100%; object-fit:cover; }
 .customer-wishlist-item h3 { margin:4px 0 7px; }
 .customer-wishlist-item strong { color:var(--navy); font-size:12px; }
+.customer-wishlist-info { min-width:0; }
+.customer-wishlist-info > strong { display:block; margin:8px 0 14px; }
+.customer-wishlist-add { margin-top:0; padding:8px 10px; border-radius:8px; font-size:10px; box-shadow:none; }
+.customer-wishlist-add:hover { transform:translateY(-1px); background:#f5f7fb; }
+.customer-wishlist-add:disabled { cursor:not-allowed; color:#929bad; background:#f3f5f8; border-color:#e6eaf0; transform:none; }
 .customer-remove { display:grid; width:32px; height:32px; place-items:center; border-radius:8px; color:var(--muted); background:#f5f6f9; }
 .customer-remove:hover { color:#9b4545; background:#fff0ef; }
+.floating-cart-button { position:fixed; z-index:45; right:clamp(16px,3vw,38px); bottom:clamp(18px,3vh,30px); display:grid; width:54px; height:54px; place-items:center; border:1px solid rgba(255,255,255,.2); border-radius:50%; color:#fff; background:var(--navy); box-shadow:0 8px 24px rgba(36,48,74,.25); transition:transform .18s ease, box-shadow .18s ease, background .18s ease; }
+.floating-cart-button:hover { transform:translateY(-3px); background:#304878; box-shadow:0 12px 28px rgba(36,48,74,.3); }
+.floating-cart-button:focus-visible { outline:3px solid var(--lime); outline-offset:3px; }
+.floating-cart-count { position:absolute; top:-5px; right:-5px; display:grid; min-width:22px; height:22px; place-items:center; padding:0 5px; border:2px solid #fff; border-radius:99px; color:var(--navy); background:var(--lime); font-size:10px; font-weight:800; }
+@keyframes cart-count-pop { 0% { transform:scale(.65); } 65% { transform:scale(1.18); } 100% { transform:scale(1); } }
+.floating-cart-count { animation:cart-count-pop .3s ease-out; }
+@media(prefers-reduced-motion:reduce) { .floating-cart-button,.floating-cart-count { transition:none; animation:none; } }
 .customer-account-locked { display:grid; justify-items:center; min-height:55vh; align-content:center; text-align:center; }
 .customer-account-locked h1 { margin:15px 0 5px; font:600 32px 'Space Grotesk'; }
 .customer-account-locked p { max-width:450px; margin:0 0 20px; color:var(--muted); font-size:12px; }
