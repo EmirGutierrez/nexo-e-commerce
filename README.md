@@ -60,4 +60,4 @@ Para activar SonarQube Cloud, crea el proyecto vinculado a este repositorio y co
 - La variable `SONAR_PROJECT_KEY` con la clave del proyecto.
 - El secreto `SONAR_TOKEN` con un token de análisis del proyecto.
 
-El trabajo de Sonar se omite hasta que estén configuradas las dos variables; al activarlo, el secreto también debe existir. La configuración de alcance está en `sonar-project.properties`. El despliegue de producción se ejecuta al subir cambios a `master` después de pasar CI. Para preparar Contabo, el dominio y los secretos de GitHub, sigue [deploy/README.md](deploy/README.md).
+El trabajo de Sonar se omite hasta que estén configuradas las dos variables; al activarlo, el secreto también debe existir. La configuración de alcance está en `sonar-project.properties`. El despliegue de producción se ejecuta al subir cambios a `develop` después de pasar CI. Para preparar Contabo, el dominio y los secretos de GitHub, sigue [deploy/README.md](deploy/README.md).

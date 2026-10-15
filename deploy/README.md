@@ -7,7 +7,7 @@ El Compose de producción ejecuta PostgreSQL, Spring Boot, Next.js y Caddy. Cadd
 1. Instala Docker Engine y el plugin de Docker Compose v2 en Ubuntu. Confirma que `docker compose version` responda.
 2. Crea un usuario `deploy` con acceso SSH por llave y permiso para ejecutar Docker. No uses `root` en el secreto de GitHub.
 3. Crea `/opt/nexo-commerce/deploy/.env.production` a partir de `deploy/production.env.example`. Configura el dominio, una contraseña aleatoria larga para la base de datos y, para el primer arranque, las cuatro variables de bootstrap del administrador. Protege el archivo con `chmod 600`.
-4. Da propiedad de `/opt/nexo-commerce` al usuario `deploy`. El workflow clona el repositorio ahí la primera vez y, después, actualiza la rama `master`.
+4. Da propiedad de `/opt/nexo-commerce` al usuario `deploy`. El workflow clona el repositorio ahí la primera vez y, después, actualiza la rama `develop`.
 5. Configura los registros DNS A de `@`, `www` y `api` con la IPv4 de la VPS. Permite TCP 22 (SSH), 80 y 443; permite UDP 443 para HTTP/3 si quieres usarlo.
 
 En el primer despliegue, Spring crea el administrador configurado por bootstrap. Cuando confirmes que ya puedes iniciar sesión, cambia `BOOTSTRAP_ADMIN_ENABLED` a `false` y borra nombre, correo y contraseña del archivo. No guardes ese archivo en Git.
@@ -25,7 +25,7 @@ En el repositorio, abre **Settings → Secrets and variables → Actions → New
 
 No compartas la llave privada en el repositorio ni en mensajes. Puedes generar una llave dedicada para el workflow y guardar la parte privada directamente como `VPS_SSH_KEY` en GitHub. Verifica la huella del servidor desde la consola de Contabo antes de guardarla como `VPS_KNOWN_HOSTS`.
 
-Cada push a `master` despliega después de que pasen la compilación del frontend, las pruebas de Spring y la construcción de las imágenes Docker. Los pushes a otras ramas ejecutan CI, pero no despliegan. También se puede iniciar manualmente el workflow seleccionando `master`.
+Cada push a `develop` despliega después de que pasen la compilación del frontend, las pruebas de Spring y la construcción de las imágenes Docker. Los pushes a otras ramas ejecutan CI, pero no despliegan. También se puede iniciar manualmente el workflow seleccionando `develop`.
 
 El workflow usa `/opt/nexo-commerce` como directorio de despliegue. La primera ejecución requiere que el usuario SSH pueda crear ese directorio y ejecutar Docker; puedes prepararlo con `sudo install -d -o deploy -g deploy /opt/nexo-commerce`.
 

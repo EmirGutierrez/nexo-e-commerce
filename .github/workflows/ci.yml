@@ -133,7 +133,7 @@ jobs:
     if: >-
       ${{
         always() &&
-        github.ref == 'refs/heads/master' &&
+        github.ref == 'refs/heads/develop' &&
         (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
         needs.frontend.result == 'success' &&
         needs.backend.result == 'success' &&
@@ -175,4 +175,4 @@ jobs:
           -o StrictHostKeyChecking=yes
           -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
           "$VPS_USER@$VPS_HOST"
-          'if [ ! -d /opt/nexo-commerce/.git ]; then git clone --branch master --single-branch https://github.com/EmirGutierrez/nexo-e-commerce.git /opt/nexo-commerce; fi && cd /opt/nexo-commerce && git pull --ff-only origin master && docker compose --env-file deploy/.env.production -f compose.prod.yaml up -d --build --remove-orphans'
+          'if [ ! -d /opt/nexo-commerce/.git ]; then git clone --branch develop --single-branch https://github.com/EmirGutierrez/nexo-e-commerce.git /opt/nexo-commerce; fi && cd /opt/nexo-commerce && git pull --ff-only origin develop && docker compose --env-file deploy/.env.production -f compose.prod.yaml up -d --build --remove-orphans'
