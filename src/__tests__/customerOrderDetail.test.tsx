@@ -2,6 +2,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, render, screen } from '@testing-library/react';
+import CustomerAccountPage from '../modules/commerce/components/CustomerAccountPage';
 import CustomerOrderDetailPage from '../modules/commerce/components/CustomerOrderDetailPage';
 import { customerPortalService, type CustomerOrder } from '../services';
 import { fetchCatalogFromApi } from '../modules/products/services/productService';
@@ -48,6 +49,7 @@ beforeEach(() => {
   appContext.user = { id: 'customer-1', name: 'Emir Gutierrez', email: 'emir@example.com', role: 'customer', initials: 'EG', status: 'Activo' };
   appContext.userType = 'customer';
   appContext.authLoading = false;
+  window.history.replaceState({}, '', '/account');
   vi.spyOn(customerPortalService, 'orders').mockResolvedValue([makeOrder()]);
   vi.mocked(fetchCatalogFromApi).mockResolvedValue(catalog as never);
 });
@@ -172,5 +174,40 @@ describe('detalle de pedido del cliente', () => {
 
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.getByText('No se pudo cargar el detalle del pedido.')).toBeTruthy();
+  });
+});
+
+describe('historial de compras del cliente', () => {
+  it('enlaza pedidos y presenta valores alternativos cuando faltan datos', async () => {
+    window.history.replaceState({}, '', '/account?section=orders');
+    vi.mocked(customerPortalService.orders).mockResolvedValueOnce([
+      makeOrder({ items: [{ quantity: 2 }], paymentStatus: 'Aprobado' }),
+      makeOrder({
+        orderNumber: undefined, customer: undefined, date: undefined, status: undefined,
+        paymentStatus: undefined, total: undefined, items: [{ quantity: undefined }],
+      }, { id: 'order-2' }),
+      makeOrder({ items: undefined }, { id: 'order-3' }),
+    ]);
+    vi.spyOn(customerPortalService, 'wishlist').mockResolvedValueOnce([]);
+    render(<CustomerAccountPage />);
+
+    const detailLinks = await screen.findAllByRole('link', { name: /Ver detalle/ });
+    expect(detailLinks.map((link) => link.getAttribute('href'))).toEqual([
+      '/account/orders/order-1', '/account/orders/order-2', '/account/orders/order-3',
+    ]);
+    expect(screen.getByText('Pedido')).toBeTruthy();
+    expect(screen.getByText('NX-ORDER-2')).toBeTruthy();
+    expect(screen.getByText('Registrado')).toBeTruthy();
+    expect(screen.getByText('0 productos · pago registrado')).toBeTruthy();
+  });
+
+  it('muestra el estado vacío cuando la cuenta no tiene pedidos', async () => {
+    window.history.replaceState({}, '', '/account?section=orders');
+    vi.mocked(customerPortalService.orders).mockResolvedValueOnce([]);
+    vi.spyOn(customerPortalService, 'wishlist').mockResolvedValueOnce([]);
+    render(<CustomerAccountPage />);
+
+    expect(await screen.findByRole('heading', { name: 'Aún no tienes compras' })).toBeTruthy();
+    expect(screen.getByRole('link', { name: /Explorar la tienda/ }).getAttribute('href')).toBe('/store');
   });
 });
