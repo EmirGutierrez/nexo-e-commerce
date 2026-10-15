@@ -49,3 +49,15 @@ Las rutas conservan las URLs existentes, incluyendo `/store`, `/cart`, `/checkou
 - El acceso administrativo requiere una cuenta creada en Spring Boot mediante el bootstrap inicial configurado fuera del repositorio; consulta `backend/README.md`.
 
 El acceso de personal y clientes usa el BFF de Next.js y sesiones, usuarios y roles de Spring Boot. Los clientes pueden crear una cuenta en `/register`; el formulario de acceso dirige a cada persona según el rol devuelto por la API. Catálogo, pedidos, promociones y comprobantes se guardan en PostgreSQL. El carrito y los productos vistos recientemente se guardan en `localStorage`.
+
+## Integración continua
+
+El flujo de GitHub Actions en `.github/workflows/ci.yml` se ejecuta al subir cambios a cualquier rama o manualmente. Revisa vulnerabilidades altas, comprueba la compilación de Next.js, ejecuta las pruebas del backend con Maven y construye las imágenes Docker del frontend y el backend. Cuando se configura SonarQube Cloud, también analiza el frontend y el backend y espera el resultado del Quality Gate; si no se cumple, falla el flujo.
+
+Para activar SonarQube Cloud, crea el proyecto vinculado a este repositorio y configura en GitHub, en **Settings → Secrets and variables → Actions**:
+
+- La variable `SONAR_ORGANIZATION` con la clave de la organización de SonarQube Cloud.
+- La variable `SONAR_PROJECT_KEY` con la clave del proyecto.
+- El secreto `SONAR_TOKEN` con un token de análisis del proyecto.
+
+El trabajo de Sonar se omite hasta que estén configuradas las dos variables; al activarlo, el secreto también debe existir. La configuración de alcance está en `sonar-project.properties`. El despliegue de producción se ejecuta al subir cambios a `master` después de pasar CI. Para preparar Contabo, el dominio y los secretos de GitHub, sigue [deploy/README.md](deploy/README.md).
