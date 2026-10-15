@@ -15,7 +15,7 @@ public class AccountUserDetailsService implements UserDetailsService {
     public AccountUserDetailsService(AppUserRepository users) { this.users = users; }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = UsernameNotFoundException.class)
     public UserDetails loadUserByUsername(String username) throws UsernameNotFoundException {
         String normalizedEmail = username.trim().toLowerCase(Locale.ROOT);
         return users.findByEmailIgnoreCase(normalizedEmail)
