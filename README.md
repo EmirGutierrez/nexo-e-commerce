@@ -28,7 +28,7 @@ Las instrucciones completas de colaboración, ramas, revisión y merges están e
 
 El contexto técnico para asistentes de IA y colaboradores está en [AGENTS.md](./AGENTS.md).
 
-El flujo oficial es `origin/develop → feature/* → revisión → merge directo a develop → master`. No se utilizan Pull Requests, `main` ni cambios directos sobre `develop` o `master`.
+El flujo diario es `origin/develop → feature/* → revisión → merge a develop`. Los lanzamientos se proponen mediante un Pull Request de `develop` a `master`. No se hacen cambios directos sobre `develop` o `master`.
 
 ## Estructura y alcance actual
 
@@ -52,12 +52,6 @@ El acceso de personal y clientes usa el BFF de Next.js y sesiones, usuarios y ro
 
 ## Integración continua
 
-El flujo de GitHub Actions en `.github/workflows/ci.yml` se ejecuta al subir cambios a cualquier rama o manualmente. Revisa vulnerabilidades altas, comprueba la compilación de Next.js, ejecuta las pruebas del backend con Maven y construye las imágenes Docker del frontend y el backend. Cuando se configura SonarQube Cloud, también analiza el frontend y el backend y espera el resultado del Quality Gate; si no se cumple, falla el flujo.
+El flujo de GitHub Actions en `.github/workflows/ci.yml` se ejecuta al subir cambios a cualquier rama y al abrir o actualizar Pull Requests hacia `develop` o `master`. Ejecuta `npm audit --audit-level=high`, las pruebas y cobertura frontend (`npm run test:coverage`), la compilación de Next.js, `mvn -B verify` y la construcción de las imágenes Docker. En pushes a `develop` y Pull Requests hacia `develop`, también ejecuta SonarQube Cloud; el token faltante hace fallar esa validación.
 
-Para activar SonarQube Cloud, crea el proyecto vinculado a este repositorio y configura en GitHub, en **Settings → Secrets and variables → Actions**:
-
-- La variable `SONAR_ORGANIZATION` con la clave de la organización de SonarQube Cloud.
-- La variable `SONAR_PROJECT_KEY` con la clave del proyecto.
-- El secreto `SONAR_TOKEN` con un token de análisis del proyecto.
-
-El trabajo de Sonar se omite hasta que estén configuradas las dos variables; al activarlo, el secreto también debe existir. La configuración de alcance está en `sonar-project.properties`. El despliegue de producción se ejecuta al subir cambios a `develop` después de pasar CI. Para preparar Contabo, el dominio y los secretos de GitHub, sigue [deploy/README.md](deploy/README.md).
+SonarQube Cloud usa la organización y clave de proyecto declaradas en el workflow y en `sonar-project.properties`. En GitHub, **Settings → Secrets and variables → Actions**, solo hace falta el secreto `SONAR_TOKEN` con un token de análisis para el proyecto. Las pruebas y el Quality Gate de Sonar deben pasar antes de que un push a `develop` pueda desplegar producción. Los pushes a otras ramas y los Pull Requests no despliegan. Para preparar Contabo, el dominio y los secretos de GitHub, sigue [deploy/README.md](deploy/README.md).

@@ -77,6 +77,17 @@ public class BusinessRecordService {
         }).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<BusinessRecordResponse> listInventoryProducts() {
+        authorize("inventory", "view");
+        return jdbc.query("""
+                SELECT id, resource_code, data::text AS data, created_at, updated_at
+                FROM business_records WHERE resource_code = 'products' ORDER BY created_at DESC, id
+                """, (rs, row) -> new BusinessRecordResponse(
+                rs.getObject("id", UUID.class), rs.getString("resource_code"), readMap(rs.getString("data")),
+                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()));
+    }
+
     @Transactional
     public BusinessRecordResponse create(String resource, Map<String, Object> input) {
         String normalized = normalize(resource);
@@ -123,6 +134,16 @@ public class BusinessRecordService {
     public BusinessRecordResponse update(String resource, UUID id, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "edit");
+        return updateAuthorized(normalized, id, input);
+    }
+
+    @Transactional
+    public BusinessRecordResponse updateInventoryProduct(UUID id, Map<String, Object> input) {
+        authorize("inventory", "edit");
+        return updateAuthorized("products", id, input);
+    }
+
+    private BusinessRecordResponse updateAuthorized(String normalized, UUID id, Map<String, Object> input) {
         if (Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este registro no admite edición directa.");
         Map<String, Object> data = clean(input);
@@ -1165,6 +1186,9 @@ public class BusinessRecordService {
             if (image.length() > 1000 && !image.startsWith("data:image/")) throw invalid("La dirección de imagen del producto es demasiado larga.");
             BigDecimal price = decimal(field(data, "price", "Valor"));
             if (price.signum() < 0) throw invalid("El precio no puede ser negativo.");
+            Object rawCost = field(data, "cost", "Costo unitario");
+            if (rawCost != null && !String.valueOf(rawCost).isBlank() && decimal(rawCost).signum() <= 0)
+                throw invalid("El costo unitario debe ser mayor que cero.");
             int stock = number(field(data, "stock", "Existencias"), 0);
             if (stock < 0) throw invalid("Las existencias no pueden ser negativas.");
             String requestedStatus = defaultText(field(data, "status", "Estado"), "Activo");

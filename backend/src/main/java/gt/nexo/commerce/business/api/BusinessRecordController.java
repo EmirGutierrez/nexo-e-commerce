@@ -47,6 +47,16 @@ public class BusinessRecordController {
         return service.createInventoryProduct(data);
     }
 
+    @GetMapping("/inventory/products")
+    @Operation(summary = "Lista productos con el permiso de consulta de inventario.")
+    public List<BusinessRecordResponse> inventoryProducts() { return service.listInventoryProducts(); }
+
+    @PutMapping("/inventory/products/{id}")
+    @Operation(summary = "Actualiza un producto con el permiso de edición de inventario.")
+    public BusinessRecordResponse updateInventoryProduct(@PathVariable UUID id, @RequestBody Map<String, Object> data) {
+        return service.updateInventoryProduct(id, data);
+    }
+
     @PutMapping("/{resource}/{id}")
     @Operation(summary = "Actualiza un registro autorizado y registra ajustes de existencias.")
     public BusinessRecordResponse update(@PathVariable String resource, @PathVariable UUID id,
