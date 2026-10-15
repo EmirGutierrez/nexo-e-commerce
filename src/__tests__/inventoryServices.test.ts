@@ -36,6 +36,22 @@ describe('servicios de inventario', () => {
     });
   });
 
+  it('filtra alertas de productos inactivos y respeta el límite de bajo stock', async () => {
+    const records = [
+      { ...productRecord, id: 'active-low', data: { ...productRecord.data, name: 'Activo con poco stock', stock: 3 } },
+      { ...productRecord, id: 'inactive-low', data: { ...productRecord.data, name: 'Inactivo', stock: 3, status: 'Inactivo' } },
+      { ...productRecord, id: 'active-stocked', data: { ...productRecord.data, name: 'Activo con stock suficiente', stock: 10 } },
+    ];
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce(records as never);
+
+    const alerts = await adminTableService.list('inventory/alerts');
+
+    expect(get).toHaveBeenCalledWith('/api/business/inventory/products');
+    expect(alerts).toEqual([
+      { id: 'active-low', data: expect.objectContaining({ Producto: 'Activo con poco stock', Existencias: 3 }) },
+    ]);
+  });
+
   it('actualiza costo, precio, existencias y ubicación mediante la ruta de inventario', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce([productRecord] as never);
     const put = vi.spyOn(apiClient, 'put').mockResolvedValueOnce({
