@@ -173,7 +173,6 @@ jobs:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          VPS_KNOWN_HOSTS: ${{ secrets.VPS_KNOWN_HOSTS }}
         run: |
           test -n "$VPS_HOST" || { echo "Falta el secreto VPS_HOST"; exit 1; }
           test -n "$VPS_USER" || { echo "Falta el secreto VPS_USER"; exit 1; }
@@ -186,12 +185,7 @@ jobs:
             exit 1
           }
           expected_fingerprint="SHA256:fHpDmhjPDYdpv7Gz7nJtymZtrDFdmiO1WPMmmj8wTO4"
-          known_hosts_value="$(printf '%s' "$VPS_KNOWN_HOSTS" | tr -d '\r\n')"
-          if [ -n "$VPS_KNOWN_HOSTS" ] && [ "$known_hosts_value" != "$expected_fingerprint" ]; then
-            printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > "$HOME/.ssh/known_hosts"
-          else
-            ssh-keyscan -T 10 -t ed25519 "$VPS_HOST" > "$HOME/.ssh/known_hosts"
-          fi
+          ssh-keyscan -T 10 -t ed25519 "$VPS_HOST" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
           observed_fingerprints="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" 2>/dev/null | awk '{print $2}' || true)"
           if ! printf '%s\n' "$observed_fingerprints" | grep -Fxq "$expected_fingerprint"; then
