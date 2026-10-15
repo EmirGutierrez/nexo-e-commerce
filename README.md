@@ -28,7 +28,9 @@ Las instrucciones completas de colaboración, ramas, revisión y merges están e
 
 El contexto técnico para asistentes de IA y colaboradores está en [AGENTS.md](./AGENTS.md).
 
-El flujo diario es `origin/develop → feature/* → revisión → merge a develop`. Los lanzamientos se proponen mediante un Pull Request de `develop` a `master`. No se hacen cambios directos sobre `develop` o `master`.
+La descripción del estado actual, la arquitectura y la evolución técnica está en [docs/contexto-proyecto.md](./docs/contexto-proyecto.md).
+
+El flujo diario es `origin/develop → feature/* → pruebas → revisión → merge directo a develop`. Los lanzamientos estables se proponen mediante un Pull Request de `develop` a `master`. No se hacen cambios directos sobre `develop` o `master`.
 
 ## Estructura y alcance actual
 
