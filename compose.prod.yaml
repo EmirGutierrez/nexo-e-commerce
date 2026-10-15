@@ -1,0 +1,116 @@
+name: nexo-commerce-prod
+
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Define POSTGRES_DB in deploy/.env.production}
+      POSTGRES_USER: ${DATABASE_USERNAME:?Define DATABASE_USERNAME in deploy/.env.production}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD:?Define DATABASE_PASSWORD in deploy/.env.production}
+    volumes:
+      - nexo-commerce-prod-data:/var/lib/postgresql/data
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+      start_period: 5s
+
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    environment:
+      SPRING_PROFILES_ACTIVE: prod
+      SERVER_ADDRESS: 0.0.0.0
+      SERVER_PORT: 8080
+      DATABASE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:?Define POSTGRES_DB in deploy/.env.production}
+      DATABASE_USERNAME: ${DATABASE_USERNAME:?Define DATABASE_USERNAME in deploy/.env.production}
+      DATABASE_PASSWORD: ${DATABASE_PASSWORD:?Define DATABASE_PASSWORD in deploy/.env.production}
+      CORS_ALLOWED_ORIGINS: https://${SITE_DOMAIN:?Define SITE_DOMAIN in deploy/.env.production},https://www.${SITE_DOMAIN}
+      SESSION_COOKIE_SECURE: "true"
+      SESSION_COOKIE_SAME_SITE: Lax
+      OPENAPI_ENABLED: "false"
+      BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-false}
+      BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - app
+      - database
+      - api
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/api/catalog/payment-methods || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 30
+      start_period: 45s
+
+  frontend:
+    build:
+      context: .
+      dockerfile: Dockerfile.frontend
+    restart: unless-stopped
+    environment:
+      NODE_ENV: production
+      HOSTNAME: 0.0.0.0
+      PORT: 3000
+      SPRING_BACKEND_URL: http://backend:8080
+      SPRING_BACKEND_ALLOW_DOCKER_HTTP: "true"
+      SESSION_COOKIE_SECURE: "true"
+    depends_on:
+      backend:
+        condition: service_healthy
+    networks:
+      - app
+      - site
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://127.0.0.1:3000/').then((response) => process.exit(response.ok ? 0 : 1)).catch(() => process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 15
+      start_period: 30s
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      SITE_DOMAIN: ${SITE_DOMAIN:?Define SITE_DOMAIN in deploy/.env.production}
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - nexo-commerce-caddy-data:/data
+      - nexo-commerce-caddy-config:/config
+    depends_on:
+      frontend:
+        condition: service_healthy
+    networks:
+      - edge
+      - site
+      - api
+
+volumes:
+  nexo-commerce-prod-data:
+  nexo-commerce-caddy-data:
+  nexo-commerce-caddy-config:
+
+networks:
+  edge:
+  site:
+    internal: true
+  app:
+    internal: true
+  api:
+    internal: true
+  database:
+    internal: true
