@@ -45,8 +45,8 @@
 
 ## Validación
 
-- `npm run build`: pendiente de ejecutar tras este ajuste visual.
-- `git diff --check`: pendiente de ejecutar tras este ajuste visual.
+- `npm run build`: completado correctamente en la integración actual.
+- `git diff --check`: completado sin errores.
 
 ## Descripción propuesta para el PR
 

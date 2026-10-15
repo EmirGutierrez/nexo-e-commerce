@@ -24,7 +24,7 @@ En el repositorio, abre **Settings → Secrets and variables → Actions → New
 
 No compartas la llave privada en el repositorio ni en mensajes. El workflow elimina retornos de carro al cargarla para admitir copias desde Windows y valida su formato antes de conectar. La huella ED25519 de la VPS se fija en el workflow y se compara con la respuesta de `ssh-keyscan`; si Contabo cambia la llave del host, actualiza la huella solo después de verificarla desde la consola de la VPS.
 
-Cada push a `develop` despliega después de que pasen la compilación del frontend, las pruebas de Spring y la construcción de las imágenes Docker. Los pushes a otras ramas ejecutan CI, pero no despliegan. También se puede iniciar manualmente el workflow seleccionando `develop`.
+Cada push a `develop` despliega después de que pasen las pruebas frontend, el build de Next.js, las pruebas de Spring, el análisis de SonarQube Cloud con Quality Gate y la construcción de las imágenes Docker. Si falta `SONAR_TOKEN`, el análisis falla y bloquea el despliegue. Los pushes a otras ramas y los Pull Requests ejecutan CI, pero no despliegan. También se puede iniciar manualmente el workflow seleccionando `develop`.
 
 El workflow usa `/opt/nexo-commerce` como directorio de despliegue. La primera ejecución requiere que el usuario SSH pueda crear ese directorio y ejecutar Docker; puedes prepararlo con `sudo install -d -o deploy -g deploy /opt/nexo-commerce`.
 
