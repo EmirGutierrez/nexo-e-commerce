@@ -19,14 +19,14 @@ export interface AdminModuleConfig {
 type Entry = { id: string; data: AdminTableRecord };
 type DialogMode = 'create' | 'edit' | 'view' | 'confirm' | null;
 const transactionSections = new Set(['sales', 'transfers', 'payments', 'invoices']);
-const statusChoices = (section: string) => section === 'products' || section === 'inventory'
+export const statusChoices = (section: string) => section === 'products' || section === 'inventory'
   ? section === 'inventory' ? ['En stock', 'Sin stock', 'Inactivo'] : ['Activo', 'Inactivo'] : section === 'customers' ? ['Activo', 'Inactivo', 'Pendiente']
   : section === 'brands' ? ['Activa', 'Inactiva'] : section === 'purchases' ? ['Pendiente', 'Registrada', 'Anulada']
   : section === 'accounting' ? ['Registrado', 'Pendiente', 'Anulado'] : ['Activo', 'Inactivo'];
 const viewOnlySections = new Set(['inventory/alerts', 'inventory/history']);
 const updateOnlySections = new Set(['settings', 'profile']);
 const numericColumns = new Set(['Valor', 'Precio de venta', 'Costo unitario', 'Ventas del mes', 'Total comprado', 'Pedidos', 'Usuarios', 'Productos', 'Existencias']);
-const tableColumnWidth = (column: string) => {
+export const tableColumnWidth = (column: string) => {
   if (['Producto', 'Nombre', 'Descripción', 'Cliente'].includes(column)) return 210;
   if (['Acciones'].includes(column)) return 132;
   if (['Fecha', 'Último acceso', 'Contacto'].includes(column)) return 150;
