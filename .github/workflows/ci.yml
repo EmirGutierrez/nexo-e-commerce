@@ -58,7 +58,8 @@ jobs:
 
       - name: Ejecutar pruebas Maven
         working-directory: backend
-        run: mvn -B clean verify
+        # Cada job parte de un checkout nuevo; no necesita el plugin clean.
+        run: mvn -B verify
 
   sonar:
     name: Analizar calidad con SonarQube Cloud
@@ -98,7 +99,8 @@ jobs:
 
       - name: Probar backend y generar cobertura JaCoCo
         working-directory: backend
-        run: mvn -B clean verify
+        # Checkout nuevo también en este job; verify ejecuta pruebas y genera JaCoCo.
+        run: mvn -B verify
 
       - name: Validar token de SonarQube Cloud
         env:
