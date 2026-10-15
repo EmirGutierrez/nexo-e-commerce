@@ -28,7 +28,7 @@ Las instrucciones completas de colaboración, ramas, revisión y merges están e
 
 El contexto técnico para asistentes de IA y colaboradores está en [AGENTS.md](./AGENTS.md).
 
-El flujo oficial es `origin/develop → feature/* → revisión → merge directo a develop → master`. No se utilizan Pull Requests, `main` ni cambios directos sobre `develop` o `master`.
+El flujo diario es `origin/develop → feature/* → revisión → merge a develop`. Los lanzamientos se proponen mediante un Pull Request de `develop` a `master`. No se hacen cambios directos sobre `develop` o `master`.
 
 ## Estructura y alcance actual
 
@@ -49,3 +49,9 @@ Las rutas conservan las URLs existentes, incluyendo `/store`, `/cart`, `/checkou
 - El acceso administrativo requiere una cuenta creada en Spring Boot mediante el bootstrap inicial configurado fuera del repositorio; consulta `backend/README.md`.
 
 El acceso de personal y clientes usa el BFF de Next.js y sesiones, usuarios y roles de Spring Boot. Los clientes pueden crear una cuenta en `/register`; el formulario de acceso dirige a cada persona según el rol devuelto por la API. Catálogo, pedidos, promociones y comprobantes se guardan en PostgreSQL. El carrito y los productos vistos recientemente se guardan en `localStorage`.
+
+## Integración continua
+
+El flujo de GitHub Actions en `.github/workflows/ci.yml` se ejecuta al subir cambios a cualquier rama y al abrir o actualizar Pull Requests hacia `develop` o `master`. Ejecuta `npm audit --audit-level=high`, las pruebas y cobertura frontend (`npm run test:coverage`), la compilación de Next.js, `mvn -B verify` y la construcción de las imágenes Docker. En pushes a `develop` y Pull Requests hacia `develop`, también ejecuta SonarQube Cloud; el token faltante hace fallar esa validación.
+
+SonarQube Cloud usa la organización y clave de proyecto declaradas en el workflow y en `sonar-project.properties`. En GitHub, **Settings → Secrets and variables → Actions**, solo hace falta el secreto `SONAR_TOKEN` con un token de análisis para el proyecto. Las pruebas y el Quality Gate de Sonar deben pasar antes de que un push a `develop` pueda desplegar producción. Los pushes a otras ramas y los Pull Requests no despliegan. Para preparar Contabo, el dominio y los secretos de GitHub, sigue [deploy/README.md](deploy/README.md).

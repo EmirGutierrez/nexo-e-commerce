@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { Archive, Ban, Check, ChevronDown, Download, Eye, Filter, Package, Pencil, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
-import { adminTableService, brandService, productInventoryService, type AdminTableRecord } from '../../../services';
+import { adminTableService, brandService, inventoryService, type AdminTableRecord } from '../../../services';
 import { formatQ } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
 import { roleLabels, type Brand, type Role } from '../../../types';
@@ -19,14 +19,14 @@ export interface AdminModuleConfig {
 type Entry = { id: string; data: AdminTableRecord };
 type DialogMode = 'create' | 'edit' | 'view' | 'confirm' | null;
 const transactionSections = new Set(['sales', 'transfers', 'payments', 'invoices']);
-const statusChoices = (section: string) => section === 'products' || section === 'inventory'
+export const statusChoices = (section: string) => section === 'products' || section === 'inventory'
   ? section === 'inventory' ? ['En stock', 'Sin stock', 'Inactivo'] : ['Activo', 'Inactivo'] : section === 'customers' ? ['Activo', 'Inactivo', 'Pendiente']
   : section === 'brands' ? ['Activa', 'Inactiva'] : section === 'purchases' ? ['Pendiente', 'Registrada', 'Anulada']
   : section === 'accounting' ? ['Registrado', 'Pendiente', 'Anulado'] : ['Activo', 'Inactivo'];
-const viewOnlySections = new Set(['inventory/history']);
+const viewOnlySections = new Set(['inventory/alerts', 'inventory/history']);
 const updateOnlySections = new Set(['settings', 'profile']);
 const numericColumns = new Set(['Valor', 'Precio de venta', 'Costo unitario', 'Ventas del mes', 'Total comprado', 'Pedidos', 'Usuarios', 'Productos', 'Existencias']);
-const tableColumnWidth = (column: string) => {
+export const tableColumnWidth = (column: string) => {
   if (['Producto', 'Nombre', 'Descripción', 'Cliente'].includes(column)) return 210;
   if (['Acciones'].includes(column)) return 132;
   if (['Fecha', 'Último acceso', 'Contacto'].includes(column)) return 150;
@@ -62,7 +62,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     adminTableService.list(section).then((rows) => {
       if (!active) return;
       setEntries(rows);
-      if (section === 'inventory') productInventoryService.list().then((products) => { if (active) reportLowStock(products); });
+      if (section === 'inventory') inventoryService.products().then((products) => { if (active) reportLowStock(products); });
     }).catch((cause) => { if (active) setLoadError(cause instanceof Error ? cause.message : 'No se pudieron cargar los registros desde PostgreSQL.'); })
       .finally(() => { if (active) setLoading(false); });
     if (section === 'products' || section === 'inventory') brandService.list().then((rows) => { if (active) setBrandOptions(rows); }).catch(() => { if (active) setBrandOptions([]); });
@@ -72,12 +72,13 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const isTransactional = transactionSections.has(section);
   const readOnly = viewOnlySections.has(section);
   const editOnly = updateOnlySections.has(section);
-  const formColumns = config.columns.filter((column) => {
+  const configuredFormColumns = config.formColumns || config.columns;
+  const formColumns = [...new Set([...configuredFormColumns, ...(isProductSection ? ['Imagen'] : [])])].filter((column) => {
     if (mode === 'create' && section === 'users' && ['Último acceso', 'Estado'].includes(column)) return false;
     if (section === 'categories' && ['Productos', 'Ventas del mes'].includes(column)) return false;
     if (section === 'customers' && ['Pedidos', 'Total comprado'].includes(column)) return false;
     return true;
-  }).concat(isProductSection ? ['Imagen'] : []);
+  });
   const tableGridTemplate = `${config.columns.map((column) => `${tableColumnWidth(column)}px`).join(' ')} 132px`;
   const stateColumn = config.columns.find((column) => column === 'Estado' || column === 'Estado de pago');
   const entriesForView = useMemo(() => {
@@ -125,14 +126,14 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const replaceEntries = (change: (current: Entry[]) => Entry[]) => setEntries(change);
   const closeDialog = () => { setMode(null); setError(''); setConfirmMessage(''); setActiveId(''); };
   const openCreate = () => {
-    const initialDraft = Object.fromEntries([...config.columns, ...(isProductSection ? ['Imagen'] : [])].map((column) => [column, ''])) as Record<string, string>;
+    const initialDraft = Object.fromEntries(formColumns.map((column) => [column, ''])) as Record<string, string>;
     if (config.columns.includes('Estado')) {
       initialDraft.Estado = section === 'inventory' ? 'En stock' : section === 'accounting' ? 'Registrado' : section === 'purchases' ? 'Registrada' : 'Activo';
     }
     if (config.columns.includes('Estado de pago')) initialDraft['Estado de pago'] = 'Pendiente';
     setActiveId(''); setDraft(initialDraft); setError(''); setFeedback(''); setInviteLink(''); setMode('create');
   };
-  const openEdit = (entry: Entry) => { setActiveId(entry.id); setDraft(Object.fromEntries([...config.columns, ...(isProductSection ? ['Imagen'] : [])].map((column) => [column, String(entry.data[column] ?? '')]))); setError(''); setMode('edit'); };
+  const openEdit = (entry: Entry) => { setActiveId(entry.id); setDraft(Object.fromEntries(formColumns.map((column) => [column, String(entry.data[column] ?? '')]))); setError(''); setMode('edit'); };
   const openView = (entry: Entry) => { setActiveId(entry.id); setMode('view'); };
   const openConfirm = (entry: Entry, action: 'delete' | 'annul' | 'archive') => {
     setActiveId(entry.id); setConfirmMessage(action); setError(''); setMode('confirm');
@@ -147,14 +148,15 @@ export default function AdminCrudModule({ section, config }: { section: string; 
 
   const saveRecord = async (event: React.FormEvent) => {
     event.preventDefault(); setError('');
-    if (section === 'inventory' && mode === 'create' && !draft.Imagen) {
-      setError('Selecciona una imagen JPG, PNG o WEBP para el producto.');
-      return;
-    }
     const nextRecord: AdminTableRecord = {};
+    const optionalColumns = new Set([
+      'Marca', 'Imagen',
+      ...(isProductSection ? ['Categoría', 'Descripción'] : []),
+      ...(section === 'inventory' ? ['Costo unitario', 'Ubicación'] : []),
+    ]);
     for (const column of formColumns) {
       const value = (draft[column] ?? '').trim();
-      if (!value && ['Marca', 'Imagen'].includes(column)) { nextRecord[column] = ''; continue; }
+      if (!value && optionalColumns.has(column)) { nextRecord[column] = ''; continue; }
       if (!value) { setError(`Completa el campo «${column}».`); return; }
       const original = entries.find((entry) => entry.id === activeId)?.data[column];
       if (typeof original === 'number' || numericColumns.has(column)) {
