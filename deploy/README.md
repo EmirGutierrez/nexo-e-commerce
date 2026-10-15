@@ -21,9 +21,8 @@ En el repositorio, abre **Settings → Secrets and variables → Actions → New
 | `VPS_HOST` | IPv4 pública de Contabo |
 | `VPS_USER` | Usuario SSH de despliegue |
 | `VPS_SSH_KEY` | Llave privada cuyo par público está en `~deploy/.ssh/authorized_keys` |
-| `VPS_KNOWN_HOSTS` | Huella pública SSH de la VPS, verificada desde la consola de Contabo |
 
-No compartas la llave privada en el repositorio ni en mensajes. Puedes generar una llave dedicada para el workflow y guardar la parte privada directamente como `VPS_SSH_KEY` en GitHub. Verifica la huella del servidor desde la consola de Contabo antes de guardarla como `VPS_KNOWN_HOSTS`.
+No compartas la llave privada en el repositorio ni en mensajes. El workflow elimina retornos de carro al cargarla para admitir copias desde Windows y valida su formato antes de conectar. La huella ED25519 de la VPS se fija en el workflow y se compara con la respuesta de `ssh-keyscan`; si Contabo cambia la llave del host, actualiza la huella solo después de verificarla desde la consola de la VPS.
 
 Cada push a `develop` despliega después de que pasen la compilación del frontend, las pruebas de Spring y la construcción de las imágenes Docker. Los pushes a otras ramas ejecutan CI, pero no despliegan. También se puede iniciar manualmente el workflow seleccionando `develop`.
 

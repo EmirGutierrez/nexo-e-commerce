@@ -158,8 +158,12 @@ jobs:
           test -n "$VPS_USER" || { echo "Falta el secreto VPS_USER"; exit 1; }
           test -n "$VPS_SSH_KEY" || { echo "Falta el secreto VPS_SSH_KEY"; exit 1; }
           install -m 700 -d "$HOME/.ssh"
-          printf '%s\n' "$VPS_SSH_KEY" > "$HOME/.ssh/nexo_deploy"
+          printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > "$HOME/.ssh/nexo_deploy"
           chmod 600 "$HOME/.ssh/nexo_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/nexo_deploy" > /dev/null || {
+            echo "El secreto VPS_SSH_KEY no contiene una llave privada SSH válida"
+            exit 1
+          }
           ssh-keyscan -T 10 -t ed25519 "$VPS_HOST" > "$HOME/.ssh/known_hosts"
           chmod 600 "$HOME/.ssh/known_hosts"
           fingerprint="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}' | sort -u)"
