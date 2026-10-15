@@ -185,13 +185,16 @@ jobs:
             echo "El secreto VPS_SSH_KEY no contiene una llave privada SSH válida"
             exit 1
           }
-          if [ -n "$VPS_KNOWN_HOSTS" ]; then
+          expected_fingerprint="SHA256:fHpDmhjPDYdpv7Gz7nJtymZtrDFdmiO1WPMmmj8wTO4"
+          known_hosts_value="$(printf '%s' "$VPS_KNOWN_HOSTS" | tr -d '\r\n')"
+          if [ -n "$VPS_KNOWN_HOSTS" ] && [ "$known_hosts_value" != "$expected_fingerprint" ]; then
             printf '%s\n' "$VPS_KNOWN_HOSTS" | tr -d '\r' > "$HOME/.ssh/known_hosts"
           else
             ssh-keyscan -T 10 -t ed25519 "$VPS_HOST" > "$HOME/.ssh/known_hosts"
           fi
           chmod 600 "$HOME/.ssh/known_hosts"
-          if ! ssh-keygen -lf "$HOME/.ssh/known_hosts" | awk '{print $2}' | grep -Fxq "SHA256:fHpDmhjPDYdpv7Gz7nJtymZtrDFdmiO1WPMmmj8wTO4"; then
+          observed_fingerprints="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" 2>/dev/null | awk '{print $2}' || true)"
+          if ! printf '%s\n' "$observed_fingerprints" | grep -Fxq "$expected_fingerprint"; then
             echo "La huella ED25519 de la VPS no coincide con la huella verificada"
             exit 1
           fi
