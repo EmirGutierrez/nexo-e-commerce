@@ -15,7 +15,7 @@ const appContext = vi.hoisted(() => ({
 vi.mock('../contexts/AppContext', () => ({ useApp: () => appContext }));
 vi.mock('../modules/products/services/productService', () => ({ fetchCatalogFromApi: vi.fn() }));
 
-const makeOrder = (data: CustomerOrder['data'] = {}): CustomerOrder => ({
+const makeOrder = (data: CustomerOrder['data'] = {}, orderFields: Partial<CustomerOrder> = {}): CustomerOrder => ({
   id: 'order-1',
   createdAt: '2026-10-15T12:00:00.000Z',
   data: {
@@ -36,6 +36,7 @@ const makeOrder = (data: CustomerOrder['data'] = {}): CustomerOrder => ({
     items: [{ productId: 'product-1', productName: 'Monitor', sku: 'MON-1', quantity: 2, unitPrice: 50, subtotal: 100 }],
     ...data,
   },
+  ...orderFields,
 });
 
 const catalog = {
@@ -75,10 +76,12 @@ describe('detalle de pedido del cliente', () => {
   });
 
   it('presenta el aviso de cancelación y el estado vacío de artículos', async () => {
-    vi.mocked(customerPortalService.orders).mockResolvedValueOnce([makeOrder({ status: 'Cancelado', items: [] })]);
+    vi.mocked(customerPortalService.orders).mockResolvedValueOnce([makeOrder({ status: 'Cancelado', orderNumber: undefined, date: undefined, items: undefined }, { createdAt: undefined })]);
     render(<CustomerOrderDetailPage orderId="order-1" />);
 
     expect(await screen.findByText(/Este pedido fue cancelado/)).toBeTruthy();
+    expect(screen.getByRole('heading', { name: 'NX-ORDER-1' })).toBeTruthy();
+    expect(screen.getByText(/Fecha no disponible/)).toBeTruthy();
     expect(screen.queryByRole('list', { name: 'Progreso del pedido' })).toBeNull();
     expect(screen.getByText('El pedido no incluye el detalle de sus artículos.')).toBeTruthy();
   });
@@ -92,6 +95,13 @@ describe('detalle de pedido del cliente', () => {
     appContext.authLoading = false;
     appContext.user = null;
     appContext.userType = null;
+    render(<CustomerOrderDetailPage orderId="order-1" />);
+    expect(screen.getByRole('heading', { name: 'Inicia sesión para ver este pedido' })).toBeTruthy();
+    expect(customerPortalService.orders).not.toHaveBeenCalled();
+
+    cleanup();
+    appContext.user = { id: 'admin-1', name: 'Admin', email: 'admin@example.com', role: 'admin', initials: 'AD', status: 'Activo' };
+    appContext.userType = 'admin';
     render(<CustomerOrderDetailPage orderId="order-1" />);
     expect(screen.getByRole('heading', { name: 'Inicia sesión para ver este pedido' })).toBeTruthy();
     expect(customerPortalService.orders).not.toHaveBeenCalled();
@@ -121,11 +131,46 @@ describe('detalle de pedido del cliente', () => {
     expect(screen.getByText('Teclado')).toBeTruthy();
   });
 
+  it('completa los datos faltantes con valores seguros y muestra el paso de pago pendiente', async () => {
+    appContext.user!.email = '';
+    vi.mocked(customerPortalService.orders).mockResolvedValueOnce([makeOrder({
+      orderNumber: undefined, customer: undefined, customerEmail: undefined, customerPhone: undefined,
+      address: undefined, date: undefined, status: undefined, paymentStatus: undefined,
+      paymentMethod: 'card', payment: undefined, subtotal: undefined, discountAmount: 0,
+      discountCode: 'SIN-DESCUENTO', total: undefined,
+      items: [{ productId: 'product-without-image', productName: undefined, sku: undefined, quantity: 0, unitPrice: Number.NaN, subtotal: 0 }],
+    })]);
+    vi.mocked(fetchCatalogFromApi).mockResolvedValueOnce({ source: 'api', products: [{ id: 'product-without-image', image: '' }] } as never);
+    render(<CustomerOrderDetailPage orderId="order-1" />);
+
+    expect(await screen.findByRole('heading', { name: 'NX-ORDER-1' })).toBeTruthy();
+    expect(screen.getByText('Pendiente de pago')).toBeTruthy();
+    expect(screen.getByText('Pendiente de actualización')).toBeTruthy();
+    expect(screen.getByText('Tarjeta simulada')).toBeTruthy();
+    expect(screen.getByText('Código aplicado')).toBeTruthy();
+    expect(screen.getByText('SIN-DESCUENTO')).toBeTruthy();
+    expect(screen.getByText('Persona que recibe el pedido')).toBeTruthy();
+    expect(screen.getByText('Dirección no disponible en el pedido')).toBeTruthy();
+    expect(screen.getByText('Código no disponible')).toBeTruthy();
+    expect(screen.getByText('Producto')).toBeTruthy();
+    expect(screen.getByText('Estado de pago no disponible')).toBeTruthy();
+    expect(screen.getByText('Precio unitario').parentElement?.querySelector('strong')?.textContent).toBe('—');
+    expect(screen.queryByRole('img')).toBeNull();
+  });
+
   it('muestra un error entendible si falla la consulta del pedido', async () => {
     vi.mocked(customerPortalService.orders).mockRejectedValueOnce(new Error('API temporalmente no disponible'));
     render(<CustomerOrderDetailPage orderId="order-1" />);
 
     expect(await screen.findByRole('alert')).toBeTruthy();
     expect(screen.getByText('API temporalmente no disponible')).toBeTruthy();
+  });
+
+  it('usa un mensaje genérico si el servicio rechaza con un valor que no es Error', async () => {
+    vi.mocked(customerPortalService.orders).mockRejectedValueOnce('fallo inesperado');
+    render(<CustomerOrderDetailPage orderId="order-1" />);
+
+    expect(await screen.findByRole('alert')).toBeTruthy();
+    expect(screen.getByText('No se pudo cargar el detalle del pedido.')).toBeTruthy();
   });
 });
