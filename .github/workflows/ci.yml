@@ -204,9 +204,16 @@ jobs:
           -o StrictHostKeyChecking=yes
           -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
           "$VPS_USER@$VPS_HOST"
-          'if [ ! -d /opt/nexo-commerce/.git ]; then git clone --branch develop --single-branch https://github.com/EmirGutierrez/nexo-e-commerce.git /opt/nexo-commerce; fi && cd /opt/nexo-commerce && git pull --ff-only origin develop && docker compose --env-file deploy/.env.production -f compose.prod.yaml up -d --build --remove-orphans --wait --wait-timeout 300'
+          'if [ ! -d /opt/nexo-commerce/.git ]; then git clone --branch develop --single-branch https://github.com/EmirGutierrez/nexo-e-commerce.git /opt/nexo-commerce; fi && cd /opt/nexo-commerce && git pull --ff-only origin develop && docker compose --env-file deploy/.env.production -f compose.prod.yaml up -d --build --remove-orphans --wait --wait-timeout 300 && docker compose --env-file deploy/.env.production -f compose.prod.yaml up -d --no-deps --force-recreate caddy'
 
       - name: Verificar frontend y API públicos
         run: |
-          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors https://nexo-e-commerce.com/ -o /dev/null
-          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors https://api.nexo-e-commerce.com/api/catalog/payment-methods -o /dev/null
+          frontend_headers="$(mktemp)"
+          api_headers="$(mktemp)"
+          trap 'rm -f "$frontend_headers" "$api_headers"' EXIT
+          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors --dump-header "$frontend_headers" https://nexo-e-commerce.com/ -o /dev/null
+          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors --dump-header "$api_headers" https://api.nexo-e-commerce.com/api/catalog/payment-methods -o /dev/null
+          grep --ignore-case --quiet '^Content-Security-Policy:' "$frontend_headers"
+          grep --ignore-case --quiet '^X-Content-Type-Options: *nosniff' "$frontend_headers"
+          grep --ignore-case --quiet '^Content-Security-Policy:' "$api_headers"
+          grep --ignore-case --quiet '^X-Content-Type-Options: *nosniff' "$api_headers"
