@@ -113,6 +113,64 @@ class BusinessRecordServiceInventoryPermissionTest {
     }
 
     @Test
+    void deniesInventoryProductRemovalWithoutInventoryDeletePermission() {
+        when(permissions.has(authentication, "inventory", "delete")).thenReturn(false);
+
+        assertThrows(AccessDeniedException.class, () -> service.deleteInventoryProduct(UUID.randomUUID()));
+
+        verify(permissions).has(authentication, "inventory", "delete");
+        verifyNoInteractions(jdbc, productImages);
+    }
+
+    @Test
+    void deactivatesInventoryProductsWhenAnyProtectedHistoryExists() throws Exception {
+        UUID id = UUID.randomUUID();
+        Map<String, Object> product = new HashMap<>(Map.of(
+                "name", "Monitor", "sku", "MON-1", "price", 149, "stock", 8, "status", "Activo"));
+        when(permissions.has(authentication, "inventory", "delete")).thenReturn(true);
+        when(mapper.readValue(anyString(), eq(Map.class))).thenReturn(product);
+        when(mapper.writeValueAsString(any())).thenReturn("{}");
+        doReturn(true).when(jdbc).queryForObject(anyString(), eq(Boolean.class), any(Object[].class));
+        doAnswer(invocation -> {
+            ResultSetExtractor<Map<String, Object>> extractor = invocation.getArgument(1);
+            ResultSet rs = org.mockito.Mockito.mock(ResultSet.class);
+            when(rs.next()).thenReturn(true);
+            when(rs.getString(1)).thenReturn("{}");
+            return extractor.extractData(rs);
+        }).when(jdbc).query(anyString(), org.mockito.ArgumentMatchers.<ResultSetExtractor<Map<String, Object>>>any(), eq(id), eq("products"));
+
+        var result = service.deleteInventoryProduct(id);
+
+        org.junit.jupiter.api.Assertions.assertFalse(result.deleted());
+        org.junit.jupiter.api.Assertions.assertEquals("Inactivo", product.get("status"));
+        verify(jdbc).update(org.mockito.ArgumentMatchers.contains("UPDATE business_records"), any(Object[].class));
+        verify(productImages, org.mockito.Mockito.never()).delete(id);
+    }
+
+    @Test
+    void physicallyRemovesInventoryProductsWithoutProtectedHistory() throws Exception {
+        UUID id = UUID.randomUUID();
+        Map<String, Object> product = Map.of("name", "Monitor", "sku", "MON-1", "price", 149, "stock", 8, "status", "Activo");
+        when(permissions.has(authentication, "inventory", "delete")).thenReturn(true);
+        when(mapper.readValue(anyString(), eq(Map.class))).thenReturn(product);
+        doReturn(false).when(jdbc).queryForObject(anyString(), eq(Boolean.class), any(Object[].class));
+        doReturn(1).when(jdbc).update(org.mockito.ArgumentMatchers.contains("DELETE FROM business_records"), eq(id));
+        doAnswer(invocation -> {
+            ResultSetExtractor<Map<String, Object>> extractor = invocation.getArgument(1);
+            ResultSet rs = org.mockito.Mockito.mock(ResultSet.class);
+            when(rs.next()).thenReturn(true);
+            when(rs.getString(1)).thenReturn("{}");
+            return extractor.extractData(rs);
+        }).when(jdbc).query(anyString(), org.mockito.ArgumentMatchers.<ResultSetExtractor<Map<String, Object>>>any(), eq(id), eq("products"));
+
+        var result = service.deleteInventoryProduct(id);
+
+        org.junit.jupiter.api.Assertions.assertTrue(result.deleted());
+        verify(productImages).delete(id);
+        verify(jdbc).update(org.mockito.ArgumentMatchers.contains("DELETE FROM business_records"), eq(id));
+    }
+
+    @Test
     void acceptsMissingBlankAndPositiveOptionalCostsForInventoryUpdates() throws Exception {
         UUID id = UUID.randomUUID();
         Map<String, Object> previous = Map.of("name", "Monitor", "sku", "MON-1", "price", 149, "stock", 8, "status", "Activo");

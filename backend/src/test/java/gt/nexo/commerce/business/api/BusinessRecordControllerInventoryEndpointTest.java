@@ -43,4 +43,15 @@ class BusinessRecordControllerInventoryEndpointTest {
 
         verify(service).updateInventoryProduct(id, data);
     }
+
+    @Test
+    void deletesAnInventoryProductThroughTheInventoryService() {
+        UUID id = UUID.randomUUID();
+        InventoryProductRemovalResponse response = new InventoryProductRemovalResponse(false);
+        when(service.deleteInventoryProduct(id)).thenReturn(response);
+
+        assertSame(response, controller.deleteInventoryProduct(id));
+
+        verify(service).deleteInventoryProduct(id);
+    }
 }

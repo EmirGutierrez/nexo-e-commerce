@@ -57,6 +57,12 @@ public class BusinessRecordController {
         return service.updateInventoryProduct(id, data);
     }
 
+    @DeleteMapping("/inventory/products/{id}")
+    @Operation(summary = "Elimina un producto sin historial o lo desactiva para conservar sus relaciones.")
+    public InventoryProductRemovalResponse deleteInventoryProduct(@PathVariable UUID id) {
+        return service.deleteInventoryProduct(id);
+    }
+
     @PutMapping("/{resource}/{id}")
     @Operation(summary = "Actualiza un registro autorizado y registra ajustes de existencias.")
     public BusinessRecordResponse update(@PathVariable String resource, @PathVariable UUID id,

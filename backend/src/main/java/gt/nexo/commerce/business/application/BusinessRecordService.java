@@ -1,6 +1,7 @@
 package gt.nexo.commerce.business.application;
 
 import gt.nexo.commerce.business.api.BusinessRecordResponse;
+import gt.nexo.commerce.business.api.InventoryProductRemovalResponse;
 import gt.nexo.commerce.business.api.OrderQuoteResponse;
 import gt.nexo.commerce.business.api.OrderSubmissionResponse;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
@@ -148,6 +149,37 @@ public class BusinessRecordService {
     public BusinessRecordResponse updateInventoryProduct(UUID id, Map<String, Object> input) {
         authorize("inventory", "edit");
         return updateAuthorized("products", id, input);
+    }
+
+    @Transactional
+    public InventoryProductRemovalResponse deleteInventoryProduct(UUID id) {
+        authorize("inventory", "delete");
+        Map<String, Object> product = lockedRecord("products", id);
+        jdbc.queryForObject("SELECT record_id FROM products WHERE record_id = ? FOR UPDATE", UUID.class, id);
+        boolean hasHistory = Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM inventory_movements WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM commerce_order_items WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM merchandise_purchase_items WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM in_person_sale_items WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM customer_wishlist_items WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM supplier_products WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM product_offers WHERE product_record_id = ?)
+                """, Boolean.class, id, id, id, id, id, id, id));
+
+        if (hasHistory) {
+            product.put("status", "Inactivo");
+            jdbc.update("""
+                    UPDATE business_records SET data = ?::jsonb, status_code = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND resource_code = 'products'
+                    """, writeJson(product), statusOf(product), id);
+            syncProjection(id, "products", product, actorId());
+            return new InventoryProductRemovalResponse(false);
+        }
+
+        productImages.delete(id);
+        int deleted = jdbc.update("DELETE FROM business_records WHERE id = ? AND resource_code = 'products'", id);
+        if (deleted == 0) throw missing();
+        return new InventoryProductRemovalResponse(true);
     }
 
     private BusinessRecordResponse updateAuthorized(String normalized, UUID id, Map<String, Object> input) {

@@ -139,6 +139,43 @@ describe('configuración y formularios de inventario', () => {
     expect(create).not.toHaveBeenCalled();
   });
 
+  it('carga las marcas persistentes y conserva la ubicación existente al editar inventario', async () => {
+    const brandId = 'brand-api-1';
+    vi.mocked(adminTableService.list).mockResolvedValue([{ ...inventoryEntry, data: { ...inventoryEntry.data, Marca: brandId } }]);
+    vi.mocked(brandService.list).mockResolvedValue([{ id: brandId, name: 'Marca API', description: '', contact: '', website: '', status: 'Activa' }]);
+    const update = vi.spyOn(adminTableService, 'update').mockResolvedValue({ ...inventoryEntry, data: { ...inventoryEntry.data, Marca: brandId, Ubicación: 'Bodega nueva' } });
+
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    await screen.findByText('Monitor');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar Inventario: Monitor' }));
+
+    await screen.findByRole('option', { name: 'Marca API' });
+    expect((screen.getByLabelText('Marca') as HTMLSelectElement).value).toBe(brandId);
+    const location = screen.getByLabelText('Ubicación') as HTMLInputElement;
+    expect(location.value).toBe('Bodega A');
+    expect(document.querySelector('#inventory-location-options option[value="Bodega A"]')).toBeTruthy();
+    fireEvent.change(location, { target: { value: 'Bodega nueva' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith('inventory', 'product-1', expect.objectContaining({
+      Marca: brandId, Ubicación: 'Bodega nueva',
+    })));
+  });
+
+  it('muestra la acción de eliminar inventario y conserva el producto como inactivo si tiene historial', async () => {
+    const remove = vi.spyOn(adminTableService, 'delete').mockResolvedValue({ deleted: false });
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    await screen.findByText('Monitor');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar Inventario: Monitor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar producto' }));
+
+    await waitFor(() => expect(remove).toHaveBeenCalledWith('inventory', 'product-1', { pendingInvitation: false }));
+    expect(screen.getByText('Monitor')).toBeTruthy();
+    expect(screen.getByRole('status').textContent).toContain('desactivó para conservar su historial');
+    expect(screen.getAllByText('Inactivo').some((element) => element.closest('.table-row'))).toBe(true);
+  });
+
   it('usa las columnas del listado como formulario de catálogo y agrega una sola entrada de imagen', async () => {
     const productConfig = { ...inventoryConfig, title: 'Productos', formColumns: undefined, columns: ['Producto', 'SKU', 'Valor', 'Estado'] };
     render(<AdminCrudModule section="products" config={productConfig} />);
@@ -152,22 +189,28 @@ describe('configuración y formularios de inventario', () => {
 });
 
 describe('revocación de invitaciones del equipo', () => {
-  it('muestra eliminar solo en invitaciones pendientes y las quita tras confirmar', async () => {
+  it('permite eliminar usuarios activos y revocar invitaciones pendientes', async () => {
     vi.mocked(adminTableService.list).mockResolvedValue([pendingInvitation, activeTeamUser]);
     const revoke = vi.spyOn(adminTableService, 'delete').mockResolvedValue(undefined);
 
     render(<AdminCrudModule section="users" config={usersConfig} />);
 
     const revokeButton = await screen.findByRole('button', { name: 'Revocar invitación: Danny Velásquez' });
-    expect(screen.queryByRole('button', { name: 'Revocar invitación: Administradora NEXO' })).toBeNull();
+    const deleteUserButton = screen.getByRole('button', { name: 'Eliminar usuario del equipo: Administradora NEXO' });
 
     fireEvent.click(revokeButton);
     expect(screen.getByText(/El enlace dejará de funcionar/)).toBeTruthy();
     fireEvent.click(screen.getByRole('button', { name: 'Revocar invitación' }));
 
-    await waitFor(() => expect(revoke).toHaveBeenCalledWith('users', 'invitation-1'));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith('users', 'invitation-1', { pendingInvitation: true }));
     await waitFor(() => expect(screen.queryByText('Danny Velásquez')).toBeNull());
     expect(screen.getByRole('status').textContent).toContain('Invitación revocada');
+
+    fireEvent.click(deleteUserButton);
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar usuario' }));
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith('users', 'user-1', { pendingInvitation: false }));
+    await waitFor(() => expect(screen.queryByText('Administradora NEXO')).toBeNull());
+    expect(screen.getByRole('status').textContent).toContain('Usuario eliminado del equipo');
   });
 
   it('no muestra la opción si el rol no tiene permiso users:delete', async () => {
@@ -183,8 +226,16 @@ describe('revocación de invitaciones del equipo', () => {
   it('envía la revocación al endpoint de invitaciones del usuario', async () => {
     const revoke = vi.spyOn(userService, 'revokeInvitation').mockResolvedValue(undefined);
 
-    await adminTableService.delete('users', 'invitation-1');
+    await adminTableService.delete('users', 'invitation-1', { pendingInvitation: true });
 
     expect(revoke).toHaveBeenCalledWith('invitation-1');
+  });
+
+  it('envía la eliminación de usuarios activos al endpoint de usuarios', async () => {
+    const remove = vi.spyOn(userService, 'delete').mockResolvedValue(undefined);
+
+    await adminTableService.delete('users', 'user-1');
+
+    expect(remove).toHaveBeenCalledWith('user-1');
   });
 });

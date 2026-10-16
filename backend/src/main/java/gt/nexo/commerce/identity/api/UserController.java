@@ -58,6 +58,14 @@ public class UserController {
         teamInvitationService.revokePendingInvitation(id, authentication);
     }
 
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("@permissionAuthorizer.has(authentication, 'users', 'delete')")
+    @Operation(summary = "Elimina un miembro del equipo, cierra sus sesiones y conserva los registros operativos.")
+    public void deleteTeamUser(@PathVariable UUID id, Authentication authentication) {
+        userAccountService.deleteTeamUser(id, authentication);
+    }
+
     @PatchMapping("/{id}/role")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     @PreAuthorize("@permissionAuthorizer.has(authentication, 'users', 'edit')")

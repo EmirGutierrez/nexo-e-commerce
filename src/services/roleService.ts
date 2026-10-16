@@ -5,7 +5,7 @@ import { apiClient } from '../shared/services/http-client';
 export const permissionModules: { id: PermissionModule; label: string; actions: PermissionAction[] }[] = [
   { id: 'dashboard', label: 'Dashboard', actions: ['view'] },
   { id: 'products', label: 'Productos', actions: ['view', 'create', 'edit', 'delete'] },
-  { id: 'inventory', label: 'Inventario', actions: ['view', 'create', 'edit', 'approve'] },
+  { id: 'inventory', label: 'Inventario', actions: ['view', 'create', 'edit', 'delete', 'approve'] },
   { id: 'orders', label: 'Pedidos', actions: ['view', 'edit', 'approve'] },
   { id: 'sales', label: 'Ventas', actions: ['view', 'create', 'edit', 'approve'] },
   { id: 'customers', label: 'Clientes', actions: ['view', 'create', 'edit', 'delete'] },

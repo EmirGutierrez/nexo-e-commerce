@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { adminTableService, inventoryService } from '../services';
+import { adminTableService, brandService, inventoryService, userService } from '../services';
 import { apiClient } from '../shared/services/http-client';
 
 const productRecord = {
@@ -32,7 +32,7 @@ describe('servicios de inventario', () => {
     expect(get).toHaveBeenCalledWith('/api/business/inventory/products');
     expect(row).toEqual({
       id: 'product-1',
-      data: expect.objectContaining({ Producto: 'Monitor', SKU: 'MON-1', Existencias: 8, 'Costo unitario': '', Descripción: 'Monitor de prueba' }),
+      data: expect.objectContaining({ Producto: 'Monitor', SKU: 'MON-1', Existencias: 8, Ubicación: 'Bodega A', 'Costo unitario': '', Descripción: 'Monitor de prueba' }),
     });
   });
 
@@ -69,5 +69,31 @@ describe('servicios de inventario', () => {
     expect(put).toHaveBeenCalledWith('/api/business/inventory/products/product-1', expect.objectContaining({
       cost: null, price: 159, stock: 5, location: 'Bodega B', description: 'Monitor actualizado',
     }));
+  });
+
+  it('elimina por la ruta protegida del inventario y devuelve si el borrado fue físico', async () => {
+    const remove = vi.spyOn(apiClient, 'delete').mockResolvedValueOnce({ deleted: false } as never);
+
+    const result = await adminTableService.delete('inventory', 'product-1');
+
+    expect(remove).toHaveBeenCalledWith('/api/business/inventory/products/product-1');
+    expect(result).toEqual({ deleted: false });
+  });
+
+  it('carga las marcas persistentes desde la API de negocios', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce([{
+      id: 'brand-1', resource: 'brands', data: { name: 'Marca API', status: 'Activa' },
+    }] as never);
+
+    await expect(brandService.list()).resolves.toEqual([expect.objectContaining({ id: 'brand-1', name: 'Marca API', status: 'Activa' })]);
+    expect(get).toHaveBeenCalledWith('/api/business/brands');
+  });
+
+  it('elimina un usuario del equipo mediante el endpoint de cuenta', async () => {
+    const remove = vi.spyOn(apiClient, 'delete').mockResolvedValueOnce(undefined as never);
+
+    await userService.delete('user-1');
+
+    expect(remove).toHaveBeenCalledWith('/api/users/user-1');
   });
 });
