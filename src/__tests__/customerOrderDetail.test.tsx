@@ -88,6 +88,16 @@ describe('detalle de pedido del cliente', () => {
     expect(screen.getByText('El pedido no incluye el detalle de sus artículos.')).toBeTruthy();
   });
 
+  it('explica la expiración de una reserva de transferencia', async () => {
+    vi.mocked(customerPortalService.orders).mockResolvedValueOnce([
+      makeOrder({ status: 'Cancelado', paymentStatus: 'Expirada' }),
+    ]);
+    render(<CustomerOrderDetailPage orderId="order-1" />);
+
+    expect(await screen.findByText(/La reserva venció tras 24 horas/)).toBeTruthy();
+    expect(screen.getByText(/Si ya realizaste la transferencia/)).toBeTruthy();
+  });
+
   it('muestra el inicio de sesión si la sesión aún carga o no hay cliente', () => {
     appContext.authLoading = true;
     const loading = render(<CustomerOrderDetailPage orderId="order-1" />);

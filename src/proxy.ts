@@ -8,7 +8,6 @@ export function proxy(request: NextRequest) {
     "default-src 'self'",
     `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${development ? " 'unsafe-eval'" : ''}`,
     `style-src 'self' 'nonce-${nonce}' https://fonts.googleapis.com`,
-    "style-src-attr 'unsafe-inline'",
     "img-src 'self' data: blob: https://images.unsplash.com",
     "font-src 'self' data: https://fonts.gstatic.com",
     `connect-src 'self'${development ? ' ws://localhost:* ws://127.0.0.1:*' : ''}`,

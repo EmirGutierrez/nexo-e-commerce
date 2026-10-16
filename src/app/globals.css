@@ -1242,6 +1242,21 @@ select:disabled {
 .data-table > .table-row { width: 100%; }
 .crud-table > .table-head > *,
 .crud-table > .table-row > * { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.crud-layout-products .table-head, .crud-layout-products .table-row { grid-template-columns: 210px 132px 132px 132px 150px 132px 145px 132px; }
+.crud-layout-inventory .table-head, .crud-layout-inventory .table-row { grid-template-columns: 210px 132px 132px 132px 145px 132px 132px; }
+.crud-layout-customers .table-head, .crud-layout-customers .table-row { grid-template-columns: 210px 132px 132px 150px 132px 145px 132px; }
+.crud-layout-users .table-head, .crud-layout-users .table-row { grid-template-columns: 210px 132px 132px 150px 145px 132px; }
+.crud-layout-transfers .table-head, .crud-layout-transfers .table-row,
+.crud-layout-payments .table-head, .crud-layout-payments .table-row { grid-template-columns: 132px 210px 150px 150px 145px 132px; }
+.crud-layout-sales .table-head, .crud-layout-sales .table-row { grid-template-columns: 132px 210px 150px 150px 145px 132px; }
+.crud-layout-categories .table-head, .crud-layout-categories .table-row { grid-template-columns: 210px 132px 150px 145px 132px; }
+.crud-layout-settings .table-head, .crud-layout-settings .table-row,
+.crud-layout-profile .table-head, .crud-layout-profile .table-row { grid-template-columns: 132px 210px 145px 132px; }
+.crud-layout-inventory-alerts .table-head, .crud-layout-inventory-alerts .table-row,
+.crud-layout-inventory-history .table-head, .crud-layout-inventory-history .table-row { grid-template-columns: 210px 132px 132px 132px 145px 132px; }
+.crud-layout-invoices .table-head, .crud-layout-invoices .table-row { grid-template-columns: 132px 210px 150px 150px 145px 132px; }
+.crud-layout-suppliers .table-head, .crud-layout-suppliers .table-row { grid-template-columns: 210px 150px 132px 132px 132px 132px 145px 132px; }
+.crud-layout-roles-permissions .table-head, .crud-layout-roles-permissions .table-row { grid-template-columns: 210px 132px 132px 132px 145px 132px; }
 .accounting-table .table-head, .accounting-table .table-row { grid-template-columns: 112px 220px 150px 90px 135px 145px 90px; }
 .purchases-table .table-head, .purchases-table .table-row { min-width: 990px; grid-template-columns: 110px 185px 140px 185px 135px 135px 100px; }
 .sales-table .table-head, .sales-table .table-row { grid-template-columns: 110px 180px 150px 75px 150px 125px 70px; }
@@ -1260,6 +1275,7 @@ select:disabled {
 .receipt-status { width:max-content; padding:5px 8px; border-radius:99px; color:#815c14; background:#fff2cf; font-size:9px; font-weight:800; }
 .receipt-status.aprobada { color:#34704e; background:#e7f5eb; }
 .receipt-status.rechazada { color:#9b4545; background:#ffeded; }
+.receipt-status.expirada { color:#59667b; background:#eef1f6; }
 .transfer-receipt-actions { display:flex; flex-wrap:wrap; gap:7px; padding:13px 17px 17px; }
 .transfer-receipt-actions .button { min-height:34px; padding:8px 10px; font-size:9px; }
 .button-danger { color:#9b4545; background:#fff0ef; }
@@ -1440,6 +1456,36 @@ select:disabled {
 .customer-notification-error { margin:9px 14px 0; padding:8px; border-radius:7px; color:#8d4b4b; background:#fff0ef; font-size:9px; }
 @media(max-width:700px) { .public-account-dropdown { position:fixed; top:70px; right:14px; }.customer-account { padding:38px 18px 60px; }.customer-account-layout { grid-template-columns:1fr; gap:13px; }.customer-account-nav { grid-template-columns:repeat(3,minmax(0,1fr)); padding:6px; }.customer-account-nav button { justify-content:center; flex-direction:column; gap:5px; padding:9px 4px; font-size:9px; }.customer-account-nav button svg:last-child { display:none; }.customer-panel { padding:17px; }.customer-order-top { align-items:flex-start; flex-direction:column; }.customer-order-bottom { align-items:flex-start; }.customer-wishlist-item { grid-template-columns:62px minmax(0,1fr) auto; gap:10px; }.customer-wishlist-image { width:62px; height:62px; } }
 @media(max-width:700px) { .customer-notification-panel { position:fixed; top:74px; right:12px; max-height:calc(100vh - 88px); }.customer-notification-trigger { width:34px; height:34px; border:0; background:transparent; } }
+
+.mfa-settings-card { display:grid; gap:17px; margin-top:18px; padding:24px; }
+.mfa-settings-card[hidden] { display:none; }
+.mfa-settings-heading { display:flex; align-items:flex-start; gap:13px; }
+.mfa-settings-heading > div { display:grid; gap:5px; }
+.mfa-settings-heading h2 { margin:0; color:var(--ink); font:600 19px 'Space Grotesk',sans-serif; }
+.mfa-settings-heading p,.mfa-disable-form > p { margin:0; color:var(--muted); font-size:11px; line-height:1.6; }
+.mfa-settings-icon { display:grid; width:38px; height:38px; flex:none; place-items:center; border-radius:11px; color:var(--navy); background:#eef2fa; }
+.mfa-settings-state { display:flex; align-items:center; gap:8px; width:max-content; max-width:100%; padding:8px 10px; border-radius:8px; color:#596779; background:#f3f5f8; font-size:10px; }
+.mfa-settings-state > span { width:7px; height:7px; border-radius:50%; background:#9aa4b3; }
+.mfa-settings-state.is-enabled { color:#47724c; background:#edf6ee; }
+.mfa-settings-state.is-enabled > span { background:#69a172; }
+.mfa-settings-muted { margin:0; color:var(--muted); font-size:11px; }
+.mfa-enrollment-form,.mfa-disable-form { display:grid; max-width:640px; gap:13px; }
+.mfa-enrollment-key { display:flex; align-items:flex-start; gap:10px; padding:13px; border:1px solid var(--border); border-radius:10px; color:var(--navy); background:#fbfcfe; }
+.mfa-enrollment-key > div { display:grid; gap:6px; min-width:0; }
+.mfa-enrollment-key strong,.mfa-recovery-panel > strong { color:var(--ink); font-size:11px; }
+.mfa-enrollment-key code,.mfa-otpauth-details code { overflow-wrap:anywhere; color:var(--navy); font:700 13px ui-monospace,SFMono-Regular,Consolas,monospace; letter-spacing:.08em; }
+.mfa-enrollment-key small { color:var(--muted); font-size:10px; line-height:1.5; }
+.mfa-otpauth-details { display:grid; gap:8px; color:var(--muted); font-size:10px; }
+.mfa-otpauth-details summary { cursor:pointer; color:var(--navy); font-weight:700; }
+.mfa-otpauth-details code { display:block; padding:10px; border-radius:8px; background:#f3f6fa; font-size:9px; letter-spacing:normal; }
+.mfa-recovery-panel { display:grid; max-width:640px; gap:9px; padding:15px; border:1px solid #d9eadb; border-radius:11px; background:#f6fbf6; }
+.mfa-recovery-panel p { margin:0; color:var(--muted); font-size:10px; line-height:1.5; }
+.mfa-recovery-panel ul { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:7px; margin:0; padding:0; list-style:none; }
+.mfa-recovery-panel code { display:block; padding:8px; border:1px solid #e1ebe1; border-radius:7px; color:var(--ink); background:#fff; font:600 10px ui-monospace,SFMono-Regular,Consolas,monospace; text-align:center; }
+.mfa-settings-message,.mfa-settings-error { margin:0; font-size:10px; line-height:1.5; }
+.mfa-settings-message { color:#47724c; }.mfa-settings-error { color:#a95656; }
+.mfa-login-code { margin-top:15px; }
+@media(max-width:700px) { .mfa-settings-card { padding:18px; }.mfa-recovery-panel ul { grid-template-columns:1fr; } }
 @media(max-width:900px) { .customer-order-detail-grid { grid-template-columns:1fr; }.customer-order-summary-column { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:700px) {
   .customer-order-detail { padding-top:30px; }

@@ -7,11 +7,18 @@ import gt.nexo.commerce.identity.api.dto.UserResponse;
 import gt.nexo.commerce.identity.api.dto.TeamInvitationRequest;
 import gt.nexo.commerce.identity.api.dto.TeamInvitationResponse;
 import gt.nexo.commerce.identity.api.dto.AcceptInvitationRequest;
+import gt.nexo.commerce.identity.api.dto.MfaCodeRequest;
+import gt.nexo.commerce.identity.api.dto.MfaDisableRequest;
+import gt.nexo.commerce.identity.api.dto.MfaEnrollmentStartRequest;
+import gt.nexo.commerce.identity.api.dto.MfaEnrollmentResponse;
+import gt.nexo.commerce.identity.api.dto.MfaRecoveryCodesResponse;
+import gt.nexo.commerce.identity.api.dto.MfaStatusResponse;
 import gt.nexo.commerce.identity.application.TeamInvitationService;
 import gt.nexo.commerce.identity.application.AuthenticationService;
 import gt.nexo.commerce.identity.application.CustomerRegistrationService;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
 import gt.nexo.commerce.identity.application.UserAccountService;
+import gt.nexo.commerce.identity.application.MfaService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.servlet.http.HttpServletRequest;
@@ -39,17 +46,20 @@ public class AuthController {
     private final CustomerRegistrationService customerRegistrationService;
     private final SecurityContextLogoutHandler logoutHandler;
     private final TeamInvitationService teamInvitationService;
+    private final MfaService mfaService;
 
     public AuthController(AuthenticationService authenticationService,
                           UserAccountService userAccountService,
                           CustomerRegistrationService customerRegistrationService,
                           SecurityContextLogoutHandler logoutHandler,
-                          TeamInvitationService teamInvitationService) {
+                          TeamInvitationService teamInvitationService,
+                          MfaService mfaService) {
         this.authenticationService = authenticationService;
         this.userAccountService = userAccountService;
         this.customerRegistrationService = customerRegistrationService;
         this.logoutHandler = logoutHandler;
         this.teamInvitationService = teamInvitationService;
+        this.mfaService = mfaService;
     }
 
     @GetMapping("/csrf")
@@ -86,6 +96,56 @@ public class AuthController {
     public UserResponse me(Authentication authentication) {
         NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
         return userAccountService.currentUser(principal.getId());
+    }
+
+    @GetMapping("/mfa")
+    @PreAuthorize("isAuthenticated()")
+    @SecurityRequirement(name = "sessionCookie")
+    @Operation(summary = "Consulta el estado de la verificación en dos pasos de la cuenta autenticada.")
+    public MfaStatusResponse mfaStatus(Authentication authentication) {
+        NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
+        return mfaService.status(principal.getId());
+    }
+
+    @PostMapping("/mfa/enroll/start")
+    @PreAuthorize("isAuthenticated()")
+    @SecurityRequirement(name = "sessionCookie")
+    @Operation(summary = "Inicia la configuración de la verificación en dos pasos.")
+    public MfaEnrollmentResponse beginMfaEnrollment(Authentication authentication,
+                                                     @Valid @RequestBody MfaEnrollmentStartRequest request) {
+        NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
+        return mfaService.beginEnrollment(principal.getId(), principal.getUsername(), request.currentPassword());
+    }
+
+    @PostMapping("/mfa/enroll/complete")
+    @PreAuthorize("isAuthenticated()")
+    @SecurityRequirement(name = "sessionCookie")
+    @Operation(summary = "Confirma la configuración MFA y devuelve códigos de recuperación de un solo uso.")
+    public MfaRecoveryCodesResponse completeMfaEnrollment(Authentication authentication,
+                                                            @Valid @RequestBody MfaCodeRequest request) {
+        NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
+        return new MfaRecoveryCodesResponse(mfaService.completeEnrollment(principal.getId(), request.code()));
+    }
+
+    @PostMapping("/mfa/recovery-codes/rotate")
+    @PreAuthorize("isAuthenticated()")
+    @SecurityRequirement(name = "sessionCookie")
+    @Operation(summary = "Regenera los códigos de recuperación y revoca los anteriores.")
+    public MfaRecoveryCodesResponse rotateMfaRecoveryCodes(Authentication authentication,
+                                                            @Valid @RequestBody MfaDisableRequest request) {
+        NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
+        return new MfaRecoveryCodesResponse(mfaService.rotateRecoveryCodes(
+                principal.getId(), request.currentPassword(), request.code()));
+    }
+
+    @PostMapping("/mfa/disable")
+    @PreAuthorize("isAuthenticated()")
+    @SecurityRequirement(name = "sessionCookie")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @Operation(summary = "Desactiva MFA tras verificar la contraseña y el segundo factor.")
+    public void disableMfa(Authentication authentication, @Valid @RequestBody MfaDisableRequest request) {
+        NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
+        mfaService.disable(principal.getId(), request.currentPassword(), request.code());
     }
 
     @PostMapping("/logout")

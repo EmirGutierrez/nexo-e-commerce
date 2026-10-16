@@ -33,19 +33,22 @@ public class AuthenticationService {
     private final AppUserRepository users;
     private final UserAccountService userAccountService;
     private final PasswordEncoder passwordEncoder;
+    private final MfaService mfaService;
 
     public AuthenticationService(AuthenticationManager authenticationManager,
                                   SecurityContextRepository securityContextRepository,
                                   SessionAuthenticationStrategy sessionAuthenticationStrategy,
                                   AppUserRepository users,
                                   UserAccountService userAccountService,
-                                  PasswordEncoder passwordEncoder) {
+                                  PasswordEncoder passwordEncoder,
+                                  MfaService mfaService) {
         this.authenticationManager = authenticationManager;
         this.securityContextRepository = securityContextRepository;
         this.sessionAuthenticationStrategy = sessionAuthenticationStrategy;
         this.users = users;
         this.userAccountService = userAccountService;
         this.passwordEncoder = passwordEncoder;
+        this.mfaService = mfaService;
     }
 
     @Transactional(noRollbackFor = InvalidCredentialsException.class)
@@ -79,8 +82,11 @@ public class AuthenticationService {
         }
 
         try {
-            return authenticationManager.authenticate(
+            Authentication authentication = authenticationManager.authenticate(
                     UsernamePasswordAuthenticationToken.unauthenticated(email, request.password()));
+            NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
+            mfaService.verifyLogin(principal.getId(), request.mfaCode());
+            return authentication;
         } catch (AuthenticationException exception) {
             // Authentication is throttled by source IP before Spring's password hash check.
             // Avoid account lockout here: a remote attacker could otherwise disable any known account.

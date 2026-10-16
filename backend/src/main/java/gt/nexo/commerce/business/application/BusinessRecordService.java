@@ -34,6 +34,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class BusinessRecordService {
+    private static final int TRANSFER_RESERVATION_HOURS = 24;
+    private static final int TRANSFER_EXPIRATION_BATCH_SIZE = 100;
     private static final Set<String> RESOURCES = Set.of(
             "products", "brands", "categories", "customers", "suppliers", "orders", "purchases",
             "sales", "accounting", "transfers", "payments", "invoices", "settings",
@@ -715,6 +717,58 @@ public class BusinessRecordService {
             item.put("date", rs.getTimestamp("submitted_at").toInstant().toString());
             return item;
         });
+    }
+
+    /**
+     * Expires transfer orders whose submitted receipt has remained unreviewed for 24 hours.
+     * Receipt rows are locked first, matching reviewTransferReceipt's lock order. SKIP LOCKED
+     * allows more than one application instance to run this job without double-releasing stock.
+     */
+    @Transactional
+    public int expirePendingTransferOrders() {
+        List<UUID> expiredOrderIds = jdbc.queryForList("""
+                SELECT r.order_record_id
+                FROM transfer_receipts r
+                JOIN business_records b ON b.id = r.order_record_id AND b.resource_code = 'orders'
+                WHERE r.status = 'Pendiente'
+                  AND r.submitted_at <= CURRENT_TIMESTAMP - (CAST(? AS integer) * INTERVAL '1 hour')
+                  AND b.data ->> 'status' = 'Pendiente de pago'
+                  AND b.data ->> 'paymentMethod' = 'transfer'
+                ORDER BY r.submitted_at, r.order_record_id
+                LIMIT ?
+                FOR UPDATE OF r SKIP LOCKED
+                """, UUID.class, TRANSFER_RESERVATION_HOURS, TRANSFER_EXPIRATION_BATCH_SIZE);
+
+        int expired = 0;
+        for (UUID orderId : expiredOrderIds) {
+            Map<String, Object> before = lockedRecord("orders", orderId);
+            if (!"Pendiente de pago".equals(String.valueOf(before.get("status")))
+                    || !"transfer".equals(String.valueOf(before.get("paymentMethod")))) continue;
+
+            Map<String, Object> after = new LinkedHashMap<>(before);
+            after.put("status", "Cancelado");
+            after.put("paymentStatus", "Expirada");
+            transitionOrder(orderId, before, after, null);
+            jdbc.update("UPDATE business_records SET data = ?::jsonb, status_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    writeJson(after), statusOf(after), orderId);
+            syncOrder(orderId, after);
+            jdbc.update("""
+                    UPDATE transfer_receipts
+                    SET status = 'Expirada', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = NULL
+                    WHERE order_record_id = ? AND status = 'Pendiente'
+                    """, orderId);
+
+            UUID customerUserId = orderCustomerId(orderId);
+            if (customerUserId != null) {
+                createCustomerNotification(customerUserId, orderId, "ORDER_EXPIRED", "Reserva vencida",
+                        "La reserva del pedido " + text(after.get("orderNumber"))
+                                + " venció tras 24 horas sin revisión del comprobante y las existencias se liberaron. "
+                                + "Si ya realizaste la transferencia, contacta a la tienda y comparte la referencia del pedido.",
+                        "order-expired:" + orderId);
+            }
+            expired++;
+        }
+        return expired;
     }
 
     @Transactional

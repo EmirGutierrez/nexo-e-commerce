@@ -61,9 +61,9 @@ function mapApiUser(user: ApiUser): User {
 }
 
 export const authService = {
-  login: async (email: string, password: string): Promise<User | null> => {
-    try { const user = await apiClient.post<ApiUser>('/api/auth/login', { email, password }); clearCsrfToken(); return mapApiUser(user); }
-    catch (error) { if (error instanceof ApiError && error.status === 401) return null; throw error; }
+  login: async (email: string, password: string, mfaCode?: string): Promise<User | null> => {
+    try { const user = await apiClient.post<ApiUser>('/api/auth/login', { email, password, ...(mfaCode ? { mfaCode } : {}) }); clearCsrfToken(); return mapApiUser(user); }
+    catch (error) { if (error instanceof ApiError && error.status === 401 && error.code !== 'MFA_REQUIRED' && error.code !== 'MFA_INVALID') return null; throw error; }
   },
   registerCustomer: async (name: string, email: string, password: string): Promise<User> => {
     const user = await apiClient.post<ApiUser>('/api/auth/register', { name, email, password }); clearCsrfToken(); return mapApiUser(user);
@@ -76,6 +76,16 @@ export const authService = {
     try { return mapApiUser(await apiClient.get<ApiUser>('/api/auth/me')); }
     catch (error) { if (error instanceof ApiError && error.status === 401) return null; throw error; }
   },
+};
+
+export interface MfaStatus { enabled: boolean; enrollmentPending: boolean; recoveryCodesRemaining: number }
+export interface MfaEnrollment { secret: string; otpauthUri: string }
+export const mfaService = {
+  status: () => apiClient.get<MfaStatus>('/api/auth/mfa'),
+  beginEnrollment: (currentPassword: string) => apiClient.post<MfaEnrollment>('/api/auth/mfa/enroll/start', { currentPassword }),
+  completeEnrollment: (code: string) => apiClient.post<{ recoveryCodes: string[] }>('/api/auth/mfa/enroll/complete', { code }),
+  rotateRecoveryCodes: (currentPassword: string, code: string) => apiClient.post<{ recoveryCodes: string[] }>('/api/auth/mfa/recovery-codes/rotate', { currentPassword, code }),
+  disable: (currentPassword: string, code: string) => apiClient.post<void>('/api/auth/mfa/disable', { currentPassword, code }),
 };
 
 export interface CustomerOrder {

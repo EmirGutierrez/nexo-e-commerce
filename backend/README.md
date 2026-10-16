@@ -64,9 +64,14 @@ Todas las escrituras requieren un token CSRF; las operaciones privadas también 
 | Método y ruta | Acceso | Resultado |
 |---|---|---|
 | `GET /api/auth/csrf` | Público | `{ "token": "…" }` |
-| `POST /api/auth/login` | Público + CSRF | `{ "id": "…", "name": "…", "email": "…", "role": "superadmin", "status": "ACTIVE", "permissions": ["users:view"] }` |
+| `POST /api/auth/login` | Público + CSRF | Envía `mfaCode` si la cuenta tiene MFA activa; la API responde `401` con `MFA_REQUIRED` o `MFA_INVALID` hasta validar el segundo factor |
 | `POST /api/auth/register` | Público + CSRF | Crea un usuario con rol `customer`, inicia sesión y devuelve la cuenta |
 | `GET /api/auth/me` | Sesión | Usuario autenticado y permisos vigentes |
+| `GET /api/auth/mfa` | Sesión | Estado MFA y cantidad de códigos de recuperación disponibles |
+| `POST /api/auth/mfa/enroll/start` | Sesión + CSRF | Requiere la contraseña actual; devuelve el secreto TOTP y URI de enrolamiento |
+| `POST /api/auth/mfa/enroll/complete` | Sesión + CSRF | Confirma TOTP y devuelve diez códigos de recuperación una sola vez |
+| `POST /api/auth/mfa/recovery-codes/rotate` | Sesión + CSRF | Verifica contraseña y segundo factor, revoca los códigos viejos y devuelve nuevos |
+| `POST /api/auth/mfa/disable` | Sesión + CSRF | Requiere contraseña actual y un código MFA; `204 No Content` |
 | `POST /api/auth/logout` | Sesión + CSRF | `204 No Content` e invalida la sesión |
 | `GET /api/users` | Sesión + `users:view` | Usuarios sin hashes de contraseña |
 
@@ -87,6 +92,8 @@ Las promociones se administran en `GET/PUT /api/business/promotions`; los compro
 ## Sesiones móviles
 
 Las apps móviles usan un token opaco independiente de la cookie web. `POST /api/mobile/auth/login` valida las mismas cuentas, devuelve el token una sola vez y guarda solo su hash SHA-256 en PostgreSQL. El token dura siete días por defecto (`MOBILE_ACCESS_TOKEN_LIFETIME` permite cambiarlo), se revoca al cerrar sesión y se rechaza si la cuenta deja de estar activa o queda bloqueada. Las peticiones móviles protegidas envían `Authorization: Bearer <token>`; Spring carga los permisos vigentes del usuario en cada petición. Estas rutas no dependen del BFF de Next.js.
+
+Las cuentas pueden activar TOTP desde **Mi perfil → Verificación en dos pasos**. La misma verificación se pide en los logins web y móvil. Antes de enrolar usuarios, configura `MFA_ENCRYPTION_KEY` como Base64 de 32 bytes aleatorios (por ejemplo, `openssl rand -base64 32`) en el gestor de secretos o archivo de entorno ignorado por Git. Conserva esa clave en una copia segura y no la rotes sin migrar los secretos; sin ella, las cuentas con MFA habilitado no podrán autenticar. El enrolamiento entrega diez códigos de recuperación, que se muestran una sola vez.
 
 | Método y ruta | Acceso | Resultado |
 |---|---|---|

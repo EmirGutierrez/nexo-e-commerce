@@ -47,7 +47,7 @@ export interface TransferReceipt {
   reference?: string;
   fileName?: string;
   submittedAt?: string;
-  status: 'Pendiente' | 'Aprobada' | 'Rechazada';
+  status: 'Pendiente' | 'Aprobada' | 'Rechazada' | 'Expirada';
 }
 
 export interface Brand {

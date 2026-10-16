@@ -6,7 +6,7 @@ El Compose de producción ejecuta PostgreSQL, Spring Boot, Next.js y Caddy. Cadd
 
 1. Instala Docker Engine y el plugin de Docker Compose v2 en Ubuntu. Confirma que `docker compose version` responda.
 2. Crea un usuario `deploy` con acceso SSH por llave y permiso para ejecutar Docker. No uses `root` en el secreto de GitHub.
-3. Crea `/opt/nexo-commerce/deploy/.env.production` a partir de `deploy/production.env.example`. Configura el dominio, una contraseña aleatoria larga para la base de datos y, para el primer arranque, las cuatro variables de bootstrap del administrador. Protege el archivo con `chmod 600`.
+3. Crea `/opt/nexo-commerce/deploy/.env.production` a partir de `deploy/production.env.example`. Configura el dominio, una contraseña aleatoria larga para la base de datos y una clave MFA persistente (`openssl rand -base64 32`). Guarda la clave en un gestor de secretos y en un respaldo seguro; sin ella no se puede enrolar MFA y cambiarla después deja inaccesibles las cuentas que ya lo usen. Para el primer arranque, configura las cuatro variables de bootstrap del administrador. Protege el archivo con `chmod 600`.
 4. Da propiedad de `/opt/nexo-commerce` al usuario `deploy`. El workflow clona el repositorio ahí la primera vez y, después, actualiza la rama `develop`.
 5. Configura los registros DNS A de `@`, `www` y `api` con la IPv4 de la VPS. Permite TCP 22 (SSH), 80 y 443; permite UDP 443 para HTTP/3 si quieres usarlo.
 

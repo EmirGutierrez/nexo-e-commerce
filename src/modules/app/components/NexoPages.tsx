@@ -30,6 +30,7 @@ import { SeasonalSpotlight } from '../../commerce/components/CommercePages';
 import PublicAccountControls from './PublicAccountControls';
 import CustomerNotificationBell from '../../commerce/components/CustomerNotificationBell';
 import FloatingCartButton from './FloatingCartButton';
+import MfaSettingsCard from '../../auth/components/MfaSettingsCard';
 
 const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
   const icons: Record<string, typeof Box> = { arrow: ArrowUpRight, box: Box, user: UserCircle, check: CheckCircle2 };
@@ -133,6 +134,8 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const requested = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('redirect');
@@ -146,13 +149,17 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
     event.preventDefault(); setError('');
     setSubmitting(true);
     try {
-      const session = await login(email, password);
+      const session = await login(email, password, mfaCode);
       if (!session) {
         setError('Correo o contraseña incorrectos.');
         return;
       }
       router.push(resolveLoginDestination(session.kind, session.user.role, requested, session.user.permissions));
     } catch (caught) {
+      if (caught instanceof ApiError && (caught.code === 'MFA_REQUIRED' || caught.code === 'MFA_INVALID')) {
+        setMfaRequired(true);
+        if (caught.code === 'MFA_INVALID') setMfaCode('');
+      }
       setError(authErrorMessage(caught, 'No fue posible iniciar sesión. Inténtalo de nuevo.'));
     } finally {
       setSubmitting(false);
@@ -161,7 +168,8 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
 
   const adminMode = initialKind === 'admin';
   return <div className="admin-login-page"><div className="admin-login-panel"><Brand /><div className="security-pill"><ShieldCheck size={15} /> Acceso protegido</div><div className="admin-login-copy"><span className="eyebrow">NEXO · {adminMode ? 'Administración' : 'Tienda'}</span><h1>{adminMode ? <>Haz que tu negocio<br /><em>avance.</em></> : <>Todo lo que buscas,<br /><em>en un solo lugar.</em></>}</h1><p>Ingresa con tu cuenta para continuar.</p></div><div className="admin-login-footer"><span>© 2025 NEXO COMMERCE</span><span>Acceso seguro</span></div></div><div className="admin-login-form"><Link href="/" className="back-link"><ArrowLeft size={16} /> Volver al inicio</Link><div className="admin-form-inner"><div className="admin-icon"><LockIcon /></div><h2>Iniciar sesión</h2><p>Usa tus credenciales para acceder a tu espacio.</p><form onSubmit={submit}>
-    <Field label="Correo electrónico" type="email" value={email} onChange={setEmail} placeholder={adminMode ? 'personal@nexo.gt' : 'tu@correo.com'} /><Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="Ingresa tu contraseña" />
+    <Field label="Correo electrónico" type="email" value={email} onChange={(value) => { setEmail(value); setMfaRequired(false); setMfaCode(''); }} placeholder={adminMode ? 'personal@nexo.gt' : 'tu@correo.com'} /><Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="Ingresa tu contraseña" />
+    {mfaRequired && <label className="field mfa-login-code"><span>Código de autenticación o recuperación</span><input required type="text" autoComplete="one-time-code" inputMode="text" autoCapitalize="characters" maxLength={32} value={mfaCode} onChange={(event) => setMfaCode(event.target.value)} placeholder="000000 o código de recuperación" /></label>}
     {error && <div className="error-message" role="alert"><X size={15} />{error}</div>}<button className={`button ${adminMode ? 'button-dark' : 'button-primary'} full`} type="submit" disabled={submitting}>{submitting ? 'Ingresando…' : <>Ingresar <ArrowRight size={16} /></>}</button></form>
     <p className="auth-bottom">Tu cuenta y sus permisos determinan a dónde ingresas.</p>
     <Link className="auth-bottom login-switch" href="/register">Crear cuenta de cliente</Link>
@@ -230,7 +238,7 @@ export function ProfilePage() {
   const [name, setName] = useState(user?.name || ''); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(''); const [error, setError] = useState('');
   useEffect(() => { setName(user?.name || ''); }, [user?.name]);
   const save = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setError(''); setMessage(''); try { await updateProfile(name); setMessage('Tu nombre se guardó en PostgreSQL.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar tu perfil.'); } finally { setBusy(false); } };
-  return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Mi cuenta · Perfil de usuario</span><h1>Mi perfil</h1><p>Actualiza tu nombre visible y consulta tu acceso.</p></div></div><section className="panel profile-panel"><form className="crud-form" onSubmit={save}><div className="crud-fields"><label className="field"><span>Nombre</span><input required minLength={2} maxLength={160} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Correo electrónico</span><input value={user?.email || ''} readOnly disabled /></label><label className="field"><span>Rol</span><input value={user ? roleLabels[user.role] : ''} readOnly disabled /></label></div>{message && <div className="crud-feedback" role="status">{message}</div>}{error && <div className="crud-error" role="alert">{error}</div>}<p className="crud-form-note">El correo y los permisos solo se cambian desde los procesos administrativos correspondientes.</p><div className="modal-actions"><button className="button button-primary" type="submit" disabled={busy || name.trim() === user?.name}>{busy ? 'Guardando…' : 'Guardar perfil'}</button></div></form></section></div>;
+  return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Mi cuenta · Perfil de usuario</span><h1>Mi perfil</h1><p>Actualiza tu nombre visible y consulta tu acceso.</p></div></div><section className="panel profile-panel"><form className="crud-form" onSubmit={save}><div className="crud-fields"><label className="field"><span>Nombre</span><input required minLength={2} maxLength={160} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Correo electrónico</span><input value={user?.email || ''} readOnly disabled /></label><label className="field"><span>Rol</span><input value={user ? roleLabels[user.role] : ''} readOnly disabled /></label></div>{message && <div className="crud-feedback" role="status">{message}</div>}{error && <div className="crud-error" role="alert">{error}</div>}<p className="crud-form-note">El correo y los permisos solo se cambian desde los procesos administrativos correspondientes.</p><div className="modal-actions"><button className="button button-primary" type="submit" disabled={busy || name.trim() === user?.name}>{busy ? 'Guardando…' : 'Guardar perfil'}</button></div></form></section><MfaSettingsCard /></div>;
 }
 
 function LockIcon() { return <ShieldCheck size={25} />; }

@@ -8,5 +8,9 @@ import jakarta.validation.constraints.Size;
 @Schema(description = "Credenciales de una cuenta de cliente o personal.")
 public record LoginRequest(
         @NotBlank @Email @Size(max = 254) String email,
-        @NotBlank @Size(max = 128) String password) {
+        @NotBlank @Size(max = 128) String password,
+        @Size(max = 32) String mfaCode) {
+    public LoginRequest(String email, String password) {
+        this(email, password, null);
+    }
 }
