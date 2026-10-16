@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Locale;
 import java.util.UUID;
@@ -76,7 +78,7 @@ public class TeamInvitationService {
                 ON CONFLICT (user_id) DO UPDATE SET token_hash = EXCLUDED.token_hash,
                 expires_at = EXCLUDED.expires_at, accepted_at = NULL, invited_by = EXCLUDED.invited_by,
                 created_at = CURRENT_TIMESTAMP
-                """, account.getId(), hash(token), expiresAt, inviter);
+                """, account.getId(), hash(token), OffsetDateTime.ofInstant(expiresAt, ZoneOffset.UTC), inviter);
         return new TeamInvitationResponse(account.getId(), email, "PENDING", token);
     }
 
