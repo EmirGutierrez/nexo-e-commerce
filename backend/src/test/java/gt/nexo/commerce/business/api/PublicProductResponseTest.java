@@ -35,4 +35,18 @@ class PublicProductResponseTest {
         assertFalse(serializedFields.contains("location"));
         assertNull(response.compareAt());
     }
+
+    @Test
+    void ignoresMalformedOptionalValuesInsteadOfFailingThePublicCatalog() {
+        Map<String, Object> product = new LinkedHashMap<>();
+        product.put("price", "not-a-price");
+        product.put("stock", "unknown");
+        product.put("featured", "not-a-boolean");
+
+        PublicProductResponse response = PublicProductResponse.from(product);
+
+        assertNull(response.price());
+        assertNull(response.stock());
+        assertEquals(Boolean.FALSE, response.featured());
+    }
 }

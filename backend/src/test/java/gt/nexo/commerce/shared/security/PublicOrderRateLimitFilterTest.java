@@ -51,6 +51,59 @@ class PublicOrderRateLimitFilterTest {
         verify(mapper).writeValue(any(ServletOutputStream.class), any(ApiError.class));
     }
 
+    @Test
+    void fallsBackToTheProxyAddressWhenForwardedIpIsMalformed() throws Exception {
+        PublicOrderRateLimitFilter filter = new PublicOrderRateLimitFilter(mock(ObjectMapper.class));
+        MockHttpServletResponse lastResponse = null;
+
+        for (int attempt = 0; attempt < 21; attempt++) {
+            MockHttpServletRequest request = orderRequest("203.0.113.25");
+            request.addHeader("X-Forwarded-For", ":");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            filter.doFilter(request, response, new MockFilterChain());
+            lastResponse = response;
+        }
+
+        assertEquals(429, lastResponse.getStatus());
+    }
+
+    @Test
+    void appliesTheSeparateQuoteLimit() throws Exception {
+        PublicOrderRateLimitFilter filter = new PublicOrderRateLimitFilter(mock(ObjectMapper.class));
+        MockHttpServletResponse lastResponse = null;
+
+        for (int attempt = 0; attempt < 81; attempt++) {
+            MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/catalog/orders/quote");
+            request.setServletPath("/api/catalog/orders/quote");
+            request.setRemoteAddr("203.0.113.30");
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            filter.doFilter(request, response, new MockFilterChain());
+            lastResponse = response;
+        }
+
+        assertEquals(429, lastResponse.getStatus());
+        assertEquals("600", lastResponse.getHeader("Retry-After"));
+    }
+
+    @Test
+    void boundsTheNumberOfRememberedAddressesAndReturnsRetryAfterWhenFull() throws Exception {
+        PublicOrderRateLimitFilter filter = new PublicOrderRateLimitFilter(mock(ObjectMapper.class));
+        MockHttpServletResponse lastResponse = null;
+
+        for (int address = 0; address <= 20_000; address++) {
+            int a = address >>> 16 & 255;
+            int b = address >>> 8 & 255;
+            int c = address & 255;
+            MockHttpServletRequest request = orderRequest("10." + a + "." + b + "." + c);
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            filter.doFilter(request, response, new MockFilterChain());
+            lastResponse = response;
+        }
+
+        assertEquals(429, lastResponse.getStatus());
+        assertEquals("600", lastResponse.getHeader("Retry-After"));
+    }
+
     private MockHttpServletRequest orderRequest(String remoteAddress) {
         MockHttpServletRequest request = new MockHttpServletRequest("POST", "/api/catalog/orders");
         request.setServletPath("/api/catalog/orders");
