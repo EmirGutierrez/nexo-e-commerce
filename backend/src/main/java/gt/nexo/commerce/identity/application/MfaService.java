@@ -15,6 +15,7 @@ import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Instant;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
@@ -75,7 +76,7 @@ public class MfaService {
                     "Desactiva la verificación en dos pasos antes de volver a configurarla.");
         }
 
-        byte[] rawSecret = new byte[20];
+        byte[] rawSecret = new byte[32];
         RANDOM.nextBytes(rawSecret);
         String secret = encodeBase32(rawSecret);
         byte[] ciphertext = encryptSecret(userId, rawSecret);
@@ -260,6 +261,9 @@ public class MfaService {
         return -1;
     }
 
+    // TOTP interoperability: Google Authenticator ignores the URI algorithm parameter and uses SHA-1.
+    // This is HMAC-SHA1 for short-lived OTPs, not SHA-1 for password storage or signatures.
+    @SuppressWarnings("java:S4790")
     static String totpCode(byte[] secret, long step) {
         try {
             Mac mac = Mac.getInstance("HmacSHA1");
@@ -338,6 +342,27 @@ public class MfaService {
         return bytes;
     }
 
-    private record MfaRecord(byte[] ciphertext, Instant enabledAt, long lastUsedStep) { }
+    private record MfaRecord(byte[] ciphertext, Instant enabledAt, long lastUsedStep) {
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) return true;
+            if (!(other instanceof MfaRecord record)) return false;
+            return Arrays.equals(ciphertext, record.ciphertext)
+                    && java.util.Objects.equals(enabledAt, record.enabledAt)
+                    && lastUsedStep == record.lastUsedStep;
+        }
+
+        @Override
+        public int hashCode() {
+            int result = Arrays.hashCode(ciphertext);
+            result = 31 * result + java.util.Objects.hashCode(enabledAt);
+            return 31 * result + Long.hashCode(lastUsedStep);
+        }
+
+        @Override
+        public String toString() {
+            return "MfaRecord[ciphertext=<redacted>, enabledAt=" + enabledAt + ", lastUsedStep=" + lastUsedStep + "]";
+        }
+    }
     private record RecoveryCode(UUID id, String hash) { }
 }
