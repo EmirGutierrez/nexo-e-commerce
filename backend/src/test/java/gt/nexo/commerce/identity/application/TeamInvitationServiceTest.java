@@ -38,7 +38,7 @@ class TeamInvitationServiceTest {
 
     @Test
     void persistsInvitationExpiryAsJdbcTimestamp() {
-        String email = "danny@example.com";
+        String email = "invited-user@example.com";
         RoleEntity adminRole = mock(RoleEntity.class);
         when(permissions.has(any(), eq("users"), eq("create"))).thenReturn(true);
         when(roles.findById("admin")).thenReturn(Optional.of(adminRole));
@@ -47,7 +47,7 @@ class TeamInvitationServiceTest {
         when(users.saveAndFlush(any(AppUserEntity.class))).thenAnswer(invocation -> invocation.getArgument(0));
 
         TeamInvitationResponse invitation = service.invite(
-                new TeamInvitationRequest("Danny Velásquez", email, "admin"), mock(Authentication.class));
+                new TeamInvitationRequest("Usuario de prueba", email, "admin"), mock(Authentication.class));
 
         ArgumentCaptor<OffsetDateTime> expiry = ArgumentCaptor.forClass(OffsetDateTime.class);
         verify(jdbc).update(contains("INSERT INTO user_invitations"), eq(invitation.id()), anyString(),
