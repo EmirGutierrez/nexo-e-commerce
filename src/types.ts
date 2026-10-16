@@ -47,7 +47,7 @@ export interface TransferReceipt {
   reference?: string;
   fileName?: string;
   submittedAt?: string;
-  status: 'Pendiente' | 'Aprobada' | 'Rechazada';
+  status: 'Pendiente' | 'Aprobada' | 'Rechazada' | 'Expirada';
 }
 
 export interface Brand {
@@ -66,6 +66,8 @@ export interface Product {
   category: string;
   price: number;
   compareAt?: number;
+  cost?: number;
+  location?: string;
   stock: number;
   status: 'Activo' | 'Bajo stock' | 'Agotado' | 'Inactivo';
   image: string;

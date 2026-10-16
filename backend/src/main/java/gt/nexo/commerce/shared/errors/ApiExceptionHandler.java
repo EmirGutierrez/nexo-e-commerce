@@ -1,6 +1,8 @@
 package gt.nexo.commerce.shared.errors;
 
 import gt.nexo.commerce.business.application.BusinessRuleException;
+import gt.nexo.commerce.identity.application.MfaChallengeException;
+import gt.nexo.commerce.identity.application.MfaUnavailableException;
 import jakarta.validation.ConstraintViolationException;
 import java.time.Instant;
 import org.springframework.http.HttpStatus;
@@ -22,6 +24,16 @@ public class ApiExceptionHandler {
     @ExceptionHandler(InvalidCredentialsException.class)
     ResponseEntity<ApiError> invalidCredentials(InvalidCredentialsException exception) {
         return error(HttpStatus.UNAUTHORIZED, "INVALID_CREDENTIALS", exception.getMessage());
+    }
+
+    @ExceptionHandler(MfaChallengeException.class)
+    ResponseEntity<ApiError> mfaChallenge(MfaChallengeException exception) {
+        return error(HttpStatus.UNAUTHORIZED, exception.getCode(), exception.getMessage());
+    }
+
+    @ExceptionHandler(MfaUnavailableException.class)
+    ResponseEntity<ApiError> mfaUnavailable(MfaUnavailableException exception) {
+        return error(HttpStatus.SERVICE_UNAVAILABLE, "MFA_UNAVAILABLE", exception.getMessage());
     }
 
     @ExceptionHandler(InactiveAccountException.class)

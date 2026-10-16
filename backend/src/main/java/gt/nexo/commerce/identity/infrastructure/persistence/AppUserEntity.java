@@ -38,9 +38,6 @@ public class AppUserEntity {
     @Column(name = "status", nullable = false, length = 20)
     private UserStatus status;
 
-    @Column(name = "failed_login_attempts", nullable = false)
-    private int failedLoginAttempts;
-
     @Column(name = "locked_until")
     private Instant lockedUntil;
 
@@ -78,16 +75,7 @@ public class AppUserEntity {
         updatedAt = Instant.now();
     }
 
-    public void recordFailedLogin(Instant now) {
-        if (isCurrentlyLocked(now)) return;
-        failedLoginAttempts++;
-        if (failedLoginAttempts >= 5) {
-            lockedUntil = now.plusSeconds(15 * 60L);
-        }
-    }
-
     public void recordSuccessfulLogin(Instant now) {
-        failedLoginAttempts = 0;
         lockedUntil = null;
         lastLoginAt = now;
     }
@@ -123,10 +111,6 @@ public class AppUserEntity {
 
     public UserStatus getStatus() {
         return status;
-    }
-
-    public int getFailedLoginAttempts() {
-        return failedLoginAttempts;
     }
 
     public Instant getLockedUntil() {

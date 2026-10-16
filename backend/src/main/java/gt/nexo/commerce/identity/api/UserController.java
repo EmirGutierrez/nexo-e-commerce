@@ -10,6 +10,7 @@ import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import java.util.List;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import java.util.Map;
@@ -47,6 +48,22 @@ public class UserController {
     @Operation(summary = "Crea una invitación de un solo uso para un miembro del equipo.")
     public TeamInvitationResponse invite(@Valid @RequestBody TeamInvitationRequest request, Authentication authentication) {
         return teamInvitationService.invite(request, authentication);
+    }
+
+    @DeleteMapping("/invitations/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("@permissionAuthorizer.has(authentication, 'users', 'delete')")
+    @Operation(summary = "Revoca una invitación pendiente que todavía no ha sido aceptada.")
+    public void revokeInvitation(@PathVariable UUID id, Authentication authentication) {
+        teamInvitationService.revokePendingInvitation(id, authentication);
+    }
+
+    @DeleteMapping("/{id}")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    @PreAuthorize("@permissionAuthorizer.has(authentication, 'users', 'delete')")
+    @Operation(summary = "Elimina un miembro del equipo, cierra sus sesiones y conserva los registros operativos.")
+    public void deleteTeamUser(@PathVariable UUID id, Authentication authentication) {
+        userAccountService.deleteTeamUser(id, authentication);
     }
 
     @PatchMapping("/{id}/role")

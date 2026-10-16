@@ -1,0 +1,235 @@
+name: CI
+
+on:
+  push:
+    branches:
+      - "**"
+  pull_request:
+    branches:
+      - develop
+      - master
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  frontend:
+    name: Compilar frontend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Instalar dependencias
+        run: npm ci
+
+      - name: Revisar vulnerabilidades altas
+        run: npm audit --audit-level=high
+
+      - name: Probar frontend y generar cobertura
+        run: npm run test:coverage
+
+      - name: Compilar Next.js
+        run: npm run build
+
+  backend:
+    name: Probar backend
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Ejecutar pruebas Maven
+        working-directory: backend
+        # Cada job parte de un checkout nuevo; no necesita el plugin clean.
+        run: mvn -B verify
+
+  sonar:
+    name: Analizar calidad con SonarQube Cloud
+    # SonarCloud debe tener develop configurada como rama principal del proyecto.
+    if: ${{ github.ref == 'refs/heads/develop' || (github.event_name == 'pull_request' && github.base_ref == 'develop') }}
+    runs-on: ubuntu-24.04
+    needs:
+      - frontend
+      - backend
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          fetch-depth: 0
+
+      - name: Configurar Java 21
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
+        with:
+          distribution: temurin
+          java-version: "21"
+          cache: maven
+          cache-dependency-path: backend/pom.xml
+
+      - name: Configurar Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
+        with:
+          node-version: 22
+
+      - name: Instalar dependencias frontend
+        run: npm ci
+
+      - name: Generar cobertura frontend para SonarQube Cloud
+        run: npm run test:coverage
+
+      - name: Probar backend y generar cobertura JaCoCo
+        working-directory: backend
+        # Checkout nuevo también en este job; verify ejecuta pruebas y genera JaCoCo.
+        run: mvn -B verify
+
+      - name: Validar token de SonarQube Cloud
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        run: test -n "$SONAR_TOKEN" || { echo "Falta el secreto SONAR_TOKEN en GitHub Actions"; exit 1; }
+
+      - name: Analizar frontend y backend
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
+        env:
+          SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
+        with:
+          args: >
+            -Dsonar.organization=emirgutierrez
+            -Dsonar.projectKey=EmirGutierrez_nexo-e-commerce
+
+  docker:
+    name: Construir imágenes Docker
+    runs-on: ubuntu-24.04
+    needs:
+      - frontend
+      - backend
+    timeout-minutes: 30
+    steps:
+      - name: Obtener código
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Validar Compose de producción
+        run: docker compose --env-file deploy/production.env.example --file compose.prod.yaml config --quiet
+
+      - name: Validar Caddyfile de producción
+        run: docker run --rm --volume "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" --env SITE_DOMAIN=example.com caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f caddy validate --config /etc/caddy/Caddyfile
+
+      - name: Construir imagen del frontend
+        run: docker build --file Dockerfile.frontend --tag nexo-commerce-frontend:ci .
+
+      - name: Construir imagen del backend
+        run: docker build --file backend/Dockerfile --tag nexo-commerce-backend:ci backend
+
+  deploy:
+    name: Desplegar producción
+    needs:
+      - frontend
+      - backend
+      - sonar
+      - docker
+    if: >-
+      ${{
+        always() &&
+        github.ref == 'refs/heads/develop' &&
+        github.event_name == 'workflow_dispatch' &&
+        needs.frontend.result == 'success' &&
+        needs.backend.result == 'success' &&
+        needs.docker.result == 'success' &&
+        needs.sonar.result == 'success'
+      }}
+    runs-on: ubuntu-24.04
+    environment:
+      name: production
+    concurrency:
+      group: nexo-production-deploy
+      cancel-in-progress: false
+    timeout-minutes: 15
+    steps:
+      - name: Validar y preparar acceso SSH
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+        run: |
+          test -n "$VPS_HOST" || { echo "Falta el secreto VPS_HOST"; exit 1; }
+          test -n "$VPS_USER" || { echo "Falta el secreto VPS_USER"; exit 1; }
+          test -n "$VPS_SSH_KEY" || { echo "Falta el secreto VPS_SSH_KEY"; exit 1; }
+          install -m 700 -d "$HOME/.ssh"
+          printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > "$HOME/.ssh/nexo_deploy"
+          chmod 600 "$HOME/.ssh/nexo_deploy"
+          ssh-keygen -y -f "$HOME/.ssh/nexo_deploy" > /dev/null || {
+            echo "El secreto VPS_SSH_KEY no contiene una llave privada SSH válida"
+            exit 1
+          }
+          expected_fingerprint="SHA256:fHpDmhjPDYdpv7Gz7nJtymZtrDFdmiO1WPMmmj8wTO4"
+          ssh-keyscan -T 10 -t ed25519 "$VPS_HOST" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          observed_fingerprints="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" 2>/dev/null | awk '{print $2}' || true)"
+          if ! printf '%s\n' "$observed_fingerprints" | grep -Fxq "$expected_fingerprint"; then
+            echo "La huella ED25519 de la VPS no coincide con la huella verificada"
+            exit 1
+          fi
+
+      - name: Sincronizar clave MFA con la VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          MFA_ENCRYPTION_KEY: ${{ secrets.MFA_ENCRYPTION_KEY }}
+        run: |
+          test -n "$MFA_ENCRYPTION_KEY" || { echo "Falta el secreto MFA_ENCRYPTION_KEY en el entorno production"; exit 1; }
+          printf '%s\n' "$MFA_ENCRYPTION_KEY" |
+            ssh -i "$HOME/.ssh/nexo_deploy" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$VPS_USER@$VPS_HOST" \
+              'python3 -c '\''import sys,base64,pathlib,os,tempfile,stat; p=pathlib.Path("/opt/nexo-commerce/deploy/.env.production"); key=sys.stdin.readline().strip(); raw=base64.b64decode(key,validate=True); assert len(raw)==32; lines=[line for line in p.read_text().splitlines() if not line.startswith("MFA_ENCRYPTION_KEY=")]; lines.append("MFA_ENCRYPTION_KEY="+key); data=("\n".join(lines)+"\n").encode(); mode=stat.S_IMODE(p.stat().st_mode); fd,tmp=tempfile.mkstemp(dir=str(p.parent),prefix=".env.production."); os.fchmod(fd,mode); os.write(fd,data); os.fsync(fd); os.close(fd); os.replace(tmp,p); print("Clave MFA sincronizada")'\'''
+
+      - name: Actualizar aplicación en la VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: >-
+          ssh -i "$HOME/.ssh/nexo_deploy"
+          -o IdentitiesOnly=yes
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=yes
+          -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          "$VPS_USER@$VPS_HOST"
+          'if [ ! -d /opt/nexo-commerce/.git ]; then git clone --branch develop --single-branch https://github.com/EmirGutierrez/nexo-e-commerce.git /opt/nexo-commerce; fi && cd /opt/nexo-commerce && git pull --ff-only origin develop && docker compose --env-file deploy/.env.production -f compose.prod.yaml up -d --build --remove-orphans --wait --wait-timeout 300 && docker compose --env-file deploy/.env.production -f compose.prod.yaml up -d --no-deps --force-recreate caddy'
+
+      - name: Verificar frontend y API públicos
+        run: |
+          frontend_headers="$(mktemp)"
+          api_headers="$(mktemp)"
+          trap 'rm -f "$frontend_headers" "$api_headers"' EXIT
+          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors --dump-header "$frontend_headers" https://nexo-e-commerce.com/ -o /dev/null
+          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors --dump-header "$api_headers" https://api.nexo-e-commerce.com/api/catalog/payment-methods -o /dev/null
+          grep --ignore-case --quiet '^Content-Security-Policy:' "$frontend_headers"
+          grep --ignore-case --quiet '^X-Content-Type-Options: *nosniff' "$frontend_headers"
+          grep --ignore-case --quiet '^Content-Security-Policy:' "$api_headers"
+          grep --ignore-case --quiet '^X-Content-Type-Options: *nosniff' "$api_headers"

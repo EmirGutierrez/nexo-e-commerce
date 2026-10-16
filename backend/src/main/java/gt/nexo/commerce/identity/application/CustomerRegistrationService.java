@@ -7,6 +7,8 @@ import gt.nexo.commerce.identity.infrastructure.persistence.RoleEntity;
 import gt.nexo.commerce.identity.infrastructure.persistence.RoleRepository;
 import gt.nexo.commerce.identity.infrastructure.persistence.UserStatus;
 import gt.nexo.commerce.shared.errors.AccountAlreadyExistsException;
+import gt.nexo.commerce.business.application.BusinessRuleException;
+import org.springframework.http.HttpStatus;
 import java.util.Locale;
 import java.util.UUID;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -31,6 +33,10 @@ public class CustomerRegistrationService {
 
     @Transactional
     public void register(RegisterRequest request) {
+        if (!PasswordPolicy.isWithinBcryptLimit(request.password())) {
+            throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "PASSWORD_TOO_LONG",
+                    "La contraseña no puede superar 72 bytes UTF-8 por el algoritmo de almacenamiento seguro.");
+        }
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         if (users.findByEmailIgnoreCase(email).isPresent()) throw new AccountAlreadyExistsException();
 

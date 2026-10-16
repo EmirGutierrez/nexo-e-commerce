@@ -1,6 +1,6 @@
 # Contexto del proyecto NEXO Commerce
 
-Guía de referencia para entender qué hace el sistema, cómo evolucionó y cómo se conectan sus partes. Describe el estado del código de `develop` al 7 de octubre de 2026; en esa fecha, `master` tenía el mismo árbol de archivos. Para las reglas de trabajo y ramas, consulta [CONTRIBUTING.md](../CONTRIBUTING.md).
+Guía de referencia para entender qué hace el sistema, cómo evolucionó y cómo se conectan sus partes. Se actualizó el 15 de octubre de 2026 para describir el estado de `develop`; `master` conserva la versión estable hasta aprobar el próximo lanzamiento. Para las reglas de trabajo y ramas, consulta [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## Resumen
 
@@ -16,7 +16,7 @@ flowchart LR
     Next -->|REST, cookies de sesión y CSRF| Spring["Spring Boot<br/>monolito modular"]
     Mobile["Cliente móvil compatible"] -->|REST + Bearer token| Spring
     Spring -->|JPA / JDBC| PG[("PostgreSQL")]
-    Flyway["Flyway<br/>migraciones V1–V17"] --> PG
+Flyway["Flyway<br/>migraciones V1–V20"] --> PG
     Browser -->|carrito y vistos recientes| Local["localStorage del navegador"]
 ```
 
@@ -41,7 +41,7 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 ### Datos y migraciones
 
 - PostgreSQL es la fuente compartida para usuarios, roles, catálogo, inventario, pedidos, ventas y demás registros del negocio.
-- Las migraciones viven en `backend/src/main/resources/db/migration`. El repositorio contiene las versiones V1 a V17; el backend ejecuta las pendientes al arrancar.
+- Las migraciones viven en `backend/src/main/resources/db/migration`. El repositorio contiene las versiones V1 a V20; el backend ejecuta las pendientes al arrancar. V19 incorpora el permiso `inventory:delete` para administradores y superadministradores. V20 crea el catálogo persistente de ubicaciones y recupera los valores existentes.
 - Las imágenes de producto pueden almacenarse en PostgreSQL; el servicio limita las imágenes cargadas como datos embebidos a 140 KB.
 - El equipo puede usar una base PostgreSQL compartida en Neon con el perfil Spring `team`. La configuración privada va en `backend/.env.team`, excluido por Git. Este documento no incluye la URL del servidor ni credenciales.
 - `backend/README.md` explica la inicialización local y compartida, los perfiles y las variables requeridas. Coordina los arranques contra la base compartida: iniciar Spring puede aplicar migraciones pendientes.
@@ -51,13 +51,16 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 ### Tienda y cuenta de cliente
 
 - Catálogo persistido con búsqueda, categorías y ordenamiento; detalle de producto, ofertas y anuncios.
-- Carrito local, validación de descuentos, checkout y confirmación de pedido.
+- Carrito local, validación de descuentos, cotización vigente del checkout y confirmación de pedido. Si cambian los precios o el descuento, la persona revisa el nuevo total antes de confirmar.
+- Los pedidos públicos usan una clave de idempotencia persistida; la repetición de un envío no vuelve a descontar inventario. La recuperación solo devuelve referencia, total y estado de pago.
 - Registro e inicio de sesión de clientes, historial de pedidos propios, lista de deseos y notificaciones.
 
 ### Panel administrativo y operación
 
 - Dashboard, productos, marcas, categorías, inventario, compras, ventas, clientes y proveedores.
 - Administración de roles y permisos; Spring valida los permisos al ejecutar operaciones protegidas.
+- El personal activo puede eliminarse desde Usuarios y equipo; se cierran sus sesiones y las referencias operativas conservan el historial. El último Súper Administrador activo no se puede desactivar, cambiar de rol ni eliminar.
+- El inventario permite eliminar productos sin relaciones; los productos con movimientos, ventas, compras, ofertas, listas de deseos, proveedores o pedidos se desactivan para preservar la trazabilidad. Las ubicaciones se guardan como catálogo persistente en PostgreSQL y quedan disponibles como sugerencias; el personal puede escribir una nueva ubicación al guardar un producto.
 - Promociones, anuncios y códigos de descuento administrados desde el panel.
 - Punto de venta presencial con efectivo o tarjeta simulada, artículos, cliente, monto recibido y cambio.
 - Ingresos y egresos en el módulo de contabilidad.
@@ -74,6 +77,9 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 - Spring es la autoridad para identidad, sesión y permisos administrativos.
 - La sesión web se persiste con Spring Session JDBC. La cookie se configura como `HttpOnly` y `SameSite=Lax`; `Secure` depende del perfil y el entorno.
 - Las escrituras web requieren token CSRF. El BFF de Next.js reenvía el token y la cookie a Spring.
+- El catálogo público usa una lista explícita de campos y no expone costo ni ubicación interna. Los envíos de pedido y cotización tienen límites temporales por IP.
+- Next genera una CSP con nonce por respuesta HTML; Caddy añade CSP restrictiva a la API y los encabezados HSTS, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options` y `X-Content-Type-Options`.
+- Caddy y el BFF limitan solicitudes a 2 MB; Spring aplica límites por IP a los endpoints públicos costosos. Las sesiones web tienen 30 minutos de inactividad y 8 horas de vida máxima.
 - Las rutas móviles usan tokens Bearer opacos; el backend conserva el hash del token y carga los permisos vigentes al autenticar la solicitud.
 - En producción, usa HTTPS entre navegador, Next.js y Spring; mantén el backend en una red privada y OpenAPI desactivado salvo que se necesite expresamente.
 - No guardes contraseñas, tokens, URL con credenciales ni archivos `.env` en Git. Los archivos `.env.*` están ignorados.

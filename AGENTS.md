@@ -75,7 +75,7 @@ Claves locales relevantes: `nexo.cart.v1` y `nexo-recent-products-v1`. El checko
 - No conectes un proveedor de pago real ni guardes datos financieros. Los pagos actuales son simulaciones.
 - Mantén textos y errores de interfaz en español. Formatea importes con el helper `formatQ` de `src/data/mockData.ts`.
 - No actualices dependencias ni cambies infraestructura para corregir un problema local si el cambio no lo requiere.
-- Revisa `git diff` antes de integrar. Para cambios de frontend, ejecuta `npm run build`; este repositorio no define un script de pruebas frontend en `package.json`.
+- Revisa `git diff` antes de integrar. Para cambios de frontend, ejecuta `npm run test:coverage` y `npm run build`.
 
 ## Zonas que requieren cuidado
 

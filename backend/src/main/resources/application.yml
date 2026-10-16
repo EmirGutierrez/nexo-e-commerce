@@ -43,8 +43,13 @@ springdoc:
     enabled: ${OPENAPI_ENABLED:false}
 
 nexo:
+  security:
+    mfa:
+      encryption-key: ${MFA_ENCRYPTION_KEY:}
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000}
+    session:
+      absolute-timeout: ${SESSION_ABSOLUTE_TIMEOUT:8h}
   mobile:
     access-token-lifetime: ${MOBILE_ACCESS_TOKEN_LIFETIME:7d}
   bootstrap:

@@ -14,5 +14,5 @@ public interface AppUserRepository extends JpaRepository<AppUserEntity, UUID> {
 
     @EntityGraph(attributePaths = {"role", "role.permissions"})
     List<AppUserEntity> findAllByOrderByDisplayNameAsc();
-    long countByRole_Code(String roleCode);
+    long countByRole_CodeAndStatus(String roleCode, UserStatus status);
 }

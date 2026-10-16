@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
@@ -18,9 +19,11 @@ import gt.nexo.commerce.shared.errors.InvalidCredentialsException;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.util.Optional;
+import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.core.Authentication;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.authentication.session.SessionAuthenticationStrategy;
 import org.springframework.security.web.context.SecurityContextRepository;
@@ -37,9 +40,10 @@ class AuthenticationServiceTest {
     private final AppUserRepository users = mock(AppUserRepository.class);
     private final UserAccountService userAccountService = mock(UserAccountService.class);
     private final PasswordEncoder passwordEncoder = mock(PasswordEncoder.class);
+    private final MfaService mfaService = mock(MfaService.class);
     private final AuthenticationService service = new AuthenticationService(
             authenticationManager, securityContextRepository, sessionAuthenticationStrategy,
-            users, userAccountService, passwordEncoder);
+            users, userAccountService, passwordEncoder, mfaService);
 
     @Test
     void reportsDisabledAccountsOnlyAfterVerifyingTheirPasswordForWebAndMobile() {
@@ -73,5 +77,40 @@ class AuthenticationServiceTest {
 
         assertThrows(InvalidCredentialsException.class,
                 () -> service.authenticateMobile(new LoginRequest(EMAIL, PASSWORD)));
+    }
+
+    @Test
+    void verifiesMfaAfterPasswordAuthenticationAndBeforeIssuingMobileSession() {
+        UUID accountId = UUID.randomUUID();
+        AppUserEntity account = mock(AppUserEntity.class);
+        NexoUserPrincipal principal = mock(NexoUserPrincipal.class);
+        Authentication authentication = mock(Authentication.class);
+        when(authentication.getPrincipal()).thenReturn(principal);
+        when(principal.getId()).thenReturn(accountId);
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        when(users.findById(accountId)).thenReturn(Optional.of(account));
+
+        service.authenticateMobile(new LoginRequest(EMAIL, PASSWORD, "123456"));
+
+        verify(mfaService).verifyLogin(accountId, "123456");
+        verify(account).recordSuccessfulLogin(any());
+    }
+
+    @Test
+    void rejectsMfaChallengeBeforeRecordingSuccessfulLogin() {
+        UUID accountId = UUID.randomUUID();
+        AppUserEntity account = mock(AppUserEntity.class);
+        NexoUserPrincipal principal = mock(NexoUserPrincipal.class);
+        Authentication authentication = mock(Authentication.class);
+        when(authentication.getPrincipal()).thenReturn(principal);
+        when(principal.getId()).thenReturn(accountId);
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        doThrow(MfaChallengeException.required()).when(mfaService).verifyLogin(accountId, null);
+
+        assertThrows(MfaChallengeException.class,
+                () -> service.authenticateMobile(new LoginRequest(EMAIL, PASSWORD)));
+
+        verify(account, never()).recordSuccessfulLogin(any());
+        verify(users, never()).findById(accountId);
     }
 }
