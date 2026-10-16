@@ -16,7 +16,7 @@ flowchart LR
     Next -->|REST, cookies de sesión y CSRF| Spring["Spring Boot<br/>monolito modular"]
     Mobile["Cliente móvil compatible"] -->|REST + Bearer token| Spring
     Spring -->|JPA / JDBC| PG[("PostgreSQL")]
-Flyway["Flyway<br/>migraciones V1–V19"] --> PG
+Flyway["Flyway<br/>migraciones V1–V20"] --> PG
     Browser -->|carrito y vistos recientes| Local["localStorage del navegador"]
 ```
 
@@ -41,7 +41,7 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 ### Datos y migraciones
 
 - PostgreSQL es la fuente compartida para usuarios, roles, catálogo, inventario, pedidos, ventas y demás registros del negocio.
-- Las migraciones viven en `backend/src/main/resources/db/migration`. El repositorio contiene las versiones V1 a V19; el backend ejecuta las pendientes al arrancar. V19 incorpora el permiso `inventory:delete` para administradores y superadministradores.
+- Las migraciones viven en `backend/src/main/resources/db/migration`. El repositorio contiene las versiones V1 a V20; el backend ejecuta las pendientes al arrancar. V19 incorpora el permiso `inventory:delete` para administradores y superadministradores. V20 crea el catálogo persistente de ubicaciones y recupera los valores existentes.
 - Las imágenes de producto pueden almacenarse en PostgreSQL; el servicio limita las imágenes cargadas como datos embebidos a 140 KB.
 - El equipo puede usar una base PostgreSQL compartida en Neon con el perfil Spring `team`. La configuración privada va en `backend/.env.team`, excluido por Git. Este documento no incluye la URL del servidor ni credenciales.
 - `backend/README.md` explica la inicialización local y compartida, los perfiles y las variables requeridas. Coordina los arranques contra la base compartida: iniciar Spring puede aplicar migraciones pendientes.
@@ -59,8 +59,8 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 
 - Dashboard, productos, marcas, categorías, inventario, compras, ventas, clientes y proveedores.
 - Administración de roles y permisos; Spring valida los permisos al ejecutar operaciones protegidas.
-- El personal activo puede eliminarse desde Usuarios y equipo; se cierran sus sesiones y las referencias operativas conservan el historial. El último Súper Administrador no se puede eliminar.
-- El inventario permite eliminar productos sin relaciones; los productos con movimientos, ventas, compras, ofertas, listas de deseos, proveedores o pedidos se desactivan para preservar la trazabilidad. Las ubicaciones se guardan como texto por producto y pueden reutilizarse como sugerencias.
+- El personal activo puede eliminarse desde Usuarios y equipo; se cierran sus sesiones y las referencias operativas conservan el historial. El último Súper Administrador activo no se puede desactivar, cambiar de rol ni eliminar.
+- El inventario permite eliminar productos sin relaciones; los productos con movimientos, ventas, compras, ofertas, listas de deseos, proveedores o pedidos se desactivan para preservar la trazabilidad. Las ubicaciones se guardan como catálogo persistente en PostgreSQL y quedan disponibles como sugerencias; el personal puede escribir una nueva ubicación al guardar un producto.
 - Promociones, anuncios y códigos de descuento administrados desde el panel.
 - Punto de venta presencial con efectivo o tarjeta simulada, artículos, cliente, monto recibido y cambio.
 - Ingresos y egresos en el módulo de contabilidad.

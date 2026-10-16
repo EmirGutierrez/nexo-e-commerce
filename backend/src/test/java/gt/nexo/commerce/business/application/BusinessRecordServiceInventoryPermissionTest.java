@@ -103,6 +103,28 @@ class BusinessRecordServiceInventoryPermissionTest {
     }
 
     @Test
+    void listsSavedInventoryLocationsWithTheInventoryViewPermission() {
+        List<String> locations = List.of("Bodega A", "Bodega B");
+        when(permissions.has(authentication, "inventory", "view")).thenReturn(true);
+        doReturn(locations).when(jdbc).queryForList(anyString(), eq(String.class));
+
+        assertSame(locations, service.listInventoryLocations());
+
+        verify(permissions).has(authentication, "inventory", "view");
+        verify(jdbc).queryForList(org.mockito.ArgumentMatchers.contains("FROM inventory_locations"), eq(String.class));
+    }
+
+    @Test
+    void deniesInventoryLocationListingWithoutInventoryViewPermission() {
+        when(permissions.has(authentication, "inventory", "view")).thenReturn(false);
+
+        assertThrows(AccessDeniedException.class, service::listInventoryLocations);
+
+        verify(permissions).has(authentication, "inventory", "view");
+        verifyNoInteractions(jdbc);
+    }
+
+    @Test
     void deniesInventoryProductUpdatesWithoutInventoryEditPermission() {
         when(permissions.has(authentication, "inventory", "edit")).thenReturn(false);
 

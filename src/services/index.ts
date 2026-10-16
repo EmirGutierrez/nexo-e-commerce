@@ -194,6 +194,7 @@ function mapSupplier(record: ApiRecord): Supplier {
 export const inventoryService = {
   summary: () => apiClient.get<{ products: number; totalUnits: number; lowStock: number; outOfStock: number }>('/api/business/inventory/summary'),
   movements: () => apiClient.get<JsonRecord[]>('/api/business/inventory/movements'),
+  locations: () => apiClient.get<string[]>('/api/business/inventory/locations'),
   products: async (): Promise<Product[]> => (await apiClient.get<ApiRecord[]>('/api/business/inventory/products')).map(mapProduct),
 };
 const inventoryProductRecords = () => apiClient.get<ApiRecord[]>('/api/business/inventory/products');

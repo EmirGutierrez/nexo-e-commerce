@@ -96,6 +96,15 @@ public class BusinessRecordService {
                 rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()));
     }
 
+    @Transactional(readOnly = true)
+    public List<String> listInventoryLocations() {
+        authorize("inventory", "view");
+        return jdbc.queryForList("""
+                SELECT location_name FROM inventory_locations
+                ORDER BY LOWER(location_name), location_name
+                """, String.class);
+    }
+
     @Transactional
     public BusinessRecordResponse create(String resource, Map<String, Object> input) {
         String normalized = normalize(resource);
@@ -1089,6 +1098,7 @@ public class BusinessRecordService {
                         number(field(data, "stock", "Existencias"), 0), defaultText(field(data, "status", "Estado"), "Activo"),
                         optionalText(field(data, "image", "Imagen")), defaultText(field(data, "description", "Descripción"), ""),
                         Boolean.TRUE.equals(data.get("featured")));
+                rememberInventoryLocation(field(data, "location", "Ubicación"));
             }
             case "suppliers" -> {
                 jdbc.update("""
@@ -1134,6 +1144,16 @@ public class BusinessRecordService {
                     decimal(field(data, "amount", "Monto")), defaultText(field(data, "status", "Estado"), "Registrado"), actor);
             default -> { }
         }
+    }
+
+    private void rememberInventoryLocation(Object value) {
+        String location = text(value);
+        if (location.isBlank()) return;
+        jdbc.update("""
+                INSERT INTO inventory_locations (location_name, normalized_name)
+                VALUES (?, LOWER(BTRIM(?)))
+                ON CONFLICT (normalized_name) DO NOTHING
+                """, location, location);
     }
 
     private void syncPurchase(UUID id, Map<String, Object> data) {

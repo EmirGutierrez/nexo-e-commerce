@@ -10,7 +10,7 @@ import { roleService } from '../services/roleService';
 const appContext = vi.hoisted(() => ({
   reportLowStock: vi.fn(),
   assignRole: vi.fn(),
-  user: null,
+  user: null as { id: string } | null,
   role: 'superadmin',
 }));
 
@@ -60,10 +60,12 @@ function fillRequiredInventoryFields() {
 beforeEach(() => {
   appContext.reportLowStock.mockClear();
   appContext.assignRole.mockClear();
+  appContext.user = null;
   vi.spyOn(adminTableService, 'list').mockResolvedValue([inventoryEntry]);
   vi.spyOn(adminTableService, 'create').mockResolvedValue({ id: 'product-2', data: inventoryEntry.data });
   vi.spyOn(inventoryService, 'products').mockResolvedValue([inventoryProduct]);
   vi.spyOn(brandService, 'list').mockResolvedValue([]);
+  vi.spyOn(inventoryService, 'locations').mockResolvedValue(['Bodega A', 'Bodega B']);
   vi.spyOn(roleService, 'can').mockReturnValue(true);
 });
 
@@ -153,13 +155,44 @@ describe('configuración y formularios de inventario', () => {
     expect((screen.getByLabelText('Marca') as HTMLSelectElement).value).toBe(brandId);
     const location = screen.getByLabelText('Ubicación') as HTMLInputElement;
     expect(location.value).toBe('Bodega A');
-    expect(document.querySelector('#inventory-location-options option[value="Bodega A"]')).toBeTruthy();
+    expect(document.querySelector('#inventory-location-options option[value="Bodega B"]')).toBeTruthy();
     fireEvent.change(location, { target: { value: 'Bodega nueva' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
 
     await waitFor(() => expect(update).toHaveBeenCalledWith('inventory', 'product-1', expect.objectContaining({
       Marca: brandId, Ubicación: 'Bodega nueva',
     })));
+  });
+
+  it('recarga el catálogo de ubicaciones después de guardar una nueva ubicación', async () => {
+    vi.mocked(inventoryService.locations)
+      .mockResolvedValueOnce(['Bodega A'])
+      .mockResolvedValueOnce(['Bodega A', 'Bodega C']);
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    await screen.findByText('Monitor');
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo producto' }));
+    fillRequiredInventoryFields();
+    fireEvent.change(screen.getByLabelText('Ubicación'), { target: { value: 'Bodega C' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+
+    await waitFor(() => expect(inventoryService.locations).toHaveBeenCalledTimes(2));
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo producto' }));
+    await waitFor(() => expect(document.querySelector('#inventory-location-options option[value="Bodega C"]')).toBeTruthy());
+  });
+
+  it('muestra error y permite reintentar cuando falla el catálogo de ubicaciones', async () => {
+    vi.mocked(inventoryService.locations)
+      .mockRejectedValueOnce(new Error('API no disponible'))
+      .mockResolvedValueOnce(['Bodega A']);
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    await screen.findByText('Monitor');
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo producto' }));
+
+    expect(await screen.findByText('API no disponible')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    await waitFor(() => expect(inventoryService.locations).toHaveBeenCalledTimes(2));
+    await waitFor(() => expect(screen.queryByText('API no disponible')).toBeNull());
+    expect(document.querySelector('#inventory-location-options option[value="Bodega A"]')).toBeTruthy();
   });
 
   it('muestra la acción de eliminar inventario y conserva el producto como inactivo si tiene historial', async () => {
@@ -221,6 +254,16 @@ describe('revocación de invitaciones del equipo', () => {
 
     await screen.findByText('Danny Velásquez');
     expect(screen.queryByRole('button', { name: 'Revocar invitación: Danny Velásquez' })).toBeNull();
+  });
+
+  it('oculta la eliminación de la cuenta propia incluso con permiso de administración', async () => {
+    appContext.user = { id: 'user-1' };
+    vi.mocked(adminTableService.list).mockResolvedValue([activeTeamUser]);
+
+    render(<AdminCrudModule section="users" config={usersConfig} />);
+
+    await screen.findByText('Administradora NEXO');
+    expect(screen.queryByRole('button', { name: 'Eliminar usuario del equipo: Administradora NEXO' })).toBeNull();
   });
 
   it('envía la revocación al endpoint de invitaciones del usuario', async () => {

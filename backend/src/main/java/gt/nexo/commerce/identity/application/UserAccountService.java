@@ -71,10 +71,11 @@ public class UserAccountService {
         boolean isSuperAdmin = authentication.getAuthorities().stream().anyMatch(authority -> authority.getAuthority().equals("ROLE_SUPERADMIN"));
         if (nextCode.equals("superadmin") && !isSuperAdmin) throw new AccessDeniedException("Solo el Súper Administrador puede asignar ese rol.");
         if (user.getRole().getCode().equals("superadmin") && !nextCode.equals("superadmin")) {
-            lockSuperadminRole();
-            long count = users.countByRole_Code("superadmin");
-            if (count <= 1) throw new BusinessRuleException(HttpStatus.CONFLICT, "LAST_SUPERADMIN", "No se puede retirar el último Súper Administrador.");
             if (!isSuperAdmin) throw new AccessDeniedException("Solo el Súper Administrador puede cambiar este rol protegido.");
+            lockSuperadminRole();
+            if (user.getStatus() == UserStatus.ACTIVE && users.countByRole_CodeAndStatus("superadmin", UserStatus.ACTIVE) <= 1) {
+                throw new BusinessRuleException(HttpStatus.CONFLICT, "LAST_SUPERADMIN", "No se puede retirar al último Súper Administrador activo.");
+            }
         }
         var role = roles.findById(nextCode).orElseThrow(() -> new BusinessRuleException(HttpStatus.BAD_REQUEST, "ROLE_NOT_FOUND", "El rol solicitado no existe."));
         user.changeRole(role);
@@ -91,10 +92,10 @@ public class UserAccountService {
         UserStatus next;
         try { next = UserStatus.valueOf(status); }
         catch (Exception exception) { throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "INVALID_USER_STATUS", "El estado de cuenta no es válido."); }
-        if (user.getRole().getCode().equals("superadmin") && next != UserStatus.ACTIVE) {
+        if (user.getRole().getCode().equals("superadmin") && user.getStatus() == UserStatus.ACTIVE && next != UserStatus.ACTIVE) {
             lockSuperadminRole();
-            if (users.countByRole_Code("superadmin") <= 1) throw new BusinessRuleException(HttpStatus.CONFLICT,
-                    "LAST_SUPERADMIN", "No se puede desactivar el último Súper Administrador.");
+            if (users.countByRole_CodeAndStatus("superadmin", UserStatus.ACTIVE) <= 1) throw new BusinessRuleException(HttpStatus.CONFLICT,
+                    "LAST_SUPERADMIN", "No se puede desactivar al último Súper Administrador activo.");
         }
         user.changeStatus(next);
     }
@@ -127,8 +128,10 @@ public class UserAccountService {
                     .anyMatch(authority -> authority.getAuthority().equals("ROLE_SUPERADMIN"));
             if (!actorIsSuperAdmin) throw new AccessDeniedException("Solo el Súper Administrador puede eliminar otra cuenta protegida.");
             lockSuperadminRole();
-            if (users.countByRole_Code("superadmin") <= 1) throw new BusinessRuleException(HttpStatus.CONFLICT,
-                    "LAST_SUPERADMIN", "No se puede eliminar el último Súper Administrador.");
+            if (user.getStatus() == UserStatus.ACTIVE && users.countByRole_CodeAndStatus("superadmin", UserStatus.ACTIVE) <= 1) {
+                throw new BusinessRuleException(HttpStatus.CONFLICT,
+                        "LAST_SUPERADMIN", "No se puede eliminar al último Súper Administrador activo.");
+            }
         }
 
         jdbc.update("DELETE FROM SPRING_SESSION WHERE LOWER(PRINCIPAL_NAME) = LOWER(?)", user.getEmail());

@@ -4,6 +4,7 @@ import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -76,13 +77,53 @@ class UserAccountServiceTest {
     void protectsTheLastSuperAdministrator() {
         when(targetRole.getCode()).thenReturn("superadmin");
         when(jdbc.queryForObject(contains("FOR UPDATE"), eq(String.class))).thenReturn("superadmin");
-        when(users.countByRole_Code("superadmin")).thenReturn(1L);
+        when(users.countByRole_CodeAndStatus("superadmin", UserStatus.ACTIVE)).thenReturn(1L);
 
         BusinessRuleException exception = assertThrows(BusinessRuleException.class,
                 () -> service.deleteTeamUser(userId, owner));
 
         assertEquals("LAST_SUPERADMIN", exception.getCode());
         verify(users, never()).delete(user);
+    }
+
+    @Test
+    void allowsDeletingAnInactiveSuperAdministratorWhenAnActiveOneRemains() {
+        when(targetRole.getCode()).thenReturn("superadmin");
+        when(user.getStatus()).thenReturn(UserStatus.DISABLED);
+        when(jdbc.queryForObject(contains("FOR UPDATE"), eq(String.class))).thenReturn("superadmin");
+
+        service.deleteTeamUser(userId, owner);
+
+        verify(users).delete(user);
+        verify(users, never()).countByRole_CodeAndStatus("superadmin", UserStatus.ACTIVE);
+    }
+
+    @Test
+    void protectsTheLastActiveSuperAdministratorFromDeactivation() {
+        when(targetRole.getCode()).thenReturn("superadmin");
+        when(jdbc.queryForObject(contains("FOR UPDATE"), eq(String.class))).thenReturn("superadmin");
+        when(users.countByRole_CodeAndStatus("superadmin", UserStatus.ACTIVE)).thenReturn(1L);
+        when(authorizer.has(owner, "users", "edit")).thenReturn(true);
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class,
+                () -> service.updateStatus(userId, "DISABLED", owner));
+
+        assertEquals("LAST_SUPERADMIN", exception.getCode());
+        verify(user, never()).changeStatus(UserStatus.DISABLED);
+    }
+
+    @Test
+    void protectsTheLastActiveSuperAdministratorFromRoleRemoval() {
+        when(targetRole.getCode()).thenReturn("superadmin");
+        when(jdbc.queryForObject(contains("FOR UPDATE"), eq(String.class))).thenReturn("superadmin");
+        when(users.countByRole_CodeAndStatus("superadmin", UserStatus.ACTIVE)).thenReturn(1L);
+        when(authorizer.has(owner, "users", "edit")).thenReturn(true);
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class,
+                () -> service.updateRole(userId, "admin", owner));
+
+        assertEquals("LAST_SUPERADMIN", exception.getCode());
+        verify(user, never()).changeRole(any(RoleEntity.class));
     }
 
     @Test

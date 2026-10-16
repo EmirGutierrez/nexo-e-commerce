@@ -33,6 +33,16 @@ class BusinessRecordControllerInventoryEndpointTest {
     }
 
     @Test
+    void listsSavedInventoryLocationsThroughTheInventoryService() {
+        List<String> locations = List.of("Bodega A", "Bodega B");
+        when(service.listInventoryLocations()).thenReturn(locations);
+
+        assertSame(locations, controller.inventoryLocations());
+
+        verify(service).listInventoryLocations();
+    }
+
+    @Test
     void updatesAnInventoryProductThroughTheInventoryService() {
         UUID id = UUID.randomUUID();
         Map<String, Object> data = Map.of("stock", 7);

@@ -51,6 +51,10 @@ public class BusinessRecordController {
     @Operation(summary = "Lista productos con el permiso de consulta de inventario.")
     public List<BusinessRecordResponse> inventoryProducts() { return service.listInventoryProducts(); }
 
+    @GetMapping("/inventory/locations")
+    @Operation(summary = "Lista las ubicaciones guardadas desde el inventario autorizado.")
+    public List<String> inventoryLocations() { return service.listInventoryLocations(); }
+
     @PutMapping("/inventory/products/{id}")
     @Operation(summary = "Actualiza un producto con el permiso de edición de inventario.")
     public BusinessRecordResponse updateInventoryProduct(@PathVariable UUID id, @RequestBody Map<String, Object> data) {

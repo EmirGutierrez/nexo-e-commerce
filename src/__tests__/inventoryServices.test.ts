@@ -24,6 +24,14 @@ describe('servicios de inventario', () => {
     expect(product.cost).toBeUndefined();
   });
 
+  it('consulta las ubicaciones persistentes mediante la API de inventario', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce(['Bodega A', 'Bodega B'] as never);
+
+    await expect(inventoryService.locations()).resolves.toEqual(['Bodega A', 'Bodega B']);
+
+    expect(get).toHaveBeenCalledWith('/api/business/inventory/locations');
+  });
+
   it('carga la tabla del inventario sin usar permisos de catálogo', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce([productRecord] as never);
 

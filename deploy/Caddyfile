@@ -18,5 +18,9 @@
 api.{$SITE_DOMAIN} {
 	import security_headers
 	encode zstd gzip
-	reverse_proxy backend:8080
+	reverse_proxy backend:8080 {
+		header_down -Strict-Transport-Security
+		header_down -X-Content-Type-Options
+		header_down -X-Frame-Options
+	}
 }
