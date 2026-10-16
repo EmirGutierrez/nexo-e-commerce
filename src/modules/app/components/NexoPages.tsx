@@ -12,7 +12,9 @@ import {
 import { categories, formatQ, orders, products, suppliers, users } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
 import { fetchCatalogFromApi, productService } from '../../products/services/productService';
-import { authService, businessSettingsService, checkoutService, dashboardService, productInventoryService, type BusinessProfileSettings } from '../../../services';
+import { authService, businessSettingsService, checkoutService, dashboardService, productInventoryService, type BusinessProfileSettings, type CheckoutQuote } from '../../../services';
+import { ApiError } from '../../../shared/services/http-client';
+import type { OrderSubmission } from '../../../services';
 import type { PaymentMethod, Product, Role, User } from '../../../types';
 import AccountingPage from '../../accounting/components/AccountingPage';
 import PurchasesPage from '../../purchases/components/PurchasesPage';
@@ -28,7 +30,6 @@ import { SeasonalSpotlight } from '../../commerce/components/CommercePages';
 import PublicAccountControls from './PublicAccountControls';
 import CustomerNotificationBell from '../../commerce/components/CustomerNotificationBell';
 import FloatingCartButton from './FloatingCartButton';
-import { ApiError } from '../../../shared/services/http-client';
 
 const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
   const icons: Record<string, typeof Box> = { arrow: ArrowUpRight, box: Box, user: UserCircle, check: CheckCircle2 };
@@ -340,6 +341,19 @@ export function Checkout() {
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [quote, setQuote] = useState<CheckoutQuote | null>(null);
+  const [acceptedQuoteFingerprint, setAcceptedQuoteFingerprint] = useState<string | null>(null);
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const completeCheckout = (result: OrderSubmission) => {
+    setDone(true);
+    try {
+      window.sessionStorage.setItem('nexo-confirmation-result', JSON.stringify({ paymentMethod: result.paymentMethod,
+        paymentStatus: result.paymentStatus, total: result.total, orderId: result.reference }));
+    } catch { /* La confirmación mínima también se envía por URL. */ }
+    clearCart();
+    const params = new URLSearchParams({ reference: result.reference, total: String(result.total), paymentMethod: result.paymentMethod, paymentStatus: result.paymentStatus });
+    window.setTimeout(() => router.replace(`/confirmation?${params.toString()}`), 700);
+  };
 
   useEffect(() => {
     if (!paymentMethods[payment]) setPayment(availableMethods[0] || 'card');
@@ -352,26 +366,46 @@ export function Checkout() {
       return;
     }
     try {
-      const result = await checkoutService.create({ customerName, customerEmail, customerPhone, address, paymentMethod: payment,
-        items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })) });
-      setDone(true);
-      window.sessionStorage.setItem('nexo-confirmation-result', JSON.stringify({ paymentMethod: payment,
-        paymentStatus: payment === 'transfer' ? 'pending_verification' : 'approved', total: result.total, reference: result.reference }));
-      clearCart();
-      window.setTimeout(() => router.push('/confirmation'), 700);
+      const items = cart.map((item) => ({ productId: item.id, quantity: item.quantity }));
+      const currentQuote = await checkoutService.quote({ items });
+      setQuote(currentQuote);
+      const fingerprint = JSON.stringify({ subtotal: currentQuote.subtotal, discount: currentQuote.discount, total: currentQuote.total,
+        items: currentQuote.items.map((item) => [item.productId, item.quantity, item.unitPrice, item.subtotal]).sort(([left], [right]) => String(left).localeCompare(String(right))) });
+      const displayedPricesChanged = currentQuote.items.some((pricedItem) => cart.find((item) => item.id === pricedItem.productId)?.price !== pricedItem.unitPrice);
+      const requiresReview = acceptedQuoteFingerprint === null
+        ? Math.abs(currentQuote.total - cartTotal) >= 0.01 || displayedPricesChanged
+        : acceptedQuoteFingerprint !== fingerprint;
+      if (requiresReview) {
+        setAcceptedQuoteFingerprint(fingerprint);
+        setPaymentError('Los precios o las existencias cambiaron. Revisa el total actualizado y vuelve a confirmar.');
+        return;
+      }
+      const idempotencyKey = idempotencyKeyRef.current || window.crypto.randomUUID();
+      idempotencyKeyRef.current = idempotencyKey;
+      try { window.sessionStorage.setItem('nexo-checkout-idempotency.v1', idempotencyKey); } catch { /* La clave en memoria permite reintentar en esta página. */ }
+      const result = await checkoutService.create({ customerName, customerEmail, customerPhone, address, paymentMethod: payment, items }, idempotencyKey, currentQuote.total);
+      completeCheckout(result);
     } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409 && idempotencyKeyRef.current) {
+        try {
+          const recovered = await checkoutService.findSubmission(idempotencyKeyRef.current);
+          if (recovered) { completeCheckout(recovered); return; }
+          idempotencyKeyRef.current = null;
+          try { window.sessionStorage.removeItem('nexo-checkout-idempotency.v1'); } catch { /* La clave se conserva en memoria. */ }
+        } catch { /* Conserva el error original y permite volver a comprobar. */ }
+      }
       setPaymentError(cause instanceof Error ? cause.message : 'No se pudo crear el pedido. Revisa tus datos e inténtalo de nuevo.');
     }
   };
 
-  useEffect(() => { if (!cart.length) router.replace('/cart'); }, [cart.length, router]);
-  if (!cart.length) return null;
+  useEffect(() => { if (!cart.length && !done) router.replace('/cart'); }, [cart.length, done, router]);
   if (done) return <div className="processing"><div className="loader" /><h2>Procesando tu pedido...</h2><p>Simulación de pago en curso; no se realizará ningún cobro.</p></div>;
+  if (!cart.length) return null;
   return <PublicShell><main className="checkout-page"><Link href="/cart" className="back-link"><ArrowLeft size={16} /> Volver al carrito</Link><div className="checkout-heading"><div><span className="eyebrow">Último paso</span><h1>Finaliza tu pedido</h1></div><div className="checkout-steps"><span className="done"><Check size={13} /> Carrito</span><i /><span className="current">2. Checkout</span><i /><span>3. Confirmación</span></div></div>
     <form className="checkout-layout" onSubmit={submit}><div className="checkout-form"><section className="form-section"><div className="section-title"><span>01</span><div><h2>Información de entrega</h2><p>¿Dónde enviamos tu pedido?</p></div></div><div className="form-grid"><Field label="Nombre completo" type="text" value={customerName} onChange={setCustomerName} placeholder="Tu nombre" /><Field label="Teléfono" type="tel" value={customerPhone} onChange={setCustomerPhone} placeholder="5555 5555" /></div><Field label="Correo electrónico" type="email" value={customerEmail} onChange={setCustomerEmail} placeholder="tu@correo.com" /><Field label="Dirección de entrega" type="text" value={address} onChange={setAddress} placeholder="Calle, avenida, zona y ciudad" /></section>
     <section className="form-section"><div className="section-title"><span>02</span><div><h2>Método de pago</h2><p>Opciones disponibles · solo demostración</p></div></div><div className="payment-options">{paymentMethods.card && <button type="button" className={payment === 'card' ? 'payment-option active' : 'payment-option'} onClick={() => { if (paymentMethods.card) { setPayment('card'); setPaymentError(''); } }}><CreditCard size={19} /><span><strong>Tarjeta simulada</strong><small>No se solicitan datos de tarjeta</small></span><span className="radio" /></button>}{paymentMethods.transfer && <button type="button" className={payment === 'transfer' ? 'payment-option active' : 'payment-option'} onClick={() => { if (paymentMethods.transfer) { setPayment('transfer'); setPaymentError(''); } }}><ArrowDownToLine size={19} /><span><strong>Transferencia bancaria</strong><small>Pendiente de verificación</small></span><span className="radio" /></button>}</div>
-    {!availableMethods.length ? <div className="payment-error" role="alert">No hay métodos de pago activos. Contacta al administrador antes de continuar.</div> : payment === 'card' ? <div className="transfer-hint"><CreditCard size={18} /><p>Pago de tarjeta simulado para esta demostración. <strong>No se realiza ningún cargo y no guardamos información financiera.</strong></p></div> : <div className="transfer-hint"><Wallet size={18} /><p>El pedido quedará <strong>pendiente de verificación</strong>. Esta demostración no procesa transferencias reales.</p></div>}
-    {paymentError && <div className="payment-error" role="alert">{paymentError}</div>}</section></div><aside className="summary-card checkout-summary"><h2>Tu pedido</h2>{cart.map((item) => <div className="mini-line" key={item.id}><span>{item.quantity} × {item.name}</span><strong>{formatQ(item.price * item.quantity)}</strong></div>)}<div className="summary-total"><span>Total a pagar</span><strong>{formatQ(cartTotal)}</strong></div><button className="button button-primary full" type="submit" disabled={!availableMethods.length}>Confirmar pedido <ArrowRight size={16} /></button><small><ShieldCheck size={14} /> Simulación únicamente. No se realizan cargos reales.</small></aside></form></main></PublicShell>;
+     {!availableMethods.length ? <div className="payment-error" role="alert">No hay métodos de pago activos. Contacta al administrador antes de continuar.</div> : payment === 'card' ? <div className="transfer-hint"><CreditCard size={18} /><p>Pago de tarjeta simulado para esta demostración. <strong>No se realiza ningún cargo y no guardamos información financiera.</strong></p></div> : <div className="transfer-hint"><Wallet size={18} /><p>El pedido quedará <strong>pendiente de verificación</strong>. Esta demostración no procesa transferencias reales.</p></div>}
+     {paymentError && <div className="payment-error" role="alert">{paymentError}</div>}</section></div><aside className="summary-card checkout-summary"><h2>Tu pedido</h2>{cart.map((item) => { const current = quote?.items.find((quoted) => quoted.productId === item.id); const unitPrice = current?.unitPrice ?? item.price; return <div className="mini-line" key={item.id}><span>{item.quantity} × {item.name}</span><strong>{formatQ(unitPrice * item.quantity)}</strong></div>; })}<div className="summary-total"><span>Total a pagar</span><strong>{formatQ(quote?.total ?? cartTotal)}</strong></div><button className="button button-primary full" type="submit" disabled={!availableMethods.length}>{acceptedQuoteFingerprint ? 'Confirmar total actualizado' : 'Confirmar pedido'} <ArrowRight size={16} /></button><small><ShieldCheck size={14} /> Simulación únicamente. No se realizan cargos reales.</small></aside></form></main></PublicShell>;
 }
 
 export function Confirmation() {

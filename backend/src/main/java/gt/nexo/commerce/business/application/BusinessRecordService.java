@@ -1,9 +1,14 @@
 package gt.nexo.commerce.business.application;
 
 import gt.nexo.commerce.business.api.BusinessRecordResponse;
+import gt.nexo.commerce.business.api.OrderQuoteResponse;
+import gt.nexo.commerce.business.api.OrderSubmissionResponse;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
 import gt.nexo.commerce.identity.application.PermissionAuthorizer;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -14,6 +19,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.HexFormat;
+import java.util.TreeMap;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -340,22 +347,72 @@ public class BusinessRecordService {
     }
 
     @Transactional
-    public BusinessRecordResponse createPublicOrder(Map<String, Object> input) {
-        return createOrder(input, null, null);
+    public OrderSubmissionResponse createPublicOrder(Map<String, Object> input, UUID idempotencyKey) {
+        return orderSubmission(createOrder(input, null, null, idempotencyKey));
     }
 
     @Transactional
-    public BusinessRecordResponse createCustomerOrder(Map<String, Object> input, UUID customerUserId) {
-        return createOrder(input, null, customerUserId);
+    public OrderSubmissionResponse createCustomerOrder(Map<String, Object> input, UUID customerUserId, UUID idempotencyKey) {
+        return orderSubmission(createOrder(input, null, customerUserId, idempotencyKey));
     }
 
     @Transactional
     public BusinessRecordResponse createStaffOrder(Map<String, Object> input) {
         authorize("orders", "create");
-        return createOrder(input, actorId(), null);
+        return createOrder(input, actorId(), null, null);
     }
 
-    private BusinessRecordResponse createOrder(Map<String, Object> input, UUID actor, UUID customerUserId) {
+    @Transactional(readOnly = true)
+    public OrderQuoteResponse quotePublicOrder(Map<String, Object> input) {
+        Map<UUID, Integer> quantities = orderQuantities(input);
+        List<OrderQuoteResponse.Item> items = new ArrayList<>();
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (var entry : quantities.entrySet()) {
+            Map<String, Object> product = publicProduct(entry.getKey());
+            int stock = number(field(product, "stock", "Existencias"), 0);
+            if (entry.getValue() > stock) throw conflict("Stock insuficiente para " + field(product, "name", "Producto") + ". Disponible: " + stock + ".");
+            BigDecimal unitPrice = promotions.priceForProduct(entry.getKey(), decimal(field(product, "price", "Valor")));
+            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(entry.getValue()));
+            items.add(new OrderQuoteResponse.Item(entry.getKey().toString(), text(field(product, "name", "Producto")),
+                    entry.getValue(), unitPrice, lineTotal));
+            subtotal = subtotal.add(lineTotal);
+        }
+        String code = text(input.get("discountCode")).toUpperCase(Locale.ROOT);
+        BigDecimal discount = BigDecimal.ZERO;
+        if (!code.isBlank()) {
+            Map<String, Object> validation = promotions.validateCode(code, subtotal);
+            if (!Boolean.TRUE.equals(validation.get("valid"))) throw conflict(text(validation.get("message")));
+            discount = decimal(validation.get("discount"));
+        }
+        return new OrderQuoteResponse(subtotal, discount, subtotal.subtract(discount), items);
+    }
+
+    @Transactional(readOnly = true)
+    public OrderSubmissionResponse publicOrderSubmission(UUID idempotencyKey) {
+        return jdbc.query("""
+                SELECT b.data::text AS data
+                FROM public_order_idempotency i
+                JOIN business_records b ON b.id = i.order_record_id AND b.resource_code = 'orders'
+                WHERE i.idempotency_key = ?
+                """, rs -> {
+            if (!rs.next()) throw missing();
+            Map<String, Object> data = readMap(rs.getString("data"));
+            return new OrderSubmissionResponse(text(data.get("orderNumber")), decimal(data.get("total")),
+                    text(data.get("paymentMethod")), text(data.get("paymentStatus")));
+        }, idempotencyKey);
+    }
+
+    private BusinessRecordResponse createOrder(Map<String, Object> input, UUID actor, UUID customerUserId, UUID idempotencyKey) {
+        if (idempotencyKey != null) {
+            String requestHash = orderRequestHash(input);
+            int inserted = jdbc.update("""
+                    INSERT INTO public_order_idempotency (idempotency_key, request_hash)
+                    VALUES (?, ?)
+                    ON CONFLICT (idempotency_key) DO NOTHING
+                    """, idempotencyKey, requestHash);
+            if (inserted == 0) return replayOrder(idempotencyKey, requestHash);
+            jdbc.update("DELETE FROM public_order_idempotency WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'");
+        }
         String customerName = text(input.get("customerName"));
         String customerEmail = text(input.get("customerEmail")).toLowerCase(Locale.ROOT);
         String paymentMethod = text(input.get("paymentMethod"));
@@ -364,16 +421,7 @@ public class BusinessRecordService {
         if (!customerEmail.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Ingresa un correo válido para el pedido.");
         if (address.isBlank() || address.length() > 500) throw invalid("Ingresa una dirección de entrega válida.");
         if (!Set.of("card", "transfer").contains(paymentMethod) || !paymentEnabled(paymentMethod)) throw conflict("El método de pago ya no está disponible.");
-        List<?> rawItems = input.get("items") instanceof List<?> list ? list : List.of();
-        if (rawItems.isEmpty()) throw invalid("El pedido debe incluir al menos un producto.");
-        Map<UUID, Integer> quantities = new LinkedHashMap<>();
-        for (Object item : rawItems) {
-            if (!(item instanceof Map<?, ?> row)) throw invalid("Uno de los artículos del pedido no es válido.");
-            UUID productId = parseUuid(row.get("productId"));
-            int quantity = number(row.get("quantity"), 0);
-            if (quantity < 1 || quantity > 100) throw invalid("La cantidad de cada producto debe estar entre 1 y 100.");
-            quantities.merge(productId, quantity, Integer::sum);
-        }
+        Map<UUID, Integer> quantities = orderQuantities(input);
         List<Map<String, Object>> orderItems = new ArrayList<>();
         BigDecimal subtotal = BigDecimal.ZERO;
         for (var entry : quantities.entrySet()) {
@@ -391,6 +439,9 @@ public class BusinessRecordService {
         String discountCode = text(input.get("discountCode")).toUpperCase(Locale.ROOT);
         BigDecimal discount = promotions.useCode(discountCode, subtotal);
         BigDecimal total = subtotal.subtract(discount);
+        if (input.get("expectedTotal") != null && decimal(input.get("expectedTotal")).compareTo(total) != 0) {
+            throw conflict("El total cambió mientras confirmabas el pedido. Revisa el precio actualizado y vuelve a confirmar.");
+        }
         UUID orderId = UUID.randomUUID();
         Instant now = Instant.now();
         String status = paymentMethod.equals("card") ? "En preparación" : "Pendiente de pago";
@@ -405,6 +456,7 @@ public class BusinessRecordService {
         data.put("orderNumber", "NX-" + orderId.toString().substring(0, 8).toUpperCase(Locale.ROOT));
         ensureCustomer(customerName, customerEmail, optionalText(input.get("customerPhone")));
         jdbc.update("INSERT INTO business_records (id, resource_code, data, status_code, created_by) VALUES (?, 'orders', ?::jsonb, ?, ?)", orderId, writeJson(data), status, actor);
+        if (idempotencyKey != null) jdbc.update("UPDATE public_order_idempotency SET order_record_id = ? WHERE idempotency_key = ?", orderId, idempotencyKey);
         syncProjection(orderId, "orders", data, actor);
         if (paymentMethod.equals("transfer")) saveTransferReceipt(orderId, input);
         for (var entry : quantities.entrySet()) changeStock(entry.getKey(), -entry.getValue(), "ORDER", "Reserva del pedido " + data.get("orderNumber"), orderId, actor);
@@ -412,6 +464,67 @@ public class BusinessRecordService {
                 "Recibimos " + data.get("orderNumber") + ". " + (paymentMethod.equals("transfer")
                         ? "Tu comprobante está pendiente de revisión." : "El pago con tarjeta fue simulado."), "order-received:" + orderId);
         return new BusinessRecordResponse(orderId, "orders", data, now, now);
+    }
+
+    private Map<UUID, Integer> orderQuantities(Map<String, Object> input) {
+        List<?> rawItems = input.get("items") instanceof List<?> list ? list : List.of();
+        if (rawItems.isEmpty()) throw invalid("El pedido debe incluir al menos un producto.");
+        Map<UUID, Integer> quantities = new LinkedHashMap<>();
+        for (Object item : rawItems) {
+            if (!(item instanceof Map<?, ?> row)) throw invalid("Uno de los artículos del pedido no es válido.");
+            UUID productId = parseUuid(row.get("productId"));
+            int quantity = number(row.get("quantity"), 0);
+            if (quantity < 1 || quantity > 100) throw invalid("La cantidad de cada producto debe estar entre 1 y 100.");
+            int combined = quantities.getOrDefault(productId, 0) + quantity;
+            if (combined > 100) throw invalid("La cantidad de cada producto no puede superar 100 unidades.");
+            quantities.put(productId, combined);
+        }
+        return quantities;
+    }
+
+    private BusinessRecordResponse replayOrder(UUID idempotencyKey, String requestHash) {
+        return jdbc.query("""
+                SELECT i.request_hash, b.id, b.resource_code, b.data::text AS data, b.created_at, b.updated_at
+                FROM public_order_idempotency i
+                LEFT JOIN business_records b ON b.id = i.order_record_id AND b.resource_code = 'orders'
+                WHERE i.idempotency_key = ?
+                FOR UPDATE OF i
+                """, rs -> {
+            if (!rs.next()) throw conflict("No se pudo confirmar el estado del pedido. Inténtalo nuevamente.");
+            if (!MessageDigest.isEqual(rs.getString("request_hash").getBytes(StandardCharsets.US_ASCII), requestHash.getBytes(StandardCharsets.US_ASCII))) {
+                throw conflict("Esta solicitud ya se usó para otro pedido. Actualiza la página e inténtalo nuevamente.");
+            }
+            UUID orderId = rs.getObject("id", UUID.class);
+            if (orderId == null) throw conflict("El pedido aún se está procesando. Consulta el estado antes de volver a enviarlo.");
+            return new BusinessRecordResponse(orderId, rs.getString("resource_code"), readMap(rs.getString("data")),
+                    rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+        }, idempotencyKey);
+    }
+
+    private OrderSubmissionResponse orderSubmission(BusinessRecordResponse order) {
+        Map<String, Object> data = order.data();
+        return new OrderSubmissionResponse(text(data.get("orderNumber")), decimal(data.get("total")),
+                text(data.get("paymentMethod")), text(data.get("paymentStatus")));
+    }
+
+    private String orderRequestHash(Map<String, Object> input) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(writeJson(canonicalize(input)).getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("No está disponible SHA-256.", exception);
+        }
+    }
+
+    private Object canonicalize(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sorted = new TreeMap<>();
+            map.forEach((key, item) -> sorted.put(String.valueOf(key), canonicalize(item)));
+            return sorted;
+        }
+        if (value instanceof List<?> list) return list.stream().map(this::canonicalize).toList();
+        return value;
     }
 
     @Transactional(readOnly = true)

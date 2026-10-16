@@ -37,3 +37,11 @@ docker compose --env-file deploy/.env.production -f compose.prod.yaml logs -f fr
 ```
 
 La base de datos persiste en el volumen `nexo-commerce-prod-data`. No uses `docker compose down -v` en producción: elimina ese volumen y sus datos.
+
+## Seguridad perimetral y respaldos
+
+Caddy aplica HSTS, CSP, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options` y `X-Content-Type-Options` a los hosts del sitio y de la API. El workflow valida el Caddyfile y la configuración de Compose antes de desplegar.
+
+El volumen de PostgreSQL conserva los datos ante el reinicio de contenedores, pero no es un respaldo: el repositorio todavía no programa copias cifradas fuera de la VPS ni verifica restauraciones. Antes de usar pedidos con datos reales, configura respaldos cifrados en un destino externo y ensaya la restauración en una base aislada. No guardes dumps con direcciones o teléfonos en el repositorio ni en un volumen sin protección.
+
+En DNS confirma que `@`, `www` y `api` apunten a la IPv4 de la VPS. Habilita DNSSEC y registros CAA en el proveedor cuando estén disponibles; esos cambios requieren acceso al panel del dominio y no se realizan desde este Compose.

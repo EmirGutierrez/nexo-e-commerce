@@ -8,6 +8,9 @@ import { roleService } from './roleService';
 type JsonRecord = Record<string, unknown>;
 interface ApiRecord<T extends JsonRecord = JsonRecord> { id: string; resource: string; data: T; createdAt?: string; updatedAt?: string }
 export type AdminTableRecord = Record<string, string | number>;
+export interface CheckoutQuote { subtotal: number; discount: number; total: number; items: { productId: string; productName: string; quantity: number; unitPrice: number; subtotal: number }[] }
+export interface OrderSubmission { reference: string; total: number; paymentMethod: PaymentMethod; paymentStatus: string }
+type CheckoutInput = { customerName: string; customerEmail: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[]; discountCode?: string; receiptImage?: string; receiptFileName?: string; receiptReference?: string };
 
 const business = {
   list: (resource: string) => apiClient.get<ApiRecord[]>(`/api/business/${encodeURIComponent(resource)}`),
@@ -265,13 +268,18 @@ export const paymentService = {
   },
 };
 export const checkoutService = {
-  create: (input: { customerName: string; customerEmail: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[]; discountCode?: string; receiptImage?: string; receiptFileName?: string; receiptReference?: string }) =>
-    apiClient.post<ApiRecord>('/api/catalog/orders', input).then((record) => ({
-      id: record.id, reference: stringValue(record.data, 'orderNumber') || record.id,
-      total: numberValue(record.data, 'total'), status: stringValue(record.data, 'status'),
-      paymentMethod: stringValue(record.data, 'paymentMethod') as PaymentMethod,
-      paymentStatus: stringValue(record.data, 'paymentStatus'),
-    })),
+  quote: (input: Pick<CheckoutInput, 'items' | 'discountCode'>) =>
+    apiClient.post<CheckoutQuote>('/api/catalog/orders/quote', input),
+  create: (input: CheckoutInput, idempotencyKey: string, expectedTotal: number) =>
+    apiClient.post<OrderSubmission>('/api/catalog/orders', { ...input, expectedTotal }, { 'Idempotency-Key': idempotencyKey }),
+  findSubmission: async (idempotencyKey: string): Promise<OrderSubmission | null> => {
+    try {
+      return await apiClient.get<OrderSubmission>(`/api/catalog/orders/submissions/${encodeURIComponent(idempotencyKey)}`);
+    } catch (issue) {
+      if (issue instanceof ApiError && issue.status === 404) return null;
+      throw issue;
+    }
+  },
 };
 export const transferService = {
   list: async () => (await business.list('orders')).filter((record) => stringValue(record.data, 'paymentMethod', 'payment') === 'transfer' || stringValue(record.data, 'payment') === 'Transferencia').map(mapOrder),

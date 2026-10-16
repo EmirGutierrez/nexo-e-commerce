@@ -1,7 +1,7 @@
 /** Cliente del BFF de Next.js. El navegador solo solicita rutas del mismo origen. */
 export interface ApiClient {
   get<T>(path: string): Promise<T>;
-  post<T>(path: string, body?: unknown): Promise<T>;
+  post<T>(path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T>;
   put<T>(path: string, body: unknown): Promise<T>;
   patch<T>(path: string, body: unknown): Promise<T>;
   delete<T>(path: string): Promise<T>;
@@ -197,12 +197,13 @@ async function getCsrfToken(): Promise<string> {
   return csrfToken;
 }
 
-async function request<T>(method: string, path: string, body?: unknown): Promise<T> {
+async function request<T>(method: string, path: string, body?: unknown, extraHeaders?: Record<string, string>): Promise<T> {
   const tabSessionId = await getTabSessionId();
   const headers: Record<string, string> = { Accept: 'application/json' };
   if (tabSessionId) headers[TAB_SESSION_HEADER] = tabSessionId;
   if (body !== undefined) headers['Content-Type'] = 'application/json';
   if (isWriteMethod(method)) headers['X-CSRF-TOKEN'] = await getCsrfToken();
+  for (const [name, value] of Object.entries(extraHeaders || {})) headers[name] = value;
 
   const response = await fetch(path, {
     method,
@@ -215,7 +216,7 @@ async function request<T>(method: string, path: string, body?: unknown): Promise
 
 export const apiClient: ApiClient = {
   get: <T,>(path: string) => request<T>('GET', path),
-  post: <T,>(path: string, body?: unknown) => request<T>('POST', path, body),
+  post: <T,>(path: string, body?: unknown, extraHeaders?: Record<string, string>) => request<T>('POST', path, body, extraHeaders),
   put: <T,>(path: string, body: unknown) => request<T>('PUT', path, body),
   patch: <T,>(path: string, body: unknown) => request<T>('PATCH', path, body),
   delete: <T,>(path: string) => request<T>('DELETE', path),

@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState, type ChangeEvent, type FormEvent } from 'react';
+import { useEffect, useMemo, useRef, useState, type ChangeEvent, type FormEvent } from 'react';
 import Link from 'next/link';
 import { useParams, useRouter } from 'next/navigation';
 import { ArrowDownToLine, ArrowLeft, ArrowRight, Check, ChevronDown, ChevronLeft, ChevronRight, CreditCard, Gift, Heart, Menu, Minus, Plus, Search, ShieldCheck, ShoppingCart, SlidersHorizontal, Sparkles, Tag, Trash2, Truck, Wallet, X } from 'lucide-react';
@@ -8,6 +8,8 @@ import { formatQ, products } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
 import { fetchCatalogFromApi } from '../../products/services/productService';
 import { checkoutService, customerPortalService } from '../../../services';
+import { ApiError } from '../../../shared/services/http-client';
+import type { CheckoutQuote, OrderSubmission } from '../../../services';
 import type { PaymentMethod, Product } from '../../../types';
 import { applyPromotion, emptyPromotionData, isPromotionActive, loadPromotionData, loadRecentlyViewed, recordRecentlyViewed, validateDiscountCode } from '../services/commerceDataService';
 import PublicAccountControls from '../../app/components/PublicAccountControls';
@@ -189,20 +191,66 @@ export function CheckoutExperience() {
   const [receiptImage, setReceiptImage] = useState('');
   const [receiptFileName, setReceiptFileName] = useState('');
   const [discount, setDiscount] = useState(0);
+  const [quote, setQuote] = useState<CheckoutQuote | null>(null);
+  const [acceptedQuoteFingerprint, setAcceptedQuoteFingerprint] = useState<string | null>(null);
+  const [recoveryStatus, setRecoveryStatus] = useState<'checking' | 'none' | 'unavailable'>('checking');
   const [delivery, setDelivery] = useState({ name: user?.name || '', email: user?.email || '', phone: '', address: '', city: 'Ciudad de Guatemala', reference: '' });
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const completionStartedRef = useRef(false);
   const availableMethods = (['card', 'transfer'] as const).filter((method) => paymentMethods[method]);
+  const cartFingerprint = JSON.stringify(cart.map((item) => [item.id, item.quantity]).sort(([left], [right]) => String(left).localeCompare(String(right))));
   useEffect(() => { if (!paymentMethods[payment]) setPayment(availableMethods[0] || 'card'); }, [paymentMethods, payment, availableMethods]);
   useEffect(() => {
     const code = readAppliedCode();
     if (code) validateDiscountCode(code, cartTotal).then((check) => setDiscount(check.valid ? Number(check.discount || 0) : 0)).catch(() => setDiscount(0));
   }, [cartTotal]);
-  useEffect(() => { if (cartLoaded && !cart.length && !done) router.replace('/cart'); }, [cartLoaded, cart.length, done, router]);
+  useEffect(() => { if (cartLoaded && recoveryStatus !== 'checking' && recoveryStatus !== 'unavailable' && !cart.length && !done) router.replace('/cart'); }, [cartLoaded, recoveryStatus, cart.length, done, router]);
+  useEffect(() => {
+    setQuote(null);
+    setAcceptedQuoteFingerprint(null);
+  }, [cartFingerprint]);
   const updateDelivery = (field: keyof typeof delivery) => (event: ChangeEvent<HTMLInputElement>) => setDelivery((current) => ({ ...current, [field]: event.target.value }));
   const chooseReceipt = async (event: ChangeEvent<HTMLInputElement>) => {
     setError('');
     const file = event.target.files?.[0];
     if (!file) { setReceiptImage(''); setReceiptFileName(''); return; }
     try { setReceiptImage(await compressImage(file)); setReceiptFileName(file.name); } catch (issue) { setReceiptImage(''); setReceiptFileName(''); setError(issue instanceof Error ? issue.message : 'No se pudo cargar el comprobante.'); }
+  };
+  const completeCheckout = (result: Pick<OrderSubmission, 'reference' | 'total' | 'paymentMethod' | 'paymentStatus'>) => {
+    if (completionStartedRef.current) return;
+    completionStartedRef.current = true;
+    const savedResult = { paymentMethod: result.paymentMethod, paymentStatus: result.paymentStatus, orderId: result.reference, total: result.total };
+    try { window.sessionStorage.setItem('nexo-confirmation-result', JSON.stringify(savedResult)); } catch { /* La confirmación también viaja en la URL sin datos personales. */ }
+    try { window.sessionStorage.removeItem('nexo-applied-discount'); } catch { /* Preferencia opcional. */ }
+    const params = new URLSearchParams({ reference: result.reference, total: String(result.total), paymentMethod: result.paymentMethod, paymentStatus: result.paymentStatus });
+    setDone(true);
+    cart.forEach((item) => removeFromCart(item.id));
+    window.setTimeout(() => router.replace(`/confirmation?${params.toString()}`), 700);
+  };
+  useEffect(() => {
+    if (!cartLoaded) return;
+    let active = true;
+    try {
+      const storedKey = window.sessionStorage.getItem('nexo-checkout-idempotency.v1');
+      if (!storedKey || !/^[0-9a-f-]{36}$/i.test(storedKey)) { setRecoveryStatus('none'); return () => { active = false; }; }
+      idempotencyKeyRef.current = storedKey;
+      checkoutService.findSubmission(storedKey).then((result) => {
+        if (!active) return;
+        setRecoveryStatus('none');
+        if (result) completeCheckout(result);
+      }).catch(() => { if (active) setRecoveryStatus('unavailable'); });
+    } catch { setRecoveryStatus('none'); /* sessionStorage puede estar bloqueado; la clave en memoria cubre reintentos de esta página. */ }
+    return () => { active = false; };
+  }, [cartLoaded]);
+  const retryRecovery = async () => {
+    const key = idempotencyKeyRef.current;
+    if (!key) { setRecoveryStatus('none'); return; }
+    setRecoveryStatus('checking');
+    try {
+      const result = await checkoutService.findSubmission(key);
+      setRecoveryStatus('none');
+      if (result) completeCheckout(result);
+    } catch { setRecoveryStatus('unavailable'); }
   };
   const submit = async (event: FormEvent) => {
     event.preventDefault(); setError('');
@@ -212,36 +260,79 @@ export function CheckoutExperience() {
     const code = readAppliedCode();
     setSubmitting(true);
     try {
+      const items = cart.map((item) => ({ productId: item.id, quantity: item.quantity }));
+      const currentQuote = await checkoutService.quote({ items, discountCode: code || undefined });
+      setQuote(currentQuote);
+      const quoteFingerprint = JSON.stringify({ subtotal: currentQuote.subtotal, discount: currentQuote.discount, total: currentQuote.total,
+        items: currentQuote.items.map((item) => [item.productId, item.quantity, item.unitPrice, item.subtotal]).sort(([left], [right]) => String(left).localeCompare(String(right))) });
+      const displayedTotal = Math.max(0, cartTotal - discount);
+      const displayedPricesChanged = currentQuote.items.some((pricedItem) => cart.find((item) => item.id === pricedItem.productId)?.price !== pricedItem.unitPrice);
+      const changedSinceDisplay = acceptedQuoteFingerprint === null
+        ? Math.abs(currentQuote.total - displayedTotal) >= 0.01 || displayedPricesChanged || Math.abs(currentQuote.discount - discount) >= 0.01
+        : acceptedQuoteFingerprint !== quoteFingerprint;
+      if (changedSinceDisplay) {
+        setAcceptedQuoteFingerprint(quoteFingerprint);
+        setError('Los precios, existencias o descuentos cambiaron. Revisa el total actualizado y vuelve a confirmar.');
+        return;
+      }
+      let idempotencyKey = idempotencyKeyRef.current;
+      if (!idempotencyKey) {
+        try {
+          const storedKey = window.sessionStorage.getItem('nexo-checkout-idempotency.v1');
+          idempotencyKey = storedKey && /^[0-9a-f-]{36}$/i.test(storedKey) ? storedKey : null;
+        } catch { /* Se conserva la clave solamente en memoria. */ }
+      }
+      idempotencyKey ||= window.crypto.randomUUID();
+      idempotencyKeyRef.current = idempotencyKey;
+      try { window.sessionStorage.setItem('nexo-checkout-idempotency.v1', idempotencyKey); } catch { /* La clave en memoria cubre reintentos de esta página. */ }
       const result = await checkoutService.create({
         customerName: delivery.name.trim(), customerEmail: delivery.email.trim(), customerPhone: delivery.phone.trim(),
         address: `${delivery.address.trim()}, ${delivery.city.trim()}${delivery.reference.trim() ? ` · ${delivery.reference.trim()}` : ''}`,
-        paymentMethod: payment, items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })),
+        paymentMethod: payment, items,
         discountCode: code, receiptImage: payment === 'transfer' ? receiptImage : undefined,
         receiptFileName: payment === 'transfer' ? receiptFileName : undefined,
         receiptReference: payment === 'transfer' ? delivery.reference.trim() : undefined,
-      });
-      try {
-        window.sessionStorage.setItem('nexo-confirmation-result', JSON.stringify({ paymentMethod: payment, paymentStatus: result.paymentStatus, orderId: result.reference, total: result.total }));
-        window.sessionStorage.removeItem('nexo-applied-discount');
-      } catch { /* El pedido demo sigue su curso aunque el navegador bloquee el almacenamiento de sesión. */ }
-      setDone(true);
-      cart.forEach((item) => removeFromCart(item.id));
-      window.setTimeout(() => router.push('/confirmation'), 700);
+      }, idempotencyKey, currentQuote.total);
+      completeCheckout(result);
     } catch (issue) {
+      if (issue instanceof ApiError && issue.status === 409 && idempotencyKeyRef.current) {
+        try {
+          const recovered = await checkoutService.findSubmission(idempotencyKeyRef.current);
+          if (recovered) { completeCheckout(recovered); return; }
+          idempotencyKeyRef.current = null;
+          try { window.sessionStorage.removeItem('nexo-checkout-idempotency.v1'); } catch { /* La clave se conserva en memoria si el storage está bloqueado. */ }
+        } catch { /* El mensaje original explica el conflicto; se conserva la clave para poder recuperarla. */ }
+      }
       setError(issue instanceof Error ? issue.message : 'No se pudo guardar el pedido. Verifica la conexión e inténtalo de nuevo.');
     } finally {
       setSubmitting(false);
     }
   };
-  if (!cart.length) return null;
+  if (!cart.length && recoveryStatus === 'checking') return <div className="processing" role="status"><div className="loader" /><h2>Verificando tu pedido...</h2><p>Estamos comprobando si el último envío quedó registrado.</p></div>;
+  if (!cart.length && recoveryStatus === 'unavailable') return <PublicShell><main className="confirmation"><div className="payment-error" role="alert">No pudimos verificar si el pedido quedó registrado. Comprueba tu conexión y vuelve a intentarlo.</div><button type="button" className="button button-primary" onClick={retryRecovery}>Volver a comprobar</button></main></PublicShell>;
   if (done) return <div className="processing"><div className="loader" /><h2>Procesando tu pedido...</h2><p>Simulación de pago en curso; no se realizará ningún cobro.</p></div>;
-  return <PublicShell><main className="checkout-page"><Link href="/cart" className="back-link"><ArrowLeft size={16} /> Volver al carrito</Link><div className="checkout-heading"><div><span className="eyebrow">Último paso</span><h1>Finaliza tu pedido</h1></div><div className="checkout-steps"><span className="done"><Check size={13} /> Carrito</span><i /><span className="current">2. Checkout</span><i /><span>3. Confirmación</span></div></div><form className="checkout-layout" onSubmit={submit}><div className="checkout-form"><section className="form-section"><div className="section-title"><span>01</span><div><h2>Información de entrega</h2><p>¿Dónde enviamos tu pedido?</p></div></div><div className="form-grid"><label className="form-field">Nombre completo<input required value={delivery.name} onChange={updateDelivery('name')} autoComplete="name" /></label><label className="form-field">Correo electrónico<input type="email" required value={delivery.email} onChange={updateDelivery('email')} autoComplete="email" /></label><label className="form-field">Teléfono<input required value={delivery.phone} onChange={updateDelivery('phone')} autoComplete="tel" /></label></div><label className="form-field">Dirección de entrega<input required value={delivery.address} onChange={updateDelivery('address')} autoComplete="street-address" /></label><div className="form-grid"><label className="form-field">Ciudad<input required value={delivery.city} onChange={updateDelivery('city')} autoComplete="address-level2" /></label><label className="form-field">Referencia (opcional)<input value={delivery.reference} onChange={updateDelivery('reference')} /></label></div></section><section className="form-section"><div className="section-title"><span>02</span><div><h2>Método de pago</h2><p>Opciones disponibles · solo demostración</p></div></div><div className="payment-options">{paymentMethods.card && <button type="button" className={payment === 'card' ? 'payment-option active' : 'payment-option'} onClick={() => setPayment('card')}><CreditCard size={19} /><span><strong>Tarjeta simulada</strong><small>No se solicitan datos de tarjeta</small></span><span className="radio" /></button>}{paymentMethods.transfer && <button type="button" className={payment === 'transfer' ? 'payment-option active' : 'payment-option'} onClick={() => setPayment('transfer')}><ArrowDownToLine size={19} /><span><strong>Transferencia bancaria</strong><small>Pendiente de verificación</small></span><span className="radio" /></button>}</div>{!availableMethods.length ? <div className="payment-error" role="alert">No hay métodos de pago activos. Contacta al administrador antes de continuar.</div> : payment === 'transfer' ? <div className="transfer-upload"><div className="transfer-hint"><Wallet size={18} /><p>El pedido quedará <strong>pendiente de verificación</strong>. Esta demostración no procesa transferencias reales.</p></div><label className="form-field">Comprobante de transferencia (JPG, PNG o WEBP, máximo 5 MB)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseReceipt} />{receiptImage && <img className="receipt-preview" src={receiptImage} alt="Vista previa del comprobante" />}</label></div> : <div className="transfer-hint"><CreditCard size={18} /><p>Pago de tarjeta simulado. <strong>No se realiza ningún cargo y no guardamos información financiera.</strong></p></div>}{error && <div className="payment-error" role="alert">{error}</div>}</section></div><aside className="summary-card checkout-summary"><h2>Tu pedido</h2>{cart.map((item) => <div className="mini-line" key={item.id}><span>{item.quantity} × {item.name}</span><strong>{formatQ(item.price * item.quantity)}</strong></div>)}<div><span>Subtotal</span><strong>{formatQ(cartTotal)}</strong></div>{discount > 0 && <div><span>Descuento</span><strong>−{formatQ(discount)}</strong></div>}<div className="summary-total"><span>Total a pagar</span><strong>{formatQ(Math.max(0, cartTotal - discount))}</strong></div><button className="button button-primary full" type="submit" disabled={!availableMethods.length || submitting}>{submitting ? 'Procesando…' : 'Confirmar pedido'} <ArrowRight size={16} /></button><small><ShieldCheck size={14} /> Simulación únicamente. No se realizan cargos reales.</small></aside></form></main></PublicShell>;
+  if (!cart.length) return null;
+  return <PublicShell><main className="checkout-page"><Link href="/cart" className="back-link"><ArrowLeft size={16} /> Volver al carrito</Link><div className="checkout-heading"><div><span className="eyebrow">Último paso</span><h1>Finaliza tu pedido</h1></div><div className="checkout-steps"><span className="done"><Check size={13} /> Carrito</span><i /><span className="current">2. Checkout</span><i /><span>3. Confirmación</span></div></div><form className="checkout-layout" onSubmit={submit}><div className="checkout-form"><section className="form-section"><div className="section-title"><span>01</span><div><h2>Información de entrega</h2><p>¿Dónde enviamos tu pedido?</p></div></div><div className="form-grid"><label className="form-field">Nombre completo<input required value={delivery.name} onChange={updateDelivery('name')} autoComplete="name" /></label><label className="form-field">Correo electrónico<input type="email" required value={delivery.email} onChange={updateDelivery('email')} autoComplete="email" /></label><label className="form-field">Teléfono<input required value={delivery.phone} onChange={updateDelivery('phone')} autoComplete="tel" /></label></div><label className="form-field">Dirección de entrega<input required value={delivery.address} onChange={updateDelivery('address')} autoComplete="street-address" /></label><div className="form-grid"><label className="form-field">Ciudad<input required value={delivery.city} onChange={updateDelivery('city')} autoComplete="address-level2" /></label><label className="form-field">Referencia (opcional)<input value={delivery.reference} onChange={updateDelivery('reference')} /></label></div></section><section className="form-section"><div className="section-title"><span>02</span><div><h2>Método de pago</h2><p>Opciones disponibles · solo demostración</p></div></div><div className="payment-options">{paymentMethods.card && <button type="button" className={payment === 'card' ? 'payment-option active' : 'payment-option'} onClick={() => setPayment('card')}><CreditCard size={19} /><span><strong>Tarjeta simulada</strong><small>No se solicitan datos de tarjeta</small></span><span className="radio" /></button>}{paymentMethods.transfer && <button type="button" className={payment === 'transfer' ? 'payment-option active' : 'payment-option'} onClick={() => setPayment('transfer')}><ArrowDownToLine size={19} /><span><strong>Transferencia bancaria</strong><small>Pendiente de verificación</small></span><span className="radio" /></button>}</div>{!availableMethods.length ? <div className="payment-error" role="alert">No hay métodos de pago activos. Contacta al administrador antes de continuar.</div> : payment === 'transfer' ? <div className="transfer-upload"><div className="transfer-hint"><Wallet size={18} /><p>El pedido quedará <strong>pendiente de verificación</strong>. Esta demostración no procesa transferencias reales.</p></div><label className="form-field">Comprobante de transferencia (JPG, PNG o WEBP, máximo 5 MB)<input type="file" accept="image/jpeg,image/png,image/webp" onChange={chooseReceipt} />{receiptImage && <img className="receipt-preview" src={receiptImage} alt="Vista previa del comprobante" />}</label></div> : <div className="transfer-hint"><CreditCard size={18} /><p>Pago de tarjeta simulado. <strong>No se realiza ningún cargo y no guardamos información financiera.</strong></p></div>}{error && <div className="payment-error" role="alert">{error}</div>}</section></div><aside className="summary-card checkout-summary"><h2>Tu pedido</h2>{cart.map((item) => { const current = quote?.items.find((quoted) => quoted.productId === item.id); const unitPrice = current?.unitPrice ?? item.price; return <div className="mini-line" key={item.id}><span>{item.quantity} × {item.name}</span><strong>{formatQ(unitPrice * item.quantity)}</strong></div>; })}<div><span>Subtotal</span><strong>{formatQ(quote?.subtotal ?? cartTotal)}</strong></div>{(quote?.discount ?? discount) > 0 && <div><span>Descuento</span><strong>−{formatQ(quote?.discount ?? discount)}</strong></div>}<div className="summary-total"><span>Total a pagar</span><strong>{formatQ(quote?.total ?? Math.max(0, cartTotal - discount))}</strong></div><button className="button button-primary full" type="submit" disabled={!availableMethods.length || submitting}>{submitting ? 'Verificando…' : acceptedQuoteFingerprint ? 'Confirmar total actualizado' : 'Confirmar pedido'} <ArrowRight size={16} /></button><small><ShieldCheck size={14} /> Simulación únicamente. No se realizan cargos reales.</small></aside></form></main></PublicShell>;
 }
 
 export function ConfirmationExperience() {
   const [result, setResult] = useState<{ paymentMethod?: PaymentMethod; paymentStatus?: string; orderId?: string; total?: number } | null>(null);
   useEffect(() => {
     try {
+      const params = new URLSearchParams(window.location.search);
+      const reference = params.get('reference');
+      const totalValue = Number(params.get('total'));
+      const paymentMethod = params.get('paymentMethod');
+      const paymentStatus = params.get('paymentStatus');
+      if (reference && /^[A-Za-z0-9-]{1,80}$/.test(reference) && Number.isFinite(totalValue) && totalValue >= 0 &&
+          (paymentMethod === 'card' || paymentMethod === 'transfer') && paymentStatus) {
+        setResult({ orderId: reference, total: totalValue, paymentMethod, paymentStatus });
+        try {
+          window.sessionStorage.removeItem('nexo-checkout-idempotency.v1');
+          window.sessionStorage.removeItem('nexo-confirmation-result');
+        } catch { /* La URL contiene la confirmación mínima si el almacenamiento está bloqueado. */ }
+        return;
+      }
       const saved = window.sessionStorage.getItem('nexo-confirmation-result');
       if (saved) setResult(JSON.parse(saved));
       else {

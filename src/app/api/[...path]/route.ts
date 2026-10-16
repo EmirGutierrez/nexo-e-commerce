@@ -88,10 +88,15 @@ async function forward(request: NextRequest, context: RouteContext<'/api/[...pat
   const headers = new Headers({ Accept: request.headers.get('accept') || 'application/json' });
   const contentType = request.headers.get('content-type');
   const csrfToken = request.headers.get('x-csrf-token');
+  const idempotencyKey = request.headers.get('idempotency-key');
+  const forwardedFor = request.headers.get('x-forwarded-for');
   const tabCookieName = sessionCookieName(request.headers.get(TAB_SESSION_HEADER));
   const session = tabCookieName ? request.cookies.get(tabCookieName)?.value : undefined;
   if (contentType) headers.set('Content-Type', contentType);
   if (csrfToken) headers.set('X-CSRF-TOKEN', csrfToken);
+  if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
+  // Caddy replaces client-supplied forwarding headers at the public edge.
+  if (forwardedFor) headers.set('X-Forwarded-For', forwardedFor);
   if (session) headers.set('Cookie', `${SESSION_COOKIE}=${session}`);
 
   const target = `${origin}/api/${path.map(encodeURIComponent).join('/')}${request.nextUrl.search}`;
@@ -108,6 +113,7 @@ async function forward(request: NextRequest, context: RouteContext<'/api/[...pat
       headers: {
         'Cache-Control': 'no-store',
         ...(upstream.headers.get('content-type') ? { 'Content-Type': upstream.headers.get('content-type')! } : {}),
+        ...(upstream.headers.get('retry-after') ? { 'Retry-After': upstream.headers.get('retry-after')! } : {}),
       },
     });
     relaySessionCookie(upstream, outgoing, request, tabCookieName);
