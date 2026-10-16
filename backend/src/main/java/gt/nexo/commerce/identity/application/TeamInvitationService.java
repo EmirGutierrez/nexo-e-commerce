@@ -83,6 +83,29 @@ public class TeamInvitationService {
     }
 
     @Transactional
+    public void revokePendingInvitation(UUID userId, Authentication authentication) {
+        if (!permissions.has(authentication, "users", "delete")) {
+            throw new AccessDeniedException("Se requiere users:delete.");
+        }
+
+        int deleted = jdbc.update("""
+                DELETE FROM app_user AS account
+                WHERE account.id = ?
+                  AND account.status = 'PENDING'
+                  AND account.role_code NOT IN ('customer', 'superadmin')
+                  AND EXISTS (
+                      SELECT 1 FROM user_invitations invitation
+                      WHERE invitation.user_id = account.id
+                        AND invitation.accepted_at IS NULL
+                  )
+                """, userId);
+        if (deleted != 1) {
+            throw new BusinessRuleException(HttpStatus.CONFLICT, "INVITATION_NOT_PENDING",
+                    "Solo se pueden revocar invitaciones pendientes que todavía no han sido aceptadas.");
+        }
+    }
+
+    @Transactional
     public void accept(String token, String rawPassword) {
         if (rawPassword == null || rawPassword.length() < 12) throw invalid("La contraseña debe tener al menos 12 caracteres.");
         if (token == null || token.isBlank()) throw invalid("El enlace de invitación no es válido.");

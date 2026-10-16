@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AdminCrudModule, { statusChoices, tableColumnWidth } from '../modules/products/components/AdminCrudModule';
 import { moduleConfig } from '../modules/app/components/NexoPages';
-import { adminTableService, brandService, inventoryService } from '../services';
+import { adminTableService, brandService, inventoryService, userService } from '../services';
 import { roleService } from '../services/roleService';
 
 const appContext = vi.hoisted(() => ({
@@ -37,6 +37,17 @@ const inventoryEntry = {
 const inventoryProduct = {
   id: 'product-1', name: 'Monitor', category: 'Pantallas', price: 149, image: '',
   description: 'Monitor de prueba', sku: 'MON-1', stock: 8, status: 'Activo' as const,
+};
+
+const usersConfig = {
+  title: 'Usuarios y equipo', description: 'Administra accesos y roles.', action: 'Invitar usuario',
+  columns: ['Nombre', 'Correo', 'Rol', 'Último acceso', 'Estado'], stats: [], rows: [],
+};
+const pendingInvitation = {
+  id: 'invitation-1', data: { Nombre: 'Danny Velásquez', Correo: 'danny@example.com', Rol: 'Administrador', 'Último acceso': 'Nunca', Estado: 'Pendiente' },
+};
+const activeTeamUser = {
+  id: 'user-1', data: { Nombre: 'Administradora NEXO', Correo: 'admin@example.com', Rol: 'Administradora', 'Último acceso': 'Hoy', Estado: 'Activo' },
 };
 
 function fillRequiredInventoryFields() {
@@ -137,5 +148,43 @@ describe('configuración y formularios de inventario', () => {
     expect(screen.getAllByLabelText('Imagen')).toHaveLength(1);
     expect((screen.getByLabelText('Publicación en tienda') as HTMLSelectElement).value).toBe('Activo');
     expect(screen.getByRole('option', { name: 'Inactivo' })).toBeTruthy();
+  });
+});
+
+describe('revocación de invitaciones del equipo', () => {
+  it('muestra eliminar solo en invitaciones pendientes y las quita tras confirmar', async () => {
+    vi.mocked(adminTableService.list).mockResolvedValue([pendingInvitation, activeTeamUser]);
+    const revoke = vi.spyOn(adminTableService, 'delete').mockResolvedValue(undefined);
+
+    render(<AdminCrudModule section="users" config={usersConfig} />);
+
+    const revokeButton = await screen.findByRole('button', { name: 'Revocar invitación: Danny Velásquez' });
+    expect(screen.queryByRole('button', { name: 'Revocar invitación: Administradora NEXO' })).toBeNull();
+
+    fireEvent.click(revokeButton);
+    expect(screen.getByText(/El enlace dejará de funcionar/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Revocar invitación' }));
+
+    await waitFor(() => expect(revoke).toHaveBeenCalledWith('users', 'invitation-1'));
+    await waitFor(() => expect(screen.queryByText('Danny Velásquez')).toBeNull());
+    expect(screen.getByRole('status').textContent).toContain('Invitación revocada');
+  });
+
+  it('no muestra la opción si el rol no tiene permiso users:delete', async () => {
+    vi.mocked(adminTableService.list).mockResolvedValue([pendingInvitation]);
+    vi.mocked(roleService.can).mockImplementation((_role, _module, action) => action !== 'delete');
+
+    render(<AdminCrudModule section="users" config={usersConfig} />);
+
+    await screen.findByText('Danny Velásquez');
+    expect(screen.queryByRole('button', { name: 'Revocar invitación: Danny Velásquez' })).toBeNull();
+  });
+
+  it('envía la revocación al endpoint de invitaciones del usuario', async () => {
+    const revoke = vi.spyOn(userService, 'revokeInvitation').mockResolvedValue(undefined);
+
+    await adminTableService.delete('users', 'invitation-1');
+
+    expect(revoke).toHaveBeenCalledWith('invitation-1');
   });
 });

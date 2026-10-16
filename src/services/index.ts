@@ -285,6 +285,7 @@ export const transferService = {
 export const userService = {
   list: async (): Promise<User[]> => (await apiClient.get<ApiUser[]>('/api/users')).map(mapApiUser),
   invite: async (input: { name: string; email: string; role: User['role'] }) => apiClient.post<{ id: string; email: string; status: string; token: string }>('/api/users/invitations', input),
+  revokeInvitation: (id: string) => apiClient.delete<void>(`/api/users/invitations/${encodeURIComponent(id)}`),
   updateProfile: async (name: string): Promise<User> => mapApiUser(await apiClient.patch<ApiUser>('/api/auth/me/profile', { name })),
 };
 export const dashboardService = {
@@ -435,7 +436,7 @@ export const adminTableService = {
     return { id: record.id, data: toAdminRow(section, dataWithId(record)) };
   },
   delete: async (section: string, id: string) => {
-    if (section === 'users') throw new Error('Las cuentas de usuario se desactivan para conservar la auditoría.');
+    if (section === 'users') return userService.revokeInvitation(id);
     await business.delete(resourceFor(section), id);
   },
 };

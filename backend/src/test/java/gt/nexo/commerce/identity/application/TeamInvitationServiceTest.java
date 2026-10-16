@@ -1,6 +1,7 @@
 package gt.nexo.commerce.identity.application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -13,6 +14,7 @@ import static org.mockito.Mockito.when;
 
 import gt.nexo.commerce.identity.api.dto.TeamInvitationRequest;
 import gt.nexo.commerce.identity.api.dto.TeamInvitationResponse;
+import gt.nexo.commerce.business.application.BusinessRuleException;
 import gt.nexo.commerce.identity.infrastructure.persistence.AppUserEntity;
 import gt.nexo.commerce.identity.infrastructure.persistence.AppUserRepository;
 import gt.nexo.commerce.identity.infrastructure.persistence.RoleEntity;
@@ -25,6 +27,7 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 class TeamInvitationServiceTest {
@@ -58,5 +61,40 @@ class TeamInvitationServiceTest {
         assertTrue(expiry.getValue().toInstant().isBefore(now.plusSeconds(49 * 60 * 60L)));
         assertEquals("PENDING", invitation.status());
         assertEquals(email, invitation.email());
+    }
+
+    @Test
+    void revokesOnlyAnUnacceptedPendingTeamInvitation() {
+        var userId = java.util.UUID.randomUUID();
+        var authentication = mock(Authentication.class);
+        when(permissions.has(authentication, "users", "delete")).thenReturn(true);
+        when(jdbc.update(contains("DELETE FROM app_user"), eq(userId))).thenReturn(1);
+
+        service.revokePendingInvitation(userId, authentication);
+
+        verify(jdbc).update(contains("account.status = 'PENDING'"), eq(userId));
+        verify(jdbc).update(contains("invitation.accepted_at IS NULL"), eq(userId));
+    }
+
+    @Test
+    void rejectsRevocationWhenTheInvitationWasAcceptedOrIsMissing() {
+        var userId = java.util.UUID.randomUUID();
+        var authentication = mock(Authentication.class);
+        when(permissions.has(authentication, "users", "delete")).thenReturn(true);
+        when(jdbc.update(contains("DELETE FROM app_user"), eq(userId))).thenReturn(0);
+
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class,
+                () -> service.revokePendingInvitation(userId, authentication));
+        assertEquals("INVITATION_NOT_PENDING", exception.getCode());
+    }
+
+    @Test
+    void requiresDeletePermissionBeforeRevokingAnInvitation() {
+        var authentication = mock(Authentication.class);
+
+        assertThrows(AccessDeniedException.class,
+                () -> service.revokePendingInvitation(java.util.UUID.randomUUID(), authentication));
+
+        org.mockito.Mockito.verifyNoInteractions(jdbc);
     }
 }
