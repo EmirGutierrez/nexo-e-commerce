@@ -5,6 +5,7 @@ import gt.nexo.commerce.identity.infrastructure.persistence.AppUserRepository;
 import gt.nexo.commerce.identity.infrastructure.persistence.RoleEntity;
 import gt.nexo.commerce.identity.infrastructure.persistence.RoleRepository;
 import gt.nexo.commerce.identity.infrastructure.persistence.UserStatus;
+import gt.nexo.commerce.identity.application.PasswordPolicy;
 import java.util.Locale;
 import java.util.UUID;
 import java.util.regex.Pattern;
@@ -36,8 +37,8 @@ public class BootstrapAdminConfiguration {
             String email = properties.email() == null ? "" : properties.email().trim().toLowerCase(Locale.ROOT);
             String password = properties.password() == null ? "" : properties.password();
             if (name.isEmpty() || name.length() > 160 || !EMAIL_PATTERN.matcher(email).matches()
-                    || password.length() < 16 || password.length() > 128) {
-                throw new IllegalStateException("Bootstrap requires a valid name and email plus a password of 16–128 characters.");
+                    || password.length() < 16 || password.length() > 128 || !PasswordPolicy.isWithinBcryptLimit(password)) {
+                throw new IllegalStateException("Bootstrap requires a valid name and email plus a password of 16–128 characters and at most 72 UTF-8 bytes.");
             }
             if (users.existsByRole_Code("superadmin")) {
                 throw new IllegalStateException("Bootstrap was enabled after a superadmin already existed. Disable BOOTSTRAP_ADMIN_ENABLED and remove the bootstrap secrets.");

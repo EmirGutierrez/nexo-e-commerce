@@ -1,9 +1,21 @@
 name: nexo-commerce-prod
 
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "5"
+
 services:
   postgres:
-    image: postgres:17-alpine
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
     restart: unless-stopped
+    user: postgres
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Define POSTGRES_DB in deploy/.env.production}
       POSTGRES_USER: ${DATABASE_USERNAME:?Define DATABASE_USERNAME in deploy/.env.production}
@@ -24,6 +36,14 @@ services:
       context: ./backend
       dockerfile: Dockerfile
     restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
     environment:
       SPRING_PROFILES_ACTIVE: prod
       SERVER_ADDRESS: 0.0.0.0
@@ -58,6 +78,11 @@ services:
       context: .
       dockerfile: Dockerfile.frontend
     restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
     environment:
       NODE_ENV: production
       HOSTNAME: 0.0.0.0
@@ -79,8 +104,18 @@ services:
       start_period: 30s
 
   caddy:
-    image: caddy:2-alpine
+    image: caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f
     restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_BIND_SERVICE
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
     environment:
       SITE_DOMAIN: ${SITE_DOMAIN:?Define SITE_DOMAIN in deploy/.env.production}
     ports:

@@ -108,6 +108,7 @@ public class TeamInvitationService {
     @Transactional
     public void accept(String token, String rawPassword) {
         if (rawPassword == null || rawPassword.length() < 12) throw invalid("La contraseña debe tener al menos 12 caracteres.");
+        if (!PasswordPolicy.isWithinBcryptLimit(rawPassword)) throw invalid("La contraseña no puede superar 72 bytes UTF-8 por el algoritmo de almacenamiento seguro.");
         if (token == null || token.isBlank()) throw invalid("El enlace de invitación no es válido.");
         UUID userId = jdbc.query("""
                 SELECT user_id FROM user_invitations

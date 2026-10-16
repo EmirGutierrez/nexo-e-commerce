@@ -24,7 +24,7 @@ En el repositorio, abre **Settings → Secrets and variables → Actions → New
 
 No compartas la llave privada en el repositorio ni en mensajes. El workflow elimina retornos de carro al cargarla para admitir copias desde Windows y valida su formato antes de conectar. La huella ED25519 de la VPS se fija en el workflow y se compara con la respuesta de `ssh-keyscan`; si Contabo cambia la llave del host, actualiza la huella solo después de verificarla desde la consola de la VPS.
 
-Cada push a `develop` despliega después de que pasen las pruebas frontend, el build de Next.js, las pruebas de Spring, el análisis de SonarQube Cloud con Quality Gate y la construcción de las imágenes Docker. Si falta `SONAR_TOKEN`, el análisis falla y bloquea el despliegue. Los pushes a otras ramas y los Pull Requests ejecutan CI, pero no despliegan. También se puede iniciar manualmente el workflow seleccionando `develop`.
+Cada push a `develop` ejecuta CI, pero no publica automáticamente en producción. Para desplegar, inicia manualmente el workflow seleccionando `develop`; se exige que pasen pruebas frontend y backend, SonarQube Cloud y la construcción de imágenes. Configura el entorno `production` en GitHub para pedir aprobación de responsables antes de entregar sus secretos al job. Los pushes a otras ramas y los Pull Requests ejecutan CI, pero no despliegan.
 
 El workflow usa `/opt/nexo-commerce` como directorio de despliegue. La primera ejecución requiere que el usuario SSH pueda crear ese directorio y ejecutar Docker; puedes prepararlo con `sudo install -d -o deploy -g deploy /opt/nexo-commerce`.
 
@@ -40,7 +40,7 @@ La base de datos persiste en el volumen `nexo-commerce-prod-data`. No uses `dock
 
 ## Seguridad perimetral y respaldos
 
-Caddy aplica HSTS, CSP, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options` y `X-Content-Type-Options` a los hosts del sitio y de la API. El workflow valida el Caddyfile y la configuración de Compose antes de desplegar.
+Caddy añade HSTS, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options` y `X-Content-Type-Options`; Next genera una CSP con nonce por respuesta HTML y Caddy añade una política restrictiva a la API. Caddy limita los cuerpos HTTP a 2 MB y el BFF vuelve a verificar el tamaño. El workflow valida el Caddyfile y la configuración de Compose antes de desplegar. Consulta [seguridad y operaciones](../docs/seguridad-y-operaciones.md) para los controles y las acciones pendientes en GitHub, DNS y VPS.
 
 El volumen de PostgreSQL conserva los datos ante el reinicio de contenedores, pero no es un respaldo: el repositorio todavía no programa copias cifradas fuera de la VPS ni verifica restauraciones. Antes de usar pedidos con datos reales, configura respaldos cifrados en un destino externo y ensaya la restauración en una base aislada. No guardes dumps con direcciones o teléfonos en el repositorio ni en un volumen sin protección.
 

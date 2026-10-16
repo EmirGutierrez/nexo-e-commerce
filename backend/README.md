@@ -38,7 +38,7 @@ El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWOR
 
 ## PostgreSQL compartido por el equipo
 
-`docker compose up -d` crea una base local persistente en la computadora actual; no comparte datos con otras computadoras. El equipo dispone de una instancia PostgreSQL compartida en Neon (proyecto `fancy-wind-65283432`, base **`nexo_commerce`**). Se restauraron allí los datos de demostración de la base local anterior y Spring aplicó las 17 migraciones Flyway. La API se conecta por TLS con verificación del certificado.
+`docker compose up -d` crea una base local persistente en la computadora actual; no comparte datos con otras computadoras. El equipo puede utilizar una instancia PostgreSQL compartida; el proveedor, host, nombre de proyecto y credenciales se distribuyen únicamente por el canal privado del equipo. La API se conecta por TLS con verificación del certificado.
 
 1. Danny comparte por un canal privado el archivo `backend/.env.team` de la instancia Neon. Cada integrante lo coloca en `backend/.env.team` dentro de su copia del repositorio. Si hay que reconstruirlo, copia `backend/env.team.example` como `backend/.env.team` y completa las credenciales recibidas. `.env.team` está ignorado por Git; no lo subas ni lo envíes dentro del repositorio.
 2. Si ya están levantados los servicios locales, detenlos desde la raíz con `docker compose down`. Esto conserva el volumen y los datos locales. Para levantar la aplicación usando la base compartida, ejecuta desde la raíz:
@@ -48,14 +48,14 @@ El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWOR
    docker compose -f compose.team.yaml ps
    ```
 
-   Este archivo Compose inicia Spring y Next.js y toma `DATABASE_URL`, `DATABASE_USERNAME` y `DATABASE_PASSWORD` de `backend/.env.team`; no inicia PostgreSQL local ni necesita `backend/.env`. La web queda en `http://localhost:13000` y Swagger en `http://localhost:18080/swagger-ui.html`. Para detenerlo usa `docker compose -f compose.team.yaml down`. Para DBeaver usa el host directo `ep-fancy-firefly-b5jrgfbt.c-7.us-east-2.aws.neon.tech`, puerto `5432`, base `nexo_commerce`, usuario `neondb_owner`, la contraseña recibida por privado y SSL activado.
+   Este archivo Compose inicia Spring y Next.js y toma `DATABASE_URL`, `DATABASE_USERNAME` y `DATABASE_PASSWORD` de `backend/.env.team`; no inicia PostgreSQL local ni necesita `backend/.env`. La web queda en `http://localhost:13000` y Swagger en `http://localhost:18080/swagger-ui.html`. Para detenerlo usa `docker compose -f compose.team.yaml down`. Para DBeaver usa los valores del archivo privado del equipo, con SSL activado. No copies el host, el usuario ni la contraseña en archivos públicos o en Git.
 3. Como alternativa sin Docker, desde `backend/` cada integrante inicia Spring con `mvn spring-boot:run -Dspring-boot.run.profiles=team`. Desde la raíz inicia Next.js con `npm run dev`; `.env.local` debe apuntar `SPRING_BACKEND_URL` a `http://localhost:8080`. Todas las APIs se conectarán al mismo PostgreSQL remoto y Flyway aplicará las migraciones pendientes al iniciar Spring.
 
 Cuentas, productos, pedidos, ventas, permisos, imágenes y demás filas persistidas en PostgreSQL serán comunes; el carrito guardado en cada navegador seguirá siendo local. Usa el mismo archivo privado en cada computadora para apuntar a la misma base. Configura copias de seguridad automáticas en el proveedor antes de guardar datos importantes. Las credenciales y la URL completa de conexión nunca deben guardarse en Git ni compartirse en canales públicos.
 
 ## Primer administrador
 
-No se crean cuentas ni contraseñas en Flyway. Para crear el primer administrador, configura temporalmente `BOOTSTRAP_ADMIN_ENABLED=true`, `BOOTSTRAP_ADMIN_NAME`, `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` en el entorno. La contraseña debe tener entre 16 y 128 caracteres. El proceso crea un único usuario `superadmin` y falla si ya existe uno. Después elimina las cuatro variables de bootstrap antes de reiniciar la API.
+No se crean cuentas ni contraseñas en Flyway. Para crear el primer administrador, configura temporalmente `BOOTSTRAP_ADMIN_ENABLED=true`, `BOOTSTRAP_ADMIN_NAME`, `BOOTSTRAP_ADMIN_EMAIL` y `BOOTSTRAP_ADMIN_PASSWORD` en el entorno. La contraseña debe tener entre 16 y 128 caracteres y no más de 72 bytes UTF-8 por el límite de BCrypt. El proceso crea un único usuario `superadmin` y falla si ya existe uno. Después elimina las cuatro variables de bootstrap antes de reiniciar la API.
 
 ## API de identidad
 
@@ -94,7 +94,7 @@ Las apps móviles usan un token opaco independiente de la cookie web. `POST /api
 | `GET /api/mobile/auth/me` | Bearer token | Usuario autenticado y permisos vigentes |
 | `POST /api/mobile/auth/logout` | Bearer token | `204 No Content` y revoca el token |
 
-La protección CSRF se conserva para las sesiones web con cookie. Las solicitudes autenticadas con `Bearer` no usan CSRF porque el sistema operativo no adjunta ese encabezado automáticamente como hace un navegador con una cookie. Usa HTTPS fuera del entorno local.
+La protección CSRF se conserva para las sesiones web con cookie. Solo las rutas `/api/mobile/**` aceptan autenticación móvil `Bearer` sin CSRF; el resto de la API mantiene el token CSRF incluso si recibe ese encabezado. Usa HTTPS fuera del entorno local.
 
 Para probar Expo Go en un teléfono físico dentro de la red local, inicia Spring con `SERVER_ADDRESS=0.0.0.0`, configura el firewall para permitir el acceso desde esa red y usa una URL alcanzable desde el dispositivo en `EXPO_PUBLIC_API_URL`. No expongas el servidor de desarrollo a Internet.
 

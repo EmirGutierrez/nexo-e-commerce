@@ -24,10 +24,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Configurar Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
           cache: npm
@@ -50,10 +50,10 @@ jobs:
     timeout-minutes: 20
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Configurar Java 21
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
           java-version: "21"
@@ -78,12 +78,12 @@ jobs:
       contents: read
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
         with:
           fetch-depth: 0
 
       - name: Configurar Java 21
-        uses: actions/setup-java@v6
+        uses: actions/setup-java@b843ebf9b913146b38da2eaa7aeddf76074ae1ad # v6
         with:
           distribution: temurin
           java-version: "21"
@@ -91,7 +91,7 @@ jobs:
           cache-dependency-path: backend/pom.xml
 
       - name: Configurar Node.js
-        uses: actions/setup-node@v7
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7
         with:
           node-version: 22
 
@@ -112,7 +112,7 @@ jobs:
         run: test -n "$SONAR_TOKEN" || { echo "Falta el secreto SONAR_TOKEN en GitHub Actions"; exit 1; }
 
       - name: Analizar frontend y backend
-        uses: SonarSource/sonarqube-scan-action@v8.3.0
+        uses: SonarSource/sonarqube-scan-action@d209202bc7d53ff1cc128f7f907dac145c9d6ae9 # v8.3.0
         env:
           SONAR_TOKEN: ${{ secrets.SONAR_TOKEN }}
         with:
@@ -129,13 +129,13 @@ jobs:
     timeout-minutes: 30
     steps:
       - name: Obtener código
-        uses: actions/checkout@v7
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
 
       - name: Validar Compose de producción
         run: docker compose --env-file deploy/production.env.example --file compose.prod.yaml config --quiet
 
       - name: Validar Caddyfile de producción
-        run: docker run --rm --volume "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" --env SITE_DOMAIN=example.com caddy:2-alpine caddy validate --config /etc/caddy/Caddyfile
+        run: docker run --rm --volume "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" --env SITE_DOMAIN=example.com caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f caddy validate --config /etc/caddy/Caddyfile
 
       - name: Construir imagen del frontend
         run: docker build --file Dockerfile.frontend --tag nexo-commerce-frontend:ci .
@@ -154,7 +154,7 @@ jobs:
       ${{
         always() &&
         github.ref == 'refs/heads/develop' &&
-        (github.event_name == 'push' || github.event_name == 'workflow_dispatch') &&
+        github.event_name == 'workflow_dispatch' &&
         needs.frontend.result == 'success' &&
         needs.backend.result == 'success' &&
         needs.docker.result == 'success' &&

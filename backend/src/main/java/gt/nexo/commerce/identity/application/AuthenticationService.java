@@ -7,6 +7,7 @@ import gt.nexo.commerce.identity.infrastructure.persistence.AppUserRepository;
 import gt.nexo.commerce.identity.infrastructure.persistence.UserStatus;
 import gt.nexo.commerce.shared.errors.InactiveAccountException;
 import gt.nexo.commerce.shared.errors.InvalidCredentialsException;
+import gt.nexo.commerce.shared.security.AuthenticatedSessionLifetimeFilter;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.time.Instant;
@@ -50,19 +51,22 @@ public class AuthenticationService {
     @Transactional(noRollbackFor = InvalidCredentialsException.class)
     public UserResponse login(LoginRequest request, HttpServletRequest servletRequest, HttpServletResponse servletResponse) {
         Authentication authentication = authenticateCredentials(request);
+        Instant authenticatedAt = Instant.now();
         sessionAuthenticationStrategy.onAuthentication(authentication, servletRequest, servletResponse);
         SecurityContext context = SecurityContextHolder.createEmptyContext();
         context.setAuthentication(authentication);
         SecurityContextHolder.setContext(context);
         securityContextRepository.saveContext(context, servletRequest, servletResponse);
+        var session = servletRequest.getSession(false);
+        if (session != null) session.setAttribute(AuthenticatedSessionLifetimeFilter.AUTHENTICATED_AT_ATTRIBUTE, authenticatedAt.toEpochMilli());
 
-        AppUserEntity account = recordSuccessfulLogin(authentication);
+        AppUserEntity account = recordSuccessfulLogin(authentication, authenticatedAt);
         return userAccountService.currentUser(account.getId());
     }
 
     @Transactional(noRollbackFor = InvalidCredentialsException.class)
     public AppUserEntity authenticateMobile(LoginRequest request) {
-        return recordSuccessfulLogin(authenticateCredentials(request));
+        return recordSuccessfulLogin(authenticateCredentials(request), Instant.now());
     }
 
     private Authentication authenticateCredentials(LoginRequest request) {
@@ -78,18 +82,17 @@ public class AuthenticationService {
             return authenticationManager.authenticate(
                     UsernamePasswordAuthenticationToken.unauthenticated(email, request.password()));
         } catch (AuthenticationException exception) {
-            existingAccount
-                    .filter(user -> user.getStatus() == UserStatus.ACTIVE)
-                    .ifPresent(user -> user.recordFailedLogin(Instant.now()));
+            // Authentication is throttled by source IP before Spring's password hash check.
+            // Avoid account lockout here: a remote attacker could otherwise disable any known account.
             throw new InvalidCredentialsException();
         }
     }
 
-    private AppUserEntity recordSuccessfulLogin(Authentication authentication) {
+    private AppUserEntity recordSuccessfulLogin(Authentication authentication, Instant authenticatedAt) {
         NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
         AppUserEntity account = users.findById(principal.getId())
                 .orElseThrow(() -> new AuthenticationServiceException("Authenticated account disappeared"));
-        account.recordSuccessfulLogin(Instant.now());
+        account.recordSuccessfulLogin(authenticatedAt);
         return account;
     }
 }

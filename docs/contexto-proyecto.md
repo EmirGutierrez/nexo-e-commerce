@@ -78,7 +78,8 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 - La sesión web se persiste con Spring Session JDBC. La cookie se configura como `HttpOnly` y `SameSite=Lax`; `Secure` depende del perfil y el entorno.
 - Las escrituras web requieren token CSRF. El BFF de Next.js reenvía el token y la cookie a Spring.
 - El catálogo público usa una lista explícita de campos y no expone costo ni ubicación interna. Los envíos de pedido y cotización tienen límites temporales por IP.
-- Caddy añade CSP, HSTS, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options` y `X-Content-Type-Options` a los sitios públicos y de API.
+- Next genera una CSP con nonce por respuesta HTML; Caddy añade CSP restrictiva a la API y los encabezados HSTS, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options` y `X-Content-Type-Options`.
+- Caddy y el BFF limitan solicitudes a 2 MB; Spring aplica límites por IP a los endpoints públicos costosos. Las sesiones web tienen 30 minutos de inactividad y 8 horas de vida máxima.
 - Las rutas móviles usan tokens Bearer opacos; el backend conserva el hash del token y carga los permisos vigentes al autenticar la solicitud.
 - En producción, usa HTTPS entre navegador, Next.js y Spring; mantén el backend en una red privada y OpenAPI desactivado salvo que se necesite expresamente.
 - No guardes contraseñas, tokens, URL con credenciales ni archivos `.env` en Git. Los archivos `.env.*` están ignorados.

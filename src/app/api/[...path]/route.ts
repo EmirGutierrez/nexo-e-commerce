@@ -8,6 +8,9 @@ const TAB_SESSION_HEADER = 'x-nexo-tab-session';
 const TAB_SESSION_ID_PATTERN = /^[a-f0-9]{48}$/;
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 const DOCKER_BACKEND_HOST = 'backend';
+const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_CONCURRENT_BODY_READS = 32;
+let activeBodyReads = 0;
 
 function isLocalHttp(request: NextRequest): boolean {
   return request.nextUrl.protocol === 'http:' && LOOPBACK_HOSTS.includes(request.nextUrl.hostname);
@@ -100,11 +103,40 @@ async function forward(request: NextRequest, context: RouteContext<'/api/[...pat
   if (session) headers.set('Cookie', `${SESSION_COOKIE}=${session}`);
 
   const target = `${origin}/api/${path.map(encodeURIComponent).join('/')}${request.nextUrl.search}`;
+  let body: ArrayBuffer | undefined;
+  if (!['GET', 'HEAD'].includes(request.method)) {
+    const declaredLength = request.headers.get('content-length');
+    if (declaredLength !== null && !/^\d+$/.test(declaredLength)) {
+      return NextResponse.json({ code: 'INVALID_CONTENT_LENGTH', message: 'El tamaño de la solicitud no es válido.' }, { status: 400 });
+    }
+    if (declaredLength !== null && Number(declaredLength) > MAX_REQUEST_BODY_BYTES) {
+      return NextResponse.json({ code: 'REQUEST_TOO_LARGE', message: 'La solicitud supera el tamaño permitido.' }, { status: 413 });
+    }
+    if (activeBodyReads >= MAX_CONCURRENT_BODY_READS) {
+      return NextResponse.json(
+        { code: 'REQUEST_CAPACITY', message: 'La API está ocupada. Intenta nuevamente en unos segundos.' },
+        { status: 429, headers: { 'Retry-After': '1' } },
+      );
+    }
+    activeBodyReads++;
+    try {
+      const boundedBody = await readBoundedBody(request);
+      if (boundedBody === null) {
+        return NextResponse.json({ code: 'REQUEST_TOO_LARGE', message: 'La solicitud supera el tamaño permitido.' }, { status: 413 });
+      }
+      body = boundedBody;
+    } catch {
+      return NextResponse.json({ code: 'INVALID_REQUEST_BODY', message: 'No se pudo leer la solicitud.' }, { status: 400 });
+    } finally {
+      activeBodyReads--;
+    }
+  }
+
   try {
     const upstream = await fetch(target, {
       method: request.method,
       headers,
-      body: ['GET', 'HEAD'].includes(request.method) ? undefined : await request.arrayBuffer(),
+      body,
       cache: 'no-store',
       redirect: 'manual',
     });
@@ -132,3 +164,34 @@ export const POST = forward;
 export const PUT = forward;
 export const PATCH = forward;
 export const DELETE = forward;
+
+async function readBoundedBody(request: NextRequest): Promise<ArrayBuffer | null> {
+  if (!request.body) return new ArrayBuffer(0);
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_REQUEST_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new ArrayBuffer(totalBytes);
+  const bodyBytes = new Uint8Array(body);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bodyBytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}

@@ -1,3 +1,15 @@
+{
+	servers {
+		max_header_size 64KB
+		timeouts {
+			read_body 5m
+			read_body_idle 30s 8192
+			read_header 10s
+			idle 2m
+		}
+	}
+}
+
 (security_headers) {
 	header {
 		Strict-Transport-Security "max-age=31536000; includeSubDomains"
@@ -5,20 +17,31 @@
 		X-Frame-Options "DENY"
 		Referrer-Policy "strict-origin-when-cross-origin"
 		Permissions-Policy "camera=(), microphone=(), geolocation=(), payment=()"
-		Content-Security-Policy "default-src 'self'; base-uri 'self'; object-src 'none'; frame-ancestors 'none'; form-action 'self'; img-src 'self' data: blob: https:; font-src 'self' data: https://fonts.gstatic.com; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; script-src 'self' 'unsafe-inline'; connect-src 'self' https://api.{$SITE_DOMAIN}; upgrade-insecure-requests"
 	}
+}
+
+(api_security_headers) {
+	import security_headers
+	header Content-Security-Policy "default-src 'none'; base-uri 'none'; object-src 'none'; frame-ancestors 'none'; form-action 'none'"
 }
 
 {$SITE_DOMAIN}, www.{$SITE_DOMAIN} {
 	import security_headers
+	request_body {
+		max_size 2MB
+	}
 	encode zstd gzip
 	reverse_proxy frontend:3000
 }
 
 api.{$SITE_DOMAIN} {
-	import security_headers
+	import api_security_headers
+	request_body {
+		max_size 2MB
+	}
 	encode zstd gzip
 	reverse_proxy backend:8080 {
+		header_down -Content-Security-Policy
 		header_down -Strict-Transport-Security
 		header_down -X-Content-Type-Options
 		header_down -X-Frame-Options
