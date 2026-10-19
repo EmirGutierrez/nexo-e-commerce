@@ -1,8 +1,49 @@
 'use client';
 
 import { useState } from 'react';
-import { KeyRound, ShieldCheck } from 'lucide-react';
+import { Eye, EyeOff, KeyRound, ShieldCheck } from 'lucide-react';
 import { authService } from '../../../services';
+
+type PasswordFieldProps = {
+  id: string;
+  label: string;
+  autoComplete: string;
+  value: string;
+  onChange: (event: React.ChangeEvent<HTMLInputElement>) => void;
+  minLength?: number;
+  hint?: string;
+};
+
+function PasswordField({ id, label, autoComplete, value, onChange, minLength, hint }: PasswordFieldProps) {
+  const [visible, setVisible] = useState(false);
+  const VisibilityIcon = visible ? EyeOff : Eye;
+
+  return <div className="field password-field">
+    <label htmlFor={id}><span>{label}</span></label>
+    <div className="password-input-wrap">
+      <input
+        id={id}
+        type={visible ? 'text' : 'password'}
+        autoComplete={autoComplete}
+        required
+        minLength={minLength}
+        maxLength={128}
+        value={value}
+        onChange={onChange}
+      />
+      <button
+        className="password-visibility-toggle"
+        type="button"
+        aria-label={`${visible ? 'Ocultar' : 'Mostrar'} ${label.toLowerCase()}`}
+        aria-pressed={visible}
+        onClick={() => setVisible((wasVisible) => !wasVisible)}
+      >
+        <VisibilityIcon size={17} aria-hidden="true" />
+      </button>
+    </div>
+    {hint && <small>{hint}</small>}
+  </div>;
+}
 
 export default function ChangePasswordCard() {
   const [currentPassword, setCurrentPassword] = useState('');
@@ -45,9 +86,9 @@ export default function ChangePasswordCard() {
   return <section className="panel mfa-settings-card" aria-labelledby="change-password-title">
     <div className="mfa-settings-heading"><span className="mfa-settings-icon"><KeyRound size={19} /></span><div><span className="eyebrow">Seguridad de la cuenta</span><h2 id="change-password-title">Cambiar contraseña</h2><p>Confirma tu contraseña actual. Al guardar, se cerrarán las sesiones abiertas de esta cuenta.</p></div></div>
     <form className="mfa-enrollment-form" onSubmit={submit}>
-      <label className="field"><span>Contraseña actual</span><input type="password" autoComplete="current-password" required maxLength={128} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label>
-      <label className="field"><span>Nueva contraseña</span><input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={newPassword} onChange={(event) => setNewPassword(event.target.value)} /><small>Usa 12 o más caracteres; el máximo compatible es 72 bytes UTF-8.</small></label>
-      <label className="field"><span>Confirmar nueva contraseña</span><input type="password" autoComplete="new-password" required minLength={12} maxLength={128} value={confirmation} onChange={(event) => setConfirmation(event.target.value)} /></label>
+      <PasswordField id="current-password" label="Contraseña actual" autoComplete="current-password" value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} />
+      <PasswordField id="new-password" label="Nueva contraseña" autoComplete="new-password" value={newPassword} onChange={(event) => setNewPassword(event.target.value)} minLength={12} hint="Usa 12 o más caracteres; el máximo compatible es 72 bytes UTF-8." />
+      <PasswordField id="confirm-new-password" label="Confirmar nueva contraseña" autoComplete="new-password" value={confirmation} onChange={(event) => setConfirmation(event.target.value)} minLength={12} />
       <label className="field"><span>Código MFA o de recuperación, si está activada</span><input type="text" autoComplete="one-time-code" autoCapitalize="characters" maxLength={32} value={mfaCode} onChange={(event) => setMfaCode(event.target.value)} /></label>
       {message && <p className="mfa-settings-message" role="status"><ShieldCheck size={15} />{message}</p>}
       {error && <p className="mfa-settings-error" role="alert">{error}</p>}

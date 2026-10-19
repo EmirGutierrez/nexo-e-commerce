@@ -1471,6 +1471,13 @@ select:disabled {
 .mfa-settings-muted { margin:0; color:var(--muted); font-size:11px; }
 .mfa-enrollment-form,.mfa-disable-form { display:grid; max-width:640px; gap:13px; }
 .mfa-enrollment-form .field small { display:block; margin-top:6px; color:var(--muted); font-size:10px; line-height:1.5; }
+.mfa-enrollment-form .password-field > label { display:block; margin-bottom:8px; }
+.mfa-enrollment-form .password-field > label > span { display:block; margin:0; color:var(--ink); font-size:11px; font-weight:800; }
+.password-input-wrap { position:relative; }
+.password-input-wrap > input { padding-right:48px; }
+.password-visibility-toggle { position:absolute; top:50%; right:7px; display:grid; width:34px; height:34px; transform:translateY(-50%); place-items:center; border:0; border-radius:7px; color:var(--muted); background:transparent; cursor:pointer; }
+.password-visibility-toggle:hover { color:var(--navy); background:#f2f5fa; }
+.password-visibility-toggle:focus-visible { outline:2px solid var(--navy); outline-offset:2px; }
 .mfa-enrollment-key { display:flex; align-items:flex-start; gap:10px; padding:13px; border:1px solid var(--border); border-radius:10px; color:var(--navy); background:#fbfcfe; }
 .mfa-enrollment-key > div { display:grid; gap:6px; min-width:0; }
 .mfa-enrollment-key strong,.mfa-recovery-panel > strong { color:var(--ink); font-size:11px; }

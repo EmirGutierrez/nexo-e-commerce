@@ -20,6 +20,30 @@ afterEach(() => {
 });
 
 describe('ChangePasswordCard', () => {
+  it('shows and hides each password independently', () => {
+    render(<ChangePasswordCard />);
+    const currentPassword = screen.getByLabelText('Contraseña actual') as HTMLInputElement;
+    const newPassword = screen.getByLabelText('Nueva contraseña') as HTMLInputElement;
+    const confirmation = screen.getByLabelText('Confirmar nueva contraseña') as HTMLInputElement;
+
+    expect(currentPassword.type).toBe('password');
+    expect(newPassword.type).toBe('password');
+    expect(confirmation.type).toBe('password');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar contraseña actual' }));
+    expect(currentPassword.type).toBe('text');
+    expect(newPassword.type).toBe('password');
+    expect(confirmation.type).toBe('password');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Mostrar nueva contraseña' }));
+    expect(currentPassword.type).toBe('text');
+    expect(newPassword.type).toBe('text');
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ocultar contraseña actual' }));
+    expect(currentPassword.type).toBe('password');
+    expect(newPassword.type).toBe('text');
+  });
+
   it('blocks mismatched confirmation before sending the password', async () => {
     render(<ChangePasswordCard />);
     fireEvent.change(screen.getByLabelText('Contraseña actual'), { target: { value: 'current-password' } });
