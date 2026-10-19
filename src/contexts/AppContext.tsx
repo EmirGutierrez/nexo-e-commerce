@@ -16,7 +16,7 @@ interface AppContextValue {
   user: User | null;
   userType: 'admin' | 'customer' | null;
   authLoading: boolean;
-  login: (email: string, password: string) => Promise<{ user: User; kind: 'admin' | 'customer' } | null>;
+  login: (email: string, password: string, mfaCode?: string) => Promise<{ user: User; kind: 'admin' | 'customer' } | null>;
   registerCustomer: (name: string, email: string, password: string) => Promise<User>;
   updateProfile: (name: string) => Promise<User>;
   logout: () => Promise<void>;
@@ -123,8 +123,8 @@ export function AppProvider({ children }: { children: ReactNode }) {
     user,
     userType,
     authLoading,
-    login: async (email, password) => {
-      const account = await authService.login(email, password);
+    login: async (email, password, mfaCode) => {
+      const account = await authService.login(email, password, mfaCode);
       if (!account) return null;
       const kind = account.role === 'customer' ? 'customer' : 'admin';
       roleService.setAuthenticatedPermissions(account.role, account.permissions);

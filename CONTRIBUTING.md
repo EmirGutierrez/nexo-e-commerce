@@ -16,7 +16,7 @@ origin/develop → rama personal → pruebas → commit → push → revisión �
 - `develop`: rama principal de integración.
 - `feature/*`: rama personal de cada compañero para un ticket o funcionalidad.
 
-No se trabajará con Pull Requests en este proyecto. La integración se realizará mediante revisión y merge directo de la rama personal hacia `develop`.
+El trabajo diario se integrará mediante revisión y merge directo de la rama personal hacia `develop`, sin Pull Requests por cada funcionalidad. Los lanzamientos estables se proponen mediante un Pull Request de `develop` a `master`.
 
 No se debe modificar directamente `develop` ni `master`. Tampoco se utilizará una rama `main`.
 

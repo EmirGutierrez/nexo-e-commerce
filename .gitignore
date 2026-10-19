@@ -4,6 +4,7 @@ node_modules/
 next-env.d.ts
 *.tsbuildinfo
 dist/
+coverage/
 **/target/
 .env
 .env.*

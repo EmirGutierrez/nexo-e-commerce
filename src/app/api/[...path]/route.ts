@@ -3,8 +3,14 @@ import { NextRequest, NextResponse } from 'next/server';
 export const runtime = 'nodejs';
 
 const SESSION_COOKIE = 'NEXOSESSION';
+const TAB_SESSION_COOKIE_PREFIX = `${SESSION_COOKIE}_`;
+const TAB_SESSION_HEADER = 'x-nexo-tab-session';
+const TAB_SESSION_ID_PATTERN = /^[a-f0-9]{48}$/;
 const LOOPBACK_HOSTS = ['localhost', '127.0.0.1', '[::1]'];
 const DOCKER_BACKEND_HOST = 'backend';
+const MAX_REQUEST_BODY_BYTES = 2 * 1024 * 1024;
+const MAX_CONCURRENT_BODY_READS = 32;
+let activeBodyReads = 0;
 
 function isLocalHttp(request: NextRequest): boolean {
   return request.nextUrl.protocol === 'http:' && LOOPBACK_HOSTS.includes(request.nextUrl.hostname);
@@ -34,7 +40,30 @@ function backendOrigin(request: NextRequest): string {
   return url.origin;
 }
 
-function relaySessionCookie(upstream: Response, outgoing: NextResponse, request: NextRequest) {
+function sessionCookieName(tabSessionId: string | null): string | null {
+  return tabSessionId && TAB_SESSION_ID_PATTERN.test(tabSessionId)
+    ? `${TAB_SESSION_COOKIE_PREFIX}${tabSessionId}`
+    : null;
+}
+
+function setSessionCookie(outgoing: NextResponse, request: NextRequest, name: string, value: string, expired: boolean) {
+  outgoing.cookies.set(name, expired ? '' : value, {
+    httpOnly: true,
+    secure: secureCookie(request),
+    sameSite: 'lax',
+    path: '/',
+    ...(expired ? { maxAge: 0 } : {}),
+  });
+}
+
+function clearLegacySessionCookie(outgoing: NextResponse, request: NextRequest) {
+  // La cookie compartida anterior no identifica una pestaña; ya no debe autorizar solicitudes.
+  setSessionCookie(outgoing, request, SESSION_COOKIE, '', true);
+}
+
+function relaySessionCookie(upstream: Response, outgoing: NextResponse, request: NextRequest, tabCookieName: string | null) {
+  if (!tabCookieName) return;
+
   for (const header of upstream.headers.getSetCookie()) {
     const [pair, ...attributes] = header.split(';');
     const separator = pair.indexOf('=');
@@ -46,13 +75,7 @@ function relaySessionCookie(upstream: Response, outgoing: NextResponse, request:
     const expired = !value || (maxAge && Number(maxAge.split('=')[1]) <= 0) ||
       (expires && Date.parse(expires.split('=').slice(1).join('=')) <= Date.now());
 
-    outgoing.cookies.set(SESSION_COOKIE, expired ? '' : value, {
-      httpOnly: true,
-      secure: secureCookie(request),
-      sameSite: 'lax',
-      path: '/',
-      ...(expired ? { maxAge: 0 } : {}),
-    });
+    setSessionCookie(outgoing, request, tabCookieName, value, Boolean(expired));
   }
 }
 
@@ -68,17 +91,52 @@ async function forward(request: NextRequest, context: RouteContext<'/api/[...pat
   const headers = new Headers({ Accept: request.headers.get('accept') || 'application/json' });
   const contentType = request.headers.get('content-type');
   const csrfToken = request.headers.get('x-csrf-token');
-  const session = request.cookies.get(SESSION_COOKIE)?.value;
+  const idempotencyKey = request.headers.get('idempotency-key');
+  const forwardedFor = request.headers.get('x-forwarded-for');
+  const tabCookieName = sessionCookieName(request.headers.get(TAB_SESSION_HEADER));
+  const session = tabCookieName ? request.cookies.get(tabCookieName)?.value : undefined;
   if (contentType) headers.set('Content-Type', contentType);
   if (csrfToken) headers.set('X-CSRF-TOKEN', csrfToken);
+  if (idempotencyKey) headers.set('Idempotency-Key', idempotencyKey);
+  // Caddy replaces client-supplied forwarding headers at the public edge.
+  if (forwardedFor) headers.set('X-Forwarded-For', forwardedFor);
   if (session) headers.set('Cookie', `${SESSION_COOKIE}=${session}`);
 
   const target = `${origin}/api/${path.map(encodeURIComponent).join('/')}${request.nextUrl.search}`;
+  let body: ArrayBuffer | undefined;
+  if (!['GET', 'HEAD'].includes(request.method)) {
+    const declaredLength = request.headers.get('content-length');
+    if (declaredLength !== null && !/^\d+$/.test(declaredLength)) {
+      return NextResponse.json({ code: 'INVALID_CONTENT_LENGTH', message: 'El tamaño de la solicitud no es válido.' }, { status: 400 });
+    }
+    if (declaredLength !== null && Number(declaredLength) > MAX_REQUEST_BODY_BYTES) {
+      return NextResponse.json({ code: 'REQUEST_TOO_LARGE', message: 'La solicitud supera el tamaño permitido.' }, { status: 413 });
+    }
+    if (activeBodyReads >= MAX_CONCURRENT_BODY_READS) {
+      return NextResponse.json(
+        { code: 'REQUEST_CAPACITY', message: 'La API está ocupada. Intenta nuevamente en unos segundos.' },
+        { status: 429, headers: { 'Retry-After': '1' } },
+      );
+    }
+    activeBodyReads++;
+    try {
+      const boundedBody = await readBoundedBody(request);
+      if (boundedBody === null) {
+        return NextResponse.json({ code: 'REQUEST_TOO_LARGE', message: 'La solicitud supera el tamaño permitido.' }, { status: 413 });
+      }
+      body = boundedBody;
+    } catch {
+      return NextResponse.json({ code: 'INVALID_REQUEST_BODY', message: 'No se pudo leer la solicitud.' }, { status: 400 });
+    } finally {
+      activeBodyReads--;
+    }
+  }
+
   try {
     const upstream = await fetch(target, {
       method: request.method,
       headers,
-      body: ['GET', 'HEAD'].includes(request.method) ? undefined : await request.arrayBuffer(),
+      body,
       cache: 'no-store',
       redirect: 'manual',
     });
@@ -87,17 +145,13 @@ async function forward(request: NextRequest, context: RouteContext<'/api/[...pat
       headers: {
         'Cache-Control': 'no-store',
         ...(upstream.headers.get('content-type') ? { 'Content-Type': upstream.headers.get('content-type')! } : {}),
+        ...(upstream.headers.get('retry-after') ? { 'Retry-After': upstream.headers.get('retry-after')! } : {}),
       },
     });
-    relaySessionCookie(upstream, outgoing, request);
+    relaySessionCookie(upstream, outgoing, request, tabCookieName);
+    clearLegacySessionCookie(outgoing, request);
     if (request.method === 'POST' && path.join('/') === 'auth/logout' && upstream.ok) {
-      outgoing.cookies.set(SESSION_COOKIE, '', {
-        httpOnly: true,
-        secure: secureCookie(request),
-        sameSite: 'lax',
-        path: '/',
-        maxAge: 0,
-      });
+      if (tabCookieName) setSessionCookie(outgoing, request, tabCookieName, '', true);
     }
     return outgoing;
   } catch {
@@ -110,3 +164,34 @@ export const POST = forward;
 export const PUT = forward;
 export const PATCH = forward;
 export const DELETE = forward;
+
+async function readBoundedBody(request: NextRequest): Promise<ArrayBuffer | null> {
+  if (!request.body) return new ArrayBuffer(0);
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let totalBytes = 0;
+  try {
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      totalBytes += value.byteLength;
+      if (totalBytes > MAX_REQUEST_BODY_BYTES) {
+        await reader.cancel().catch(() => undefined);
+        return null;
+      }
+      chunks.push(value);
+    }
+  } finally {
+    reader.releaseLock();
+  }
+
+  const body = new ArrayBuffer(totalBytes);
+  const bodyBytes = new Uint8Array(body);
+  let offset = 0;
+  for (const chunk of chunks) {
+    bodyBytes.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return body;
+}

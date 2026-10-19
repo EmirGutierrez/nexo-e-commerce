@@ -12,7 +12,9 @@ import {
 import { categories, formatQ, orders, products, suppliers, users } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
 import { fetchCatalogFromApi, productService } from '../../products/services/productService';
-import { authService, businessSettingsService, checkoutService, dashboardService, productInventoryService, type BusinessProfileSettings } from '../../../services';
+import { authService, businessSettingsService, checkoutService, dashboardService, productInventoryService, type BusinessProfileSettings, type CheckoutQuote } from '../../../services';
+import { ApiError } from '../../../shared/services/http-client';
+import type { OrderSubmission } from '../../../services';
 import type { PaymentMethod, Product, Role, User } from '../../../types';
 import AccountingPage from '../../accounting/components/AccountingPage';
 import PurchasesPage from '../../purchases/components/PurchasesPage';
@@ -27,7 +29,8 @@ import { OffersAdminPage, TransferReceiptsPage } from '../../commerce/components
 import { SeasonalSpotlight } from '../../commerce/components/CommercePages';
 import PublicAccountControls from './PublicAccountControls';
 import CustomerNotificationBell from '../../commerce/components/CustomerNotificationBell';
-import { ApiError } from '../../../shared/services/http-client';
+import FloatingCartButton from './FloatingCartButton';
+import MfaSettingsCard from '../../auth/components/MfaSettingsCard';
 
 const Icon = ({ name, size = 18 }: { name: string; size?: number }) => {
   const icons: Record<string, typeof Box> = { arrow: ArrowUpRight, box: Box, user: UserCircle, check: CheckCircle2 };
@@ -52,7 +55,7 @@ function PublicHeader() {
   }, [menuOpen]);
   const closeMenu = () => setMenuOpen(false);
 
-  return <header className="public-header">
+  return <><header className="public-header">
     <Brand />
     <nav id="public-navigation" className={`public-nav${menuOpen ? ' is-open' : ''}`} aria-label="Navegación principal">
       <Link href="/store" onClick={closeMenu}>Tienda</Link>
@@ -68,7 +71,7 @@ function PublicHeader() {
       </button>
       <Link href="/cart" className="cart-button"><ShoppingCart size={18} /><span className="cart-label">Carrito</span>{cartCount > 0 && <b>{cartCount}</b>}</Link>
     </div>
-  </header>;
+  </header><FloatingCartButton /></>;
 }
 
 export function Landing() {
@@ -131,6 +134,8 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
   const router = useRouter();
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [mfaCode, setMfaCode] = useState('');
+  const [mfaRequired, setMfaRequired] = useState(false);
   const [error, setError] = useState('');
   const [submitting, setSubmitting] = useState(false);
   const requested = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('redirect');
@@ -144,13 +149,17 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
     event.preventDefault(); setError('');
     setSubmitting(true);
     try {
-      const session = await login(email, password);
+      const session = await login(email, password, mfaCode);
       if (!session) {
         setError('Correo o contraseña incorrectos.');
         return;
       }
       router.push(resolveLoginDestination(session.kind, session.user.role, requested, session.user.permissions));
     } catch (caught) {
+      if (caught instanceof ApiError && (caught.code === 'MFA_REQUIRED' || caught.code === 'MFA_INVALID')) {
+        setMfaRequired(true);
+        if (caught.code === 'MFA_INVALID') setMfaCode('');
+      }
       setError(authErrorMessage(caught, 'No fue posible iniciar sesión. Inténtalo de nuevo.'));
     } finally {
       setSubmitting(false);
@@ -159,7 +168,8 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
 
   const adminMode = initialKind === 'admin';
   return <div className="admin-login-page"><div className="admin-login-panel"><Brand /><div className="security-pill"><ShieldCheck size={15} /> Acceso protegido</div><div className="admin-login-copy"><span className="eyebrow">NEXO · {adminMode ? 'Administración' : 'Tienda'}</span><h1>{adminMode ? <>Haz que tu negocio<br /><em>avance.</em></> : <>Todo lo que buscas,<br /><em>en un solo lugar.</em></>}</h1><p>Ingresa con tu cuenta para continuar.</p></div><div className="admin-login-footer"><span>© 2025 NEXO COMMERCE</span><span>Acceso seguro</span></div></div><div className="admin-login-form"><Link href="/" className="back-link"><ArrowLeft size={16} /> Volver al inicio</Link><div className="admin-form-inner"><div className="admin-icon"><LockIcon /></div><h2>Iniciar sesión</h2><p>Usa tus credenciales para acceder a tu espacio.</p><form onSubmit={submit}>
-    <Field label="Correo electrónico" type="email" value={email} onChange={setEmail} placeholder={adminMode ? 'personal@nexo.gt' : 'tu@correo.com'} /><Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="Ingresa tu contraseña" />
+    <Field label="Correo electrónico" type="email" value={email} onChange={(value) => { setEmail(value); setMfaRequired(false); setMfaCode(''); }} placeholder={adminMode ? 'personal@nexo.gt' : 'tu@correo.com'} /><Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="Ingresa tu contraseña" />
+    {mfaRequired && <label className="field mfa-login-code"><span>Código de autenticación o recuperación</span><input required type="text" autoComplete="one-time-code" inputMode="text" autoCapitalize="characters" maxLength={32} value={mfaCode} onChange={(event) => setMfaCode(event.target.value)} placeholder="000000 o código de recuperación" /></label>}
     {error && <div className="error-message" role="alert"><X size={15} />{error}</div>}<button className={`button ${adminMode ? 'button-dark' : 'button-primary'} full`} type="submit" disabled={submitting}>{submitting ? 'Ingresando…' : <>Ingresar <ArrowRight size={16} /></>}</button></form>
     <p className="auth-bottom">Tu cuenta y sus permisos determinan a dónde ingresas.</p>
     <Link className="auth-bottom login-switch" href="/register">Crear cuenta de cliente</Link>
@@ -228,7 +238,7 @@ export function ProfilePage() {
   const [name, setName] = useState(user?.name || ''); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(''); const [error, setError] = useState('');
   useEffect(() => { setName(user?.name || ''); }, [user?.name]);
   const save = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setError(''); setMessage(''); try { await updateProfile(name); setMessage('Tu nombre se guardó en PostgreSQL.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar tu perfil.'); } finally { setBusy(false); } };
-  return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Mi cuenta · Perfil de usuario</span><h1>Mi perfil</h1><p>Actualiza tu nombre visible y consulta tu acceso.</p></div></div><section className="panel profile-panel"><form className="crud-form" onSubmit={save}><div className="crud-fields"><label className="field"><span>Nombre</span><input required minLength={2} maxLength={160} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Correo electrónico</span><input value={user?.email || ''} readOnly disabled /></label><label className="field"><span>Rol</span><input value={user ? roleLabels[user.role] : ''} readOnly disabled /></label></div>{message && <div className="crud-feedback" role="status">{message}</div>}{error && <div className="crud-error" role="alert">{error}</div>}<p className="crud-form-note">El correo y los permisos solo se cambian desde los procesos administrativos correspondientes.</p><div className="modal-actions"><button className="button button-primary" type="submit" disabled={busy || name.trim() === user?.name}>{busy ? 'Guardando…' : 'Guardar perfil'}</button></div></form></section></div>;
+  return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Mi cuenta · Perfil de usuario</span><h1>Mi perfil</h1><p>Actualiza tu nombre visible y consulta tu acceso.</p></div></div><section className="panel profile-panel"><form className="crud-form" onSubmit={save}><div className="crud-fields"><label className="field"><span>Nombre</span><input required minLength={2} maxLength={160} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Correo electrónico</span><input value={user?.email || ''} readOnly disabled /></label><label className="field"><span>Rol</span><input value={user ? roleLabels[user.role] : ''} readOnly disabled /></label></div>{message && <div className="crud-feedback" role="status">{message}</div>}{error && <div className="crud-error" role="alert">{error}</div>}<p className="crud-form-note">El correo y los permisos solo se cambian desde los procesos administrativos correspondientes.</p><div className="modal-actions"><button className="button button-primary" type="submit" disabled={busy || name.trim() === user?.name}>{busy ? 'Guardando…' : 'Guardar perfil'}</button></div></form></section><MfaSettingsCard /></div>;
 }
 
 function LockIcon() { return <ShieldCheck size={25} />; }
@@ -339,6 +349,19 @@ export function Checkout() {
   const [customerEmail, setCustomerEmail] = useState('');
   const [customerPhone, setCustomerPhone] = useState('');
   const [address, setAddress] = useState('');
+  const [quote, setQuote] = useState<CheckoutQuote | null>(null);
+  const [acceptedQuoteFingerprint, setAcceptedQuoteFingerprint] = useState<string | null>(null);
+  const idempotencyKeyRef = useRef<string | null>(null);
+  const completeCheckout = (result: OrderSubmission) => {
+    setDone(true);
+    try {
+      window.sessionStorage.setItem('nexo-confirmation-result', JSON.stringify({ paymentMethod: result.paymentMethod,
+        paymentStatus: result.paymentStatus, total: result.total, orderId: result.reference }));
+    } catch { /* La confirmación mínima también se envía por URL. */ }
+    clearCart();
+    const params = new URLSearchParams({ reference: result.reference, total: String(result.total), paymentMethod: result.paymentMethod, paymentStatus: result.paymentStatus });
+    window.setTimeout(() => router.replace(`/confirmation?${params.toString()}`), 700);
+  };
 
   useEffect(() => {
     if (!paymentMethods[payment]) setPayment(availableMethods[0] || 'card');
@@ -351,26 +374,46 @@ export function Checkout() {
       return;
     }
     try {
-      const result = await checkoutService.create({ customerName, customerEmail, customerPhone, address, paymentMethod: payment,
-        items: cart.map((item) => ({ productId: item.id, quantity: item.quantity })) });
-      setDone(true);
-      window.sessionStorage.setItem('nexo-confirmation-result', JSON.stringify({ paymentMethod: payment,
-        paymentStatus: payment === 'transfer' ? 'pending_verification' : 'approved', total: result.total, reference: result.reference }));
-      clearCart();
-      window.setTimeout(() => router.push('/confirmation'), 700);
+      const items = cart.map((item) => ({ productId: item.id, quantity: item.quantity }));
+      const currentQuote = await checkoutService.quote({ items });
+      setQuote(currentQuote);
+      const fingerprint = JSON.stringify({ subtotal: currentQuote.subtotal, discount: currentQuote.discount, total: currentQuote.total,
+        items: currentQuote.items.map((item) => [item.productId, item.quantity, item.unitPrice, item.subtotal]).sort(([left], [right]) => String(left).localeCompare(String(right))) });
+      const displayedPricesChanged = currentQuote.items.some((pricedItem) => cart.find((item) => item.id === pricedItem.productId)?.price !== pricedItem.unitPrice);
+      const requiresReview = acceptedQuoteFingerprint === null
+        ? Math.abs(currentQuote.total - cartTotal) >= 0.01 || displayedPricesChanged
+        : acceptedQuoteFingerprint !== fingerprint;
+      if (requiresReview) {
+        setAcceptedQuoteFingerprint(fingerprint);
+        setPaymentError('Los precios o las existencias cambiaron. Revisa el total actualizado y vuelve a confirmar.');
+        return;
+      }
+      const idempotencyKey = idempotencyKeyRef.current || window.crypto.randomUUID();
+      idempotencyKeyRef.current = idempotencyKey;
+      try { window.sessionStorage.setItem('nexo-checkout-idempotency.v1', idempotencyKey); } catch { /* La clave en memoria permite reintentar en esta página. */ }
+      const result = await checkoutService.create({ customerName, customerEmail, customerPhone, address, paymentMethod: payment, items }, idempotencyKey, currentQuote.total);
+      completeCheckout(result);
     } catch (cause) {
+      if (cause instanceof ApiError && cause.status === 409 && idempotencyKeyRef.current) {
+        try {
+          const recovered = await checkoutService.findSubmission(idempotencyKeyRef.current);
+          if (recovered) { completeCheckout(recovered); return; }
+          idempotencyKeyRef.current = null;
+          try { window.sessionStorage.removeItem('nexo-checkout-idempotency.v1'); } catch { /* La clave se conserva en memoria. */ }
+        } catch { /* Conserva el error original y permite volver a comprobar. */ }
+      }
       setPaymentError(cause instanceof Error ? cause.message : 'No se pudo crear el pedido. Revisa tus datos e inténtalo de nuevo.');
     }
   };
 
-  useEffect(() => { if (!cart.length) router.replace('/cart'); }, [cart.length, router]);
-  if (!cart.length) return null;
+  useEffect(() => { if (!cart.length && !done) router.replace('/cart'); }, [cart.length, done, router]);
   if (done) return <div className="processing"><div className="loader" /><h2>Procesando tu pedido...</h2><p>Simulación de pago en curso; no se realizará ningún cobro.</p></div>;
+  if (!cart.length) return null;
   return <PublicShell><main className="checkout-page"><Link href="/cart" className="back-link"><ArrowLeft size={16} /> Volver al carrito</Link><div className="checkout-heading"><div><span className="eyebrow">Último paso</span><h1>Finaliza tu pedido</h1></div><div className="checkout-steps"><span className="done"><Check size={13} /> Carrito</span><i /><span className="current">2. Checkout</span><i /><span>3. Confirmación</span></div></div>
     <form className="checkout-layout" onSubmit={submit}><div className="checkout-form"><section className="form-section"><div className="section-title"><span>01</span><div><h2>Información de entrega</h2><p>¿Dónde enviamos tu pedido?</p></div></div><div className="form-grid"><Field label="Nombre completo" type="text" value={customerName} onChange={setCustomerName} placeholder="Tu nombre" /><Field label="Teléfono" type="tel" value={customerPhone} onChange={setCustomerPhone} placeholder="5555 5555" /></div><Field label="Correo electrónico" type="email" value={customerEmail} onChange={setCustomerEmail} placeholder="tu@correo.com" /><Field label="Dirección de entrega" type="text" value={address} onChange={setAddress} placeholder="Calle, avenida, zona y ciudad" /></section>
     <section className="form-section"><div className="section-title"><span>02</span><div><h2>Método de pago</h2><p>Opciones disponibles · solo demostración</p></div></div><div className="payment-options">{paymentMethods.card && <button type="button" className={payment === 'card' ? 'payment-option active' : 'payment-option'} onClick={() => { if (paymentMethods.card) { setPayment('card'); setPaymentError(''); } }}><CreditCard size={19} /><span><strong>Tarjeta simulada</strong><small>No se solicitan datos de tarjeta</small></span><span className="radio" /></button>}{paymentMethods.transfer && <button type="button" className={payment === 'transfer' ? 'payment-option active' : 'payment-option'} onClick={() => { if (paymentMethods.transfer) { setPayment('transfer'); setPaymentError(''); } }}><ArrowDownToLine size={19} /><span><strong>Transferencia bancaria</strong><small>Pendiente de verificación</small></span><span className="radio" /></button>}</div>
-    {!availableMethods.length ? <div className="payment-error" role="alert">No hay métodos de pago activos. Contacta al administrador antes de continuar.</div> : payment === 'card' ? <div className="transfer-hint"><CreditCard size={18} /><p>Pago de tarjeta simulado para esta demostración. <strong>No se realiza ningún cargo y no guardamos información financiera.</strong></p></div> : <div className="transfer-hint"><Wallet size={18} /><p>El pedido quedará <strong>pendiente de verificación</strong>. Esta demostración no procesa transferencias reales.</p></div>}
-    {paymentError && <div className="payment-error" role="alert">{paymentError}</div>}</section></div><aside className="summary-card checkout-summary"><h2>Tu pedido</h2>{cart.map((item) => <div className="mini-line" key={item.id}><span>{item.quantity} × {item.name}</span><strong>{formatQ(item.price * item.quantity)}</strong></div>)}<div className="summary-total"><span>Total a pagar</span><strong>{formatQ(cartTotal)}</strong></div><button className="button button-primary full" type="submit" disabled={!availableMethods.length}>Confirmar pedido <ArrowRight size={16} /></button><small><ShieldCheck size={14} /> Simulación únicamente. No se realizan cargos reales.</small></aside></form></main></PublicShell>;
+     {!availableMethods.length ? <div className="payment-error" role="alert">No hay métodos de pago activos. Contacta al administrador antes de continuar.</div> : payment === 'card' ? <div className="transfer-hint"><CreditCard size={18} /><p>Pago de tarjeta simulado para esta demostración. <strong>No se realiza ningún cargo y no guardamos información financiera.</strong></p></div> : <div className="transfer-hint"><Wallet size={18} /><p>El pedido quedará <strong>pendiente de verificación</strong>. Esta demostración no procesa transferencias reales.</p></div>}
+     {paymentError && <div className="payment-error" role="alert">{paymentError}</div>}</section></div><aside className="summary-card checkout-summary"><h2>Tu pedido</h2>{cart.map((item) => { const current = quote?.items.find((quoted) => quoted.productId === item.id); const unitPrice = current?.unitPrice ?? item.price; return <div className="mini-line" key={item.id}><span>{item.quantity} × {item.name}</span><strong>{formatQ(unitPrice * item.quantity)}</strong></div>; })}<div className="summary-total"><span>Total a pagar</span><strong>{formatQ(quote?.total ?? cartTotal)}</strong></div><button className="button button-primary full" type="submit" disabled={!availableMethods.length}>{acceptedQuoteFingerprint ? 'Confirmar total actualizado' : 'Confirmar pedido'} <ArrowRight size={16} /></button><small><ShieldCheck size={14} /> Simulación únicamente. No se realizan cargos reales.</small></aside></form></main></PublicShell>;
 }
 
 export function Confirmation() {
@@ -525,9 +568,9 @@ function InventoryDonut({ products, healthy, lowStock, outOfStock }: { products:
 
 function ModulePage({ section }: { section: string }) { const config = moduleConfig[section] || moduleConfig.products; return <AdminCrudModule section={section} config={config} />; }
 
-const moduleConfig: Record<string, AdminModuleConfig> = {
-  products: { title: 'Productos', description: 'Administra tu catálogo y mantén la información siempre actualizada.', action: 'Nuevo producto', columns: ['Producto', 'Marca', 'Categoría', 'SKU', 'Valor', 'Existencias', 'Estado'], stats: [{ label: 'Total productos', value: '156', detail: '+12 este mes', tone: 'positive' }, { label: 'Activos', value: '124', detail: '79.5% del catálogo' }, { label: 'Bajo stock', value: '24', detail: 'Requieren atención', tone: 'warning' }, { label: 'Agotados', value: '8', detail: 'Acción recomendada', tone: 'danger' }], rows: products.map((p) => ({ Producto: p.name, Marca: p.brandId || '', Categoría: p.category, SKU: p.sku, Valor: p.price, Existencias: p.stock, Imagen: p.image, Estado: p.status })) },
-  inventory: { title: 'Inventario', description: 'Controla existencias, ubicaciones y movimientos de tus productos.', columns: ['Producto', 'Marca', 'SKU', 'Existencias', 'Ubicación', 'Estado'], stats: [{ label: 'Unidades totales', value: '2,486', detail: '+8.6%', tone: 'positive' }, { label: 'Valor inventario', value: 'Q 186k', detail: 'Costo estimado' }, { label: 'Bajo stock', value: '24', detail: 'Requieren atención', tone: 'warning' }, { label: 'Movimientos hoy', value: '36', detail: '8 entradas · 28 salidas' }], rows: products.map((p) => ({ Producto: p.name, Marca: p.brandId || '', Categoría: p.category, SKU: p.sku, Valor: p.price, Existencias: p.stock, Imagen: p.image, Ubicación: 'Bodega central', Estado: p.status === 'Activo' ? 'En stock' : p.status })) },
+export const moduleConfig: Record<string, AdminModuleConfig> = {
+  products: { title: 'Productos', description: 'Consulta el catálogo y mantén la información siempre actualizada.', columns: ['Producto', 'Marca', 'Categoría', 'SKU', 'Valor', 'Existencias', 'Estado'], stats: [{ label: 'Total productos', value: '156', detail: '+12 este mes', tone: 'positive' }, { label: 'Activos', value: '124', detail: '79.5% del catálogo' }, { label: 'Bajo stock', value: '24', detail: 'Requieren atención', tone: 'warning' }, { label: 'Agotados', value: '8', detail: 'Acción recomendada', tone: 'danger' }], rows: products.map((p) => ({ Producto: p.name, Marca: p.brandId || '', Categoría: p.category, SKU: p.sku, Valor: p.price, Existencias: p.stock, Imagen: p.image, Estado: p.status })) },
+  inventory: { title: 'Inventario', description: 'Controla existencias y registra productos con sus imágenes y movimientos.', action: 'Nuevo producto', formColumns: ['Producto', 'Marca', 'Categoría', 'SKU', 'Costo unitario', 'Precio de venta', 'Existencias', 'Ubicación', 'Estado', 'Descripción'], columns: ['Producto', 'Marca', 'SKU', 'Existencias', 'Ubicación', 'Estado'], stats: [{ label: 'Unidades totales', value: '2,486', detail: '+8.6%', tone: 'positive' }, { label: 'Valor inventario', value: 'Q 186k', detail: 'Costo estimado' }, { label: 'Bajo stock', value: '24', detail: 'Requieren atención', tone: 'warning' }, { label: 'Movimientos hoy', value: '36', detail: '8 entradas · 28 salidas' }], rows: products.map((p) => ({ Producto: p.name, Marca: p.brandId || '', Categoría: p.category, SKU: p.sku, Valor: p.price, Existencias: p.stock, Imagen: p.image, Ubicación: p.location || '', Estado: p.status === 'Activo' ? 'En stock' : p.status })) },
   customers: { title: 'Clientes', description: 'Conoce y gestiona la relación con las personas que compran en NEXO.', action: 'Nuevo cliente', columns: ['Nombre', 'Correo', 'Pedidos', 'Total comprado', 'Favoritos', 'Estado'], stats: [{ label: 'Clientes totales', value: '2,504', detail: '+14.2% este mes', tone: 'positive' }, { label: 'Nuevos este mes', value: '184', detail: '+8.4%', tone: 'positive' }, { label: 'Clientes recurrentes', value: '68%', detail: 'Últimos 90 días' }, { label: 'Ticket promedio', value: 'Q 377', detail: '+2.4%', tone: 'positive' }], rows: [{ Nombre: 'Valeria Castillo', Correo: 'valeria@email.com', Pedidos: 12, 'Total comprado': 4280, Favoritos: 0, Estado: 'Activo' }, { Nombre: 'Alejandro Pérez', Correo: 'alejandro@email.com', Pedidos: 8, 'Total comprado': 3120, Favoritos: 0, Estado: 'Activo' }, { Nombre: 'Sofía Rodríguez', Correo: 'sofia@email.com', Pedidos: 5, 'Total comprado': 1840, Favoritos: 0, Estado: 'Activo' }, { Nombre: 'Mateo Estrada', Correo: 'mateo@email.com', Pedidos: 3, 'Total comprado': 2160, Favoritos: 0, Estado: 'Activo' }] },
   users: { title: 'Usuarios y equipo', description: 'Administra accesos, roles y permisos del equipo NEXO.', action: 'Invitar usuario', columns: ['Nombre', 'Correo', 'Rol', 'Último acceso', 'Estado'], stats: [{ label: 'Usuarios activos', value: '8', detail: 'De 10 registrados' }, { label: 'Administradores', value: '2', detail: 'Acceso elevado' }, { label: 'Invitaciones', value: '2', detail: 'Pendientes', tone: 'warning' }, { label: 'Roles configurados', value: '5', detail: 'Permisos activos' }], rows: users.map((u) => ({ Nombre: u.name, Correo: u.email, Rol: roleLabels[u.role], 'Último acceso': 'Hoy, 09:42', Estado: u.status })) },
   transfers: { title: 'Transferencias', description: 'Verifica los comprobantes y confirma los pagos pendientes.', columns: ['Pedido', 'Cliente', 'Fecha', 'Valor', 'Estado de pago'], stats: [{ label: 'Por verificar', value: '7', detail: 'Requieren revisión', tone: 'warning' }, { label: 'Aprobadas hoy', value: '14', detail: '+16.7%', tone: 'positive' }, { label: 'Rechazadas', value: '2', detail: 'Este mes', tone: 'danger' }, { label: 'Monto pendiente', value: 'Q 8,460', detail: 'En verificación' }], rows: orders.filter((o) => o.payment === 'Transferencia').map((o) => ({ Pedido: o.id, Cliente: o.customer, Fecha: o.date, Valor: o.total, 'Estado de pago': o.status === 'Completado' ? 'Aprobada' : 'Pendiente' })) },
@@ -536,8 +579,8 @@ const moduleConfig: Record<string, AdminModuleConfig> = {
   settings: { title: 'Configuración', description: 'Personaliza la operación y las preferencias de tu cuenta.', action: 'Guardar cambios', columns: ['Configuración', 'Descripción', 'Estado'], stats: [{ label: 'Perfil de negocio', value: 'Completo', detail: 'Información actualizada' }, { label: 'Métodos disponibles', value: '2', detail: 'Se configuran arriba' }, { label: 'Notificaciones', value: 'Activas', detail: 'Preferencias guardadas' }, { label: 'Integraciones', value: '0', detail: 'Preparadas para API' }], rows: [{ Configuración: 'Datos del negocio', Descripción: 'Nombre, dirección y contacto', Estado: 'Activo' }, { Configuración: 'Notificaciones', Descripción: 'Alertas de pedidos y stock', Estado: 'Activo' }] },
 };
 
-moduleConfig['inventory/alerts'] = { ...moduleConfig.inventory, title: 'Alertas de stock', description: 'Identifica productos que necesitan reposición antes de afectar tus ventas.', action: undefined, columns: ['Producto', 'SKU', 'Existencias', 'Ubicación', 'Estado'], rows: products.filter((p) => p.stock < 15).map((p) => ({ Producto: p.name, SKU: p.sku, Existencias: p.stock, Ubicación: 'Bodega central', Estado: p.status })) };
-moduleConfig['inventory/history'] = { ...moduleConfig.inventory, title: 'Historial de movimientos', description: 'Consulta entradas, salidas y ajustes registrados en tu inventario.', action: undefined, columns: ['Producto', 'SKU', 'Existencias', 'Ubicación', 'Estado'], rows: [{ Producto: 'Auriculares Wave Pro', SKU: 'TEC-WAV-001', Existencias: 12, Ubicación: 'Bodega central', Estado: 'Entrada' }, { Producto: 'Mochila Terra Daily', SKU: 'ACC-TER-003', Existencias: -4, Ubicación: 'Sala de ventas', Estado: 'Salida' }, { Producto: 'Lámpara Aura Mini', SKU: 'HOG-AUR-002', Existencias: 8, Ubicación: 'Bodega central', Estado: 'Entrada' }] };
+moduleConfig['inventory/alerts'] = { ...moduleConfig.inventory, title: 'Alertas de stock', description: 'Identifica productos que necesitan reposición antes de afectar tus ventas.', action: undefined, columns: ['Producto', 'SKU', 'Existencias', 'Ubicación', 'Estado'], rows: [] };
+moduleConfig['inventory/history'] = { ...moduleConfig.inventory, title: 'Historial de movimientos', description: 'Consulta entradas, salidas y ajustes registrados en tu inventario.', action: undefined, columns: ['Producto', 'SKU', 'Existencias', 'Ubicación', 'Estado'], rows: [] };
 moduleConfig.invoices = { ...moduleConfig.sales, title: 'Referencias de pedidos', description: 'Consulta referencias de pedidos registrados. No son facturas fiscales.', action: undefined, columns: ['Referencia', 'Cliente', 'Fecha', 'Total', 'Estado'], rows: [] };
 moduleConfig.payments = { ...moduleConfig.transfers, title: 'Pagos', description: 'Supervisa los métodos de pago y el estado de cada transacción.', action: undefined, columns: ['Pedido', 'Cliente', 'Fecha', 'Valor', 'Estado de pago'], rows: orders.map((o) => ({ Pedido: o.id, Cliente: o.customer, Fecha: o.date, Valor: o.total, 'Estado de pago': o.payment === 'Tarjeta' ? 'Aprobada' : 'Pendiente' })) };
 moduleConfig.suppliers = { ...moduleConfig.products, title: 'Proveedores', description: 'Administra empresas abastecedoras y sus productos asociados.', action: 'Nuevo proveedor', columns: ['Empresa', 'Contacto', 'Teléfono', 'Correo', 'Productos abastecidos', 'Último pedido', 'Estado'], rows: suppliers.map((supplier) => ({ Empresa: supplier.name, Contacto: supplier.contactPerson || '—', Teléfono: supplier.phone || '—', Correo: supplier.email || '—', 'Productos abastecidos': supplier.productIds.length, 'Último pedido': supplier.lastOrder || 'Sin pedidos', Estado: supplier.status })) };

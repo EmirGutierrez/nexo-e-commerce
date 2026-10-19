@@ -11,6 +11,8 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.OffsetDateTime;
+import java.time.ZoneOffset;
 import java.util.Base64;
 import java.util.Locale;
 import java.util.UUID;
@@ -76,13 +78,37 @@ public class TeamInvitationService {
                 ON CONFLICT (user_id) DO UPDATE SET token_hash = EXCLUDED.token_hash,
                 expires_at = EXCLUDED.expires_at, accepted_at = NULL, invited_by = EXCLUDED.invited_by,
                 created_at = CURRENT_TIMESTAMP
-                """, account.getId(), hash(token), expiresAt, inviter);
+                """, account.getId(), hash(token), OffsetDateTime.ofInstant(expiresAt, ZoneOffset.UTC), inviter);
         return new TeamInvitationResponse(account.getId(), email, "PENDING", token);
+    }
+
+    @Transactional
+    public void revokePendingInvitation(UUID userId, Authentication authentication) {
+        if (!permissions.has(authentication, "users", "delete")) {
+            throw new AccessDeniedException("Se requiere users:delete.");
+        }
+
+        int deleted = jdbc.update("""
+                DELETE FROM app_user AS account
+                WHERE account.id = ?
+                  AND account.status = 'PENDING'
+                  AND account.role_code NOT IN ('customer', 'superadmin')
+                  AND EXISTS (
+                      SELECT 1 FROM user_invitations invitation
+                      WHERE invitation.user_id = account.id
+                        AND invitation.accepted_at IS NULL
+                  )
+                """, userId);
+        if (deleted != 1) {
+            throw new BusinessRuleException(HttpStatus.CONFLICT, "INVITATION_NOT_PENDING",
+                    "Solo se pueden revocar invitaciones pendientes que todavía no han sido aceptadas.");
+        }
     }
 
     @Transactional
     public void accept(String token, String rawPassword) {
         if (rawPassword == null || rawPassword.length() < 12) throw invalid("La contraseña debe tener al menos 12 caracteres.");
+        if (!PasswordPolicy.isWithinBcryptLimit(rawPassword)) throw invalid("La contraseña no puede superar 72 bytes UTF-8 por el algoritmo de almacenamiento seguro.");
         if (token == null || token.isBlank()) throw invalid("El enlace de invitación no es válido.");
         UUID userId = jdbc.query("""
                 SELECT user_id FROM user_invitations

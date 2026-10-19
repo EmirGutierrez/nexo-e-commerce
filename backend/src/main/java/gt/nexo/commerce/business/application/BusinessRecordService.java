@@ -1,9 +1,15 @@
 package gt.nexo.commerce.business.application;
 
 import gt.nexo.commerce.business.api.BusinessRecordResponse;
+import gt.nexo.commerce.business.api.InventoryProductRemovalResponse;
+import gt.nexo.commerce.business.api.OrderQuoteResponse;
+import gt.nexo.commerce.business.api.OrderSubmissionResponse;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
 import gt.nexo.commerce.identity.application.PermissionAuthorizer;
 import java.math.BigDecimal;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
 import java.time.ZoneOffset;
@@ -14,6 +20,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.HexFormat;
+import java.util.TreeMap;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -26,6 +34,8 @@ import tools.jackson.databind.ObjectMapper;
 
 @Service
 public class BusinessRecordService {
+    private static final int TRANSFER_RESERVATION_HOURS = 24;
+    private static final int TRANSFER_EXPIRATION_BATCH_SIZE = 100;
     private static final Set<String> RESOURCES = Set.of(
             "products", "brands", "categories", "customers", "suppliers", "orders", "purchases",
             "sales", "accounting", "transfers", "payments", "invoices", "settings",
@@ -77,10 +87,40 @@ public class BusinessRecordService {
         }).toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<BusinessRecordResponse> listInventoryProducts() {
+        authorize("inventory", "view");
+        return jdbc.query("""
+                SELECT id, resource_code, data::text AS data, created_at, updated_at
+                FROM business_records WHERE resource_code = 'products' ORDER BY created_at DESC, id
+                """, (rs, row) -> new BusinessRecordResponse(
+                rs.getObject("id", UUID.class), rs.getString("resource_code"), readMap(rs.getString("data")),
+                rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant()));
+    }
+
+    @Transactional(readOnly = true)
+    public List<String> listInventoryLocations() {
+        authorize("inventory", "view");
+        return jdbc.queryForList("""
+                SELECT location_name FROM inventory_locations
+                ORDER BY LOWER(location_name), location_name
+                """, String.class);
+    }
+
     @Transactional
     public BusinessRecordResponse create(String resource, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "create");
+        return createAuthorized(normalized, input);
+    }
+
+    @Transactional
+    public BusinessRecordResponse createInventoryProduct(Map<String, Object> input) {
+        authorize("inventory", "create");
+        return createAuthorized("products", input);
+    }
+
+    private BusinessRecordResponse createAuthorized(String normalized, Map<String, Object> input) {
         if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);
@@ -113,6 +153,47 @@ public class BusinessRecordService {
     public BusinessRecordResponse update(String resource, UUID id, Map<String, Object> input) {
         String normalized = normalize(resource);
         authorize(normalized, "edit");
+        return updateAuthorized(normalized, id, input);
+    }
+
+    @Transactional
+    public BusinessRecordResponse updateInventoryProduct(UUID id, Map<String, Object> input) {
+        authorize("inventory", "edit");
+        return updateAuthorized("products", id, input);
+    }
+
+    @Transactional
+    public InventoryProductRemovalResponse deleteInventoryProduct(UUID id) {
+        authorize("inventory", "delete");
+        Map<String, Object> product = lockedRecord("products", id);
+        jdbc.queryForObject("SELECT record_id FROM products WHERE record_id = ? FOR UPDATE", UUID.class, id);
+        boolean hasHistory = Boolean.TRUE.equals(jdbc.queryForObject("""
+                SELECT EXISTS (SELECT 1 FROM inventory_movements WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM commerce_order_items WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM merchandise_purchase_items WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM in_person_sale_items WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM customer_wishlist_items WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM supplier_products WHERE product_record_id = ?)
+                    OR EXISTS (SELECT 1 FROM product_offers WHERE product_record_id = ?)
+                """, Boolean.class, id, id, id, id, id, id, id));
+
+        if (hasHistory) {
+            product.put("status", "Inactivo");
+            jdbc.update("""
+                    UPDATE business_records SET data = ?::jsonb, status_code = ?, updated_at = CURRENT_TIMESTAMP
+                    WHERE id = ? AND resource_code = 'products'
+                    """, writeJson(product), statusOf(product), id);
+            syncProjection(id, "products", product, actorId());
+            return new InventoryProductRemovalResponse(false);
+        }
+
+        productImages.delete(id);
+        int deleted = jdbc.update("DELETE FROM business_records WHERE id = ? AND resource_code = 'products'", id);
+        if (deleted == 0) throw missing();
+        return new InventoryProductRemovalResponse(true);
+    }
+
+    private BusinessRecordResponse updateAuthorized(String normalized, UUID id, Map<String, Object> input) {
         if (Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este registro no admite edición directa.");
         Map<String, Object> data = clean(input);
@@ -309,22 +390,72 @@ public class BusinessRecordService {
     }
 
     @Transactional
-    public BusinessRecordResponse createPublicOrder(Map<String, Object> input) {
-        return createOrder(input, null, null);
+    public OrderSubmissionResponse createPublicOrder(Map<String, Object> input, UUID idempotencyKey) {
+        return orderSubmission(createOrder(input, null, null, idempotencyKey));
     }
 
     @Transactional
-    public BusinessRecordResponse createCustomerOrder(Map<String, Object> input, UUID customerUserId) {
-        return createOrder(input, null, customerUserId);
+    public OrderSubmissionResponse createCustomerOrder(Map<String, Object> input, UUID customerUserId, UUID idempotencyKey) {
+        return orderSubmission(createOrder(input, null, customerUserId, idempotencyKey));
     }
 
     @Transactional
     public BusinessRecordResponse createStaffOrder(Map<String, Object> input) {
         authorize("orders", "create");
-        return createOrder(input, actorId(), null);
+        return createOrder(input, actorId(), null, null);
     }
 
-    private BusinessRecordResponse createOrder(Map<String, Object> input, UUID actor, UUID customerUserId) {
+    @Transactional(readOnly = true)
+    public OrderQuoteResponse quotePublicOrder(Map<String, Object> input) {
+        Map<UUID, Integer> quantities = orderQuantities(input);
+        List<OrderQuoteResponse.Item> items = new ArrayList<>();
+        BigDecimal subtotal = BigDecimal.ZERO;
+        for (var entry : quantities.entrySet()) {
+            Map<String, Object> product = publicProduct(entry.getKey());
+            int stock = number(field(product, "stock", "Existencias"), 0);
+            if (entry.getValue() > stock) throw conflict("Stock insuficiente para " + field(product, "name", "Producto") + ". Disponible: " + stock + ".");
+            BigDecimal unitPrice = promotions.priceForProduct(entry.getKey(), decimal(field(product, "price", "Valor")));
+            BigDecimal lineTotal = unitPrice.multiply(BigDecimal.valueOf(entry.getValue()));
+            items.add(new OrderQuoteResponse.Item(entry.getKey().toString(), text(field(product, "name", "Producto")),
+                    entry.getValue(), unitPrice, lineTotal));
+            subtotal = subtotal.add(lineTotal);
+        }
+        String code = text(input.get("discountCode")).toUpperCase(Locale.ROOT);
+        BigDecimal discount = BigDecimal.ZERO;
+        if (!code.isBlank()) {
+            Map<String, Object> validation = promotions.validateCode(code, subtotal);
+            if (!Boolean.TRUE.equals(validation.get("valid"))) throw conflict(text(validation.get("message")));
+            discount = decimal(validation.get("discount"));
+        }
+        return new OrderQuoteResponse(subtotal, discount, subtotal.subtract(discount), items);
+    }
+
+    @Transactional(readOnly = true)
+    public OrderSubmissionResponse publicOrderSubmission(UUID idempotencyKey) {
+        return jdbc.query("""
+                SELECT b.data::text AS data
+                FROM public_order_idempotency i
+                JOIN business_records b ON b.id = i.order_record_id AND b.resource_code = 'orders'
+                WHERE i.idempotency_key = ?
+                """, rs -> {
+            if (!rs.next()) throw missing();
+            Map<String, Object> data = readMap(rs.getString("data"));
+            return new OrderSubmissionResponse(text(data.get("orderNumber")), decimal(data.get("total")),
+                    text(data.get("paymentMethod")), text(data.get("paymentStatus")));
+        }, idempotencyKey);
+    }
+
+    private BusinessRecordResponse createOrder(Map<String, Object> input, UUID actor, UUID customerUserId, UUID idempotencyKey) {
+        if (idempotencyKey != null) {
+            String requestHash = orderRequestHash(input);
+            int inserted = jdbc.update("""
+                    INSERT INTO public_order_idempotency (idempotency_key, request_hash)
+                    VALUES (?, ?)
+                    ON CONFLICT (idempotency_key) DO NOTHING
+                    """, idempotencyKey, requestHash);
+            if (inserted == 0) return replayOrder(idempotencyKey, requestHash);
+            jdbc.update("DELETE FROM public_order_idempotency WHERE created_at < CURRENT_TIMESTAMP - INTERVAL '90 days'");
+        }
         String customerName = text(input.get("customerName"));
         String customerEmail = text(input.get("customerEmail")).toLowerCase(Locale.ROOT);
         String paymentMethod = text(input.get("paymentMethod"));
@@ -333,16 +464,7 @@ public class BusinessRecordService {
         if (!customerEmail.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Ingresa un correo válido para el pedido.");
         if (address.isBlank() || address.length() > 500) throw invalid("Ingresa una dirección de entrega válida.");
         if (!Set.of("card", "transfer").contains(paymentMethod) || !paymentEnabled(paymentMethod)) throw conflict("El método de pago ya no está disponible.");
-        List<?> rawItems = input.get("items") instanceof List<?> list ? list : List.of();
-        if (rawItems.isEmpty()) throw invalid("El pedido debe incluir al menos un producto.");
-        Map<UUID, Integer> quantities = new LinkedHashMap<>();
-        for (Object item : rawItems) {
-            if (!(item instanceof Map<?, ?> row)) throw invalid("Uno de los artículos del pedido no es válido.");
-            UUID productId = parseUuid(row.get("productId"));
-            int quantity = number(row.get("quantity"), 0);
-            if (quantity < 1 || quantity > 100) throw invalid("La cantidad de cada producto debe estar entre 1 y 100.");
-            quantities.merge(productId, quantity, Integer::sum);
-        }
+        Map<UUID, Integer> quantities = orderQuantities(input);
         List<Map<String, Object>> orderItems = new ArrayList<>();
         BigDecimal subtotal = BigDecimal.ZERO;
         for (var entry : quantities.entrySet()) {
@@ -360,6 +482,9 @@ public class BusinessRecordService {
         String discountCode = text(input.get("discountCode")).toUpperCase(Locale.ROOT);
         BigDecimal discount = promotions.useCode(discountCode, subtotal);
         BigDecimal total = subtotal.subtract(discount);
+        if (input.get("expectedTotal") != null && decimal(input.get("expectedTotal")).compareTo(total) != 0) {
+            throw conflict("El total cambió mientras confirmabas el pedido. Revisa el precio actualizado y vuelve a confirmar.");
+        }
         UUID orderId = UUID.randomUUID();
         Instant now = Instant.now();
         String status = paymentMethod.equals("card") ? "En preparación" : "Pendiente de pago";
@@ -374,6 +499,7 @@ public class BusinessRecordService {
         data.put("orderNumber", "NX-" + orderId.toString().substring(0, 8).toUpperCase(Locale.ROOT));
         ensureCustomer(customerName, customerEmail, optionalText(input.get("customerPhone")));
         jdbc.update("INSERT INTO business_records (id, resource_code, data, status_code, created_by) VALUES (?, 'orders', ?::jsonb, ?, ?)", orderId, writeJson(data), status, actor);
+        if (idempotencyKey != null) jdbc.update("UPDATE public_order_idempotency SET order_record_id = ? WHERE idempotency_key = ?", orderId, idempotencyKey);
         syncProjection(orderId, "orders", data, actor);
         if (paymentMethod.equals("transfer")) saveTransferReceipt(orderId, input);
         for (var entry : quantities.entrySet()) changeStock(entry.getKey(), -entry.getValue(), "ORDER", "Reserva del pedido " + data.get("orderNumber"), orderId, actor);
@@ -381,6 +507,67 @@ public class BusinessRecordService {
                 "Recibimos " + data.get("orderNumber") + ". " + (paymentMethod.equals("transfer")
                         ? "Tu comprobante está pendiente de revisión." : "El pago con tarjeta fue simulado."), "order-received:" + orderId);
         return new BusinessRecordResponse(orderId, "orders", data, now, now);
+    }
+
+    private Map<UUID, Integer> orderQuantities(Map<String, Object> input) {
+        List<?> rawItems = input.get("items") instanceof List<?> list ? list : List.of();
+        if (rawItems.isEmpty()) throw invalid("El pedido debe incluir al menos un producto.");
+        Map<UUID, Integer> quantities = new LinkedHashMap<>();
+        for (Object item : rawItems) {
+            if (!(item instanceof Map<?, ?> row)) throw invalid("Uno de los artículos del pedido no es válido.");
+            UUID productId = parseUuid(row.get("productId"));
+            int quantity = number(row.get("quantity"), 0);
+            if (quantity < 1 || quantity > 100) throw invalid("La cantidad de cada producto debe estar entre 1 y 100.");
+            int combined = quantities.getOrDefault(productId, 0) + quantity;
+            if (combined > 100) throw invalid("La cantidad de cada producto no puede superar 100 unidades.");
+            quantities.put(productId, combined);
+        }
+        return quantities;
+    }
+
+    private BusinessRecordResponse replayOrder(UUID idempotencyKey, String requestHash) {
+        return jdbc.query("""
+                SELECT i.request_hash, b.id, b.resource_code, b.data::text AS data, b.created_at, b.updated_at
+                FROM public_order_idempotency i
+                LEFT JOIN business_records b ON b.id = i.order_record_id AND b.resource_code = 'orders'
+                WHERE i.idempotency_key = ?
+                FOR UPDATE OF i
+                """, rs -> {
+            if (!rs.next()) throw conflict("No se pudo confirmar el estado del pedido. Inténtalo nuevamente.");
+            if (!MessageDigest.isEqual(rs.getString("request_hash").getBytes(StandardCharsets.US_ASCII), requestHash.getBytes(StandardCharsets.US_ASCII))) {
+                throw conflict("Esta solicitud ya se usó para otro pedido. Actualiza la página e inténtalo nuevamente.");
+            }
+            UUID orderId = rs.getObject("id", UUID.class);
+            if (orderId == null) throw conflict("El pedido aún se está procesando. Consulta el estado antes de volver a enviarlo.");
+            return new BusinessRecordResponse(orderId, rs.getString("resource_code"), readMap(rs.getString("data")),
+                    rs.getTimestamp("created_at").toInstant(), rs.getTimestamp("updated_at").toInstant());
+        }, idempotencyKey);
+    }
+
+    private OrderSubmissionResponse orderSubmission(BusinessRecordResponse order) {
+        Map<String, Object> data = order.data();
+        return new OrderSubmissionResponse(text(data.get("orderNumber")), decimal(data.get("total")),
+                text(data.get("paymentMethod")), text(data.get("paymentStatus")));
+    }
+
+    private String orderRequestHash(Map<String, Object> input) {
+        try {
+            byte[] digest = MessageDigest.getInstance("SHA-256")
+                    .digest(writeJson(canonicalize(input)).getBytes(StandardCharsets.UTF_8));
+            return HexFormat.of().formatHex(digest);
+        } catch (NoSuchAlgorithmException exception) {
+            throw new IllegalStateException("No está disponible SHA-256.", exception);
+        }
+    }
+
+    private Object canonicalize(Object value) {
+        if (value instanceof Map<?, ?> map) {
+            Map<String, Object> sorted = new TreeMap<>();
+            map.forEach((key, item) -> sorted.put(String.valueOf(key), canonicalize(item)));
+            return sorted;
+        }
+        if (value instanceof List<?> list) return list.stream().map(this::canonicalize).toList();
+        return value;
     }
 
     @Transactional(readOnly = true)
@@ -530,6 +717,58 @@ public class BusinessRecordService {
             item.put("date", rs.getTimestamp("submitted_at").toInstant().toString());
             return item;
         });
+    }
+
+    /**
+     * Expires transfer orders whose submitted receipt has remained unreviewed for 24 hours.
+     * Receipt rows are locked first, matching reviewTransferReceipt's lock order. SKIP LOCKED
+     * allows more than one application instance to run this job without double-releasing stock.
+     */
+    @Transactional
+    public int expirePendingTransferOrders() {
+        List<UUID> expiredOrderIds = jdbc.queryForList("""
+                SELECT r.order_record_id
+                FROM transfer_receipts r
+                JOIN business_records b ON b.id = r.order_record_id AND b.resource_code = 'orders'
+                WHERE r.status = 'Pendiente'
+                  AND r.submitted_at <= CURRENT_TIMESTAMP - (CAST(? AS integer) * INTERVAL '1 hour')
+                  AND b.data ->> 'status' = 'Pendiente de pago'
+                  AND b.data ->> 'paymentMethod' = 'transfer'
+                ORDER BY r.submitted_at, r.order_record_id
+                LIMIT ?
+                FOR UPDATE OF r SKIP LOCKED
+                """, UUID.class, TRANSFER_RESERVATION_HOURS, TRANSFER_EXPIRATION_BATCH_SIZE);
+
+        int expired = 0;
+        for (UUID orderId : expiredOrderIds) {
+            Map<String, Object> before = lockedRecord("orders", orderId);
+            if (!"Pendiente de pago".equals(String.valueOf(before.get("status")))
+                    || !"transfer".equals(String.valueOf(before.get("paymentMethod")))) continue;
+
+            Map<String, Object> after = new LinkedHashMap<>(before);
+            after.put("status", "Cancelado");
+            after.put("paymentStatus", "Expirada");
+            transitionOrder(orderId, before, after, null);
+            jdbc.update("UPDATE business_records SET data = ?::jsonb, status_code = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?",
+                    writeJson(after), statusOf(after), orderId);
+            syncOrder(orderId, after);
+            jdbc.update("""
+                    UPDATE transfer_receipts
+                    SET status = 'Expirada', reviewed_at = CURRENT_TIMESTAMP, reviewed_by = NULL
+                    WHERE order_record_id = ? AND status = 'Pendiente'
+                    """, orderId);
+
+            UUID customerUserId = orderCustomerId(orderId);
+            if (customerUserId != null) {
+                createCustomerNotification(customerUserId, orderId, "ORDER_EXPIRED", "Reserva vencida",
+                        "La reserva del pedido " + text(after.get("orderNumber"))
+                                + " venció tras 24 horas sin revisión del comprobante y las existencias se liberaron. "
+                                + "Si ya realizaste la transferencia, contacta a la tienda y comparte la referencia del pedido.",
+                        "order-expired:" + orderId);
+            }
+            expired++;
+        }
+        return expired;
     }
 
     @Transactional
@@ -913,6 +1152,7 @@ public class BusinessRecordService {
                         number(field(data, "stock", "Existencias"), 0), defaultText(field(data, "status", "Estado"), "Activo"),
                         optionalText(field(data, "image", "Imagen")), defaultText(field(data, "description", "Descripción"), ""),
                         Boolean.TRUE.equals(data.get("featured")));
+                rememberInventoryLocation(field(data, "location", "Ubicación"));
             }
             case "suppliers" -> {
                 jdbc.update("""
@@ -958,6 +1198,16 @@ public class BusinessRecordService {
                     decimal(field(data, "amount", "Monto")), defaultText(field(data, "status", "Estado"), "Registrado"), actor);
             default -> { }
         }
+    }
+
+    private void rememberInventoryLocation(Object value) {
+        String location = text(value);
+        if (location.isBlank()) return;
+        jdbc.update("""
+                INSERT INTO inventory_locations (location_name, normalized_name)
+                VALUES (?, LOWER(BTRIM(?)))
+                ON CONFLICT (normalized_name) DO NOTHING
+                """, location, location);
     }
 
     private void syncPurchase(UUID id, Map<String, Object> data) {
@@ -1155,6 +1405,9 @@ public class BusinessRecordService {
             if (image.length() > 1000 && !image.startsWith("data:image/")) throw invalid("La dirección de imagen del producto es demasiado larga.");
             BigDecimal price = decimal(field(data, "price", "Valor"));
             if (price.signum() < 0) throw invalid("El precio no puede ser negativo.");
+            Object rawCost = field(data, "cost", "Costo unitario");
+            if (rawCost != null && !String.valueOf(rawCost).isBlank() && decimal(rawCost).signum() <= 0)
+                throw invalid("El costo unitario debe ser mayor que cero.");
             int stock = number(field(data, "stock", "Existencias"), 0);
             if (stock < 0) throw invalid("Las existencias no pueden ser negativas.");
             String requestedStatus = defaultText(field(data, "status", "Estado"), "Activo");

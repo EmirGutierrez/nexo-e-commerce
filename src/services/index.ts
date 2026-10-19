@@ -8,6 +8,9 @@ import { roleService } from './roleService';
 type JsonRecord = Record<string, unknown>;
 interface ApiRecord<T extends JsonRecord = JsonRecord> { id: string; resource: string; data: T; createdAt?: string; updatedAt?: string }
 export type AdminTableRecord = Record<string, string | number>;
+export interface CheckoutQuote { subtotal: number; discount: number; total: number; items: { productId: string; productName: string; quantity: number; unitPrice: number; subtotal: number }[] }
+export interface OrderSubmission { reference: string; total: number; paymentMethod: PaymentMethod; paymentStatus: string }
+type CheckoutInput = { customerName: string; customerEmail: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[]; discountCode?: string; receiptImage?: string; receiptFileName?: string; receiptReference?: string };
 
 const business = {
   list: (resource: string) => apiClient.get<ApiRecord[]>(`/api/business/${encodeURIComponent(resource)}`),
@@ -31,6 +34,8 @@ function mapProduct(record: ApiRecord): Product {
     category: stringValue(data, 'category', 'Categoría'),
     price: numberValue(data, 'price', 'Valor'),
     compareAt: value(data, 'compareAt', 'Precio anterior') === undefined ? undefined : numberValue(data, 'compareAt', 'Precio anterior'),
+    cost: value(data, 'cost', 'Costo unitario') === undefined || value(data, 'cost', 'Costo unitario') === '' ? undefined : numberValue(data, 'cost', 'Costo unitario'),
+    location: stringValue(data, 'location', 'Ubicación') || undefined,
     stock,
     status: statusValue === 'Inactivo' || statusValue === 'Inactiva' ? 'Inactivo' : statusValue === 'Agotado' || stock === 0 ? 'Agotado' : stock < 10 ? 'Bajo stock' : 'Activo',
     image: stringValue(data, 'image', 'Imagen'),
@@ -42,7 +47,8 @@ function mapProduct(record: ApiRecord): Product {
 function productData(product: Product): JsonRecord {
   return { name: product.name, brandId: product.brandId || null, category: product.category, price: product.price,
     compareAt: product.compareAt ?? null, stock: product.stock, status: product.status, image: product.image,
-    description: product.description, featured: Boolean(product.featured), sku: product.sku };
+    description: product.description, featured: Boolean(product.featured), sku: product.sku,
+    ...(product.cost === undefined ? {} : { cost: product.cost }), ...(product.location === undefined ? {} : { location: product.location }) };
 }
 
 interface ApiUser { id: string; name: string; email: string; role: string; status: string; lastLoginAt?: string | null; permissions?: string[] }
@@ -55,9 +61,9 @@ function mapApiUser(user: ApiUser): User {
 }
 
 export const authService = {
-  login: async (email: string, password: string): Promise<User | null> => {
-    try { const user = await apiClient.post<ApiUser>('/api/auth/login', { email, password }); clearCsrfToken(); return mapApiUser(user); }
-    catch (error) { if (error instanceof ApiError && error.status === 401) return null; throw error; }
+  login: async (email: string, password: string, mfaCode?: string): Promise<User | null> => {
+    try { const user = await apiClient.post<ApiUser>('/api/auth/login', { email, password, ...(mfaCode ? { mfaCode } : {}) }); clearCsrfToken(); return mapApiUser(user); }
+    catch (error) { if (error instanceof ApiError && error.status === 401 && error.code !== 'MFA_REQUIRED' && error.code !== 'MFA_INVALID') return null; throw error; }
   },
   registerCustomer: async (name: string, email: string, password: string): Promise<User> => {
     const user = await apiClient.post<ApiUser>('/api/auth/register', { name, email, password }); clearCsrfToken(); return mapApiUser(user);
@@ -72,10 +78,24 @@ export const authService = {
   },
 };
 
+export interface MfaStatus { enabled: boolean; enrollmentPending: boolean; recoveryCodesRemaining: number }
+export interface MfaEnrollment { secret: string; otpauthUri: string }
+export const mfaService = {
+  status: () => apiClient.get<MfaStatus>('/api/auth/mfa'),
+  beginEnrollment: (currentPassword: string) => apiClient.post<MfaEnrollment>('/api/auth/mfa/enroll/start', { currentPassword }),
+  completeEnrollment: (code: string) => apiClient.post<{ recoveryCodes: string[] }>('/api/auth/mfa/enroll/complete', { code }),
+  rotateRecoveryCodes: (currentPassword: string, code: string) => apiClient.post<{ recoveryCodes: string[] }>('/api/auth/mfa/recovery-codes/rotate', { currentPassword, code }),
+  disable: (currentPassword: string, code: string) => apiClient.post<void>('/api/auth/mfa/disable', { currentPassword, code }),
+};
+
 export interface CustomerOrder {
   id: string; createdAt?: string;
-  data: { orderNumber?: string; customer?: string; date?: string; status?: string; paymentStatus?: string;
-    paymentMethod?: string; total?: number; items?: { productName?: string; quantity?: number; subtotal?: number }[] };
+  data: {
+    orderNumber?: string; customer?: string; customerEmail?: string; customerPhone?: string; address?: string;
+    date?: string; status?: string; paymentStatus?: string; paymentMethod?: string; payment?: string;
+    subtotal?: number; discountAmount?: number; discountCode?: string; total?: number;
+    items?: { productId?: string; productName?: string; sku?: string; quantity?: number; unitPrice?: number; subtotal?: number }[];
+  };
 }
 export interface CustomerNotification {
   id: string; orderId?: string | null; type: string; title: string; message: string; read: boolean; createdAt: string;
@@ -184,7 +204,10 @@ function mapSupplier(record: ApiRecord): Supplier {
 export const inventoryService = {
   summary: () => apiClient.get<{ products: number; totalUnits: number; lowStock: number; outOfStock: number }>('/api/business/inventory/summary'),
   movements: () => apiClient.get<JsonRecord[]>('/api/business/inventory/movements'),
+  locations: () => apiClient.get<string[]>('/api/business/inventory/locations'),
+  products: async (): Promise<Product[]> => (await apiClient.get<ApiRecord[]>('/api/business/inventory/products')).map(mapProduct),
 };
+const inventoryProductRecords = () => apiClient.get<ApiRecord[]>('/api/business/inventory/products');
 export const productInventoryService = {
   list: async (): Promise<Product[]> => (await business.list('products')).map(mapProduct),
   assignBrand: async (sku: string, brandId: string | null) => {
@@ -256,13 +279,18 @@ export const paymentService = {
   },
 };
 export const checkoutService = {
-  create: (input: { customerName: string; customerEmail: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[]; discountCode?: string; receiptImage?: string; receiptFileName?: string; receiptReference?: string }) =>
-    apiClient.post<ApiRecord>('/api/catalog/orders', input).then((record) => ({
-      id: record.id, reference: stringValue(record.data, 'orderNumber') || record.id,
-      total: numberValue(record.data, 'total'), status: stringValue(record.data, 'status'),
-      paymentMethod: stringValue(record.data, 'paymentMethod') as PaymentMethod,
-      paymentStatus: stringValue(record.data, 'paymentStatus'),
-    })),
+  quote: (input: Pick<CheckoutInput, 'items' | 'discountCode'>) =>
+    apiClient.post<CheckoutQuote>('/api/catalog/orders/quote', input),
+  create: (input: CheckoutInput, idempotencyKey: string, expectedTotal: number) =>
+    apiClient.post<OrderSubmission>('/api/catalog/orders', { ...input, expectedTotal }, { 'Idempotency-Key': idempotencyKey }),
+  findSubmission: async (idempotencyKey: string): Promise<OrderSubmission | null> => {
+    try {
+      return await apiClient.get<OrderSubmission>(`/api/catalog/orders/submissions/${encodeURIComponent(idempotencyKey)}`);
+    } catch (issue) {
+      if (issue instanceof ApiError && issue.status === 404) return null;
+      throw issue;
+    }
+  },
 };
 export const transferService = {
   list: async () => (await business.list('orders')).filter((record) => stringValue(record.data, 'paymentMethod', 'payment') === 'transfer' || stringValue(record.data, 'payment') === 'Transferencia').map(mapOrder),
@@ -276,6 +304,8 @@ export const transferService = {
 export const userService = {
   list: async (): Promise<User[]> => (await apiClient.get<ApiUser[]>('/api/users')).map(mapApiUser),
   invite: async (input: { name: string; email: string; role: User['role'] }) => apiClient.post<{ id: string; email: string; status: string; token: string }>('/api/users/invitations', input),
+  revokeInvitation: (id: string) => apiClient.delete<void>(`/api/users/invitations/${encodeURIComponent(id)}`),
+  delete: (id: string) => apiClient.delete<void>(`/api/users/${encodeURIComponent(id)}`),
   updateProfile: async (name: string): Promise<User> => mapApiUser(await apiClient.patch<ApiUser>('/api/auth/me/profile', { name })),
 };
 export const dashboardService = {
@@ -318,8 +348,13 @@ export const accountingService = {
 const resourceFor = (section: string) => section === 'inventory' || section === 'inventory/alerts' ? 'products' : ['transfers', 'payments', 'invoices'].includes(section) ? 'orders' : section;
 function toDomainData(section: string, row: AdminTableRecord): JsonRecord {
   if (section === 'products' || section === 'inventory' || section === 'inventory/alerts') return {
-    name: row.Producto, brandId: row.Marca || null, category: row.Categoría || '', sku: row.SKU || '', price: row.Valor ?? 0,
-    stock: row.Existencias ?? 0, status: row.Estado === 'En stock' ? 'Activo' : row.Estado || 'Activo', image: row.Imagen || '',
+    name: row.Producto, brandId: row.Marca || null, category: row.Categoría || '', sku: row.SKU || '',
+    ...(row['Precio de venta'] !== undefined || row.Valor !== undefined ? { price: row['Precio de venta'] ?? row.Valor } : {}),
+    ...(row['Costo unitario'] === undefined ? {} : { cost: row['Costo unitario'] === '' ? null : row['Costo unitario'] }),
+    stock: row.Existencias ?? 0,
+    status: row.Estado === 'Inactivo' ? 'Inactivo' : 'Activo',
+    ...(row.Imagen !== undefined ? { image: row.Imagen } : {}),
+    ...(row.Ubicación !== undefined ? { location: row.Ubicación } : {}),
     ...(row.Descripción === undefined ? {} : { description: row.Descripción }),
   };
   if (section === 'categories') return { name: row.Nombre, status: row.Estado || 'Activo' };
@@ -342,9 +377,14 @@ function toDomainData(section: string, row: AdminTableRecord): JsonRecord {
 function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
   if (section === 'products' || section === 'inventory' || section === 'inventory/alerts') return {
     Producto: stringValue(data, 'name', 'Producto'), Marca: stringValue(data, 'brandId', 'Marca'), Categoría: stringValue(data, 'category', 'Categoría'),
-    SKU: stringValue(data, 'sku', 'SKU'), Valor: numberValue(data, 'price', 'Valor'), Existencias: numberValue(data, 'stock', 'Existencias'),
-    Imagen: stringValue(data, 'image', 'Imagen'), Estado: section === 'inventory' && stringValue(data, 'status', 'Estado') === 'Activo' ? 'En stock' : stringValue(data, 'status', 'Estado'),
-    Ubicación: stringValue(data, 'Ubicación') || 'Bodega central',
+    SKU: stringValue(data, 'sku', 'SKU'), Valor: numberValue(data, 'price', 'Valor'),
+    'Costo unitario': value(data, 'cost', 'Costo unitario') === undefined || value(data, 'cost', 'Costo unitario') === '' ? '' : numberValue(data, 'cost', 'Costo unitario'),
+    'Precio de venta': numberValue(data, 'price', 'Precio de venta'),
+    Existencias: numberValue(data, 'stock', 'Existencias'), Imagen: stringValue(data, 'image', 'Imagen'),
+    Estado: section === 'inventory'
+      ? stringValue(data, 'status', 'Estado') === 'Inactivo' ? 'Inactivo' : numberValue(data, 'stock', 'Existencias') > 0 ? 'En stock' : 'Sin stock'
+      : stringValue(data, 'status', 'Estado'),
+    Ubicación: stringValue(data, 'location', 'Ubicación'), Descripción: stringValue(data, 'description', 'Descripción'),
   };
   if (section === 'categories') return { Nombre: stringValue(data, 'name'), Productos: numberValue(data, 'products'), 'Ventas del mes': numberValue(data, 'monthlySales'), Estado: stringValue(data, 'status') };
   if (section === 'customers') return { Nombre: stringValue(data, 'name'), Correo: stringValue(data, 'email'), Pedidos: numberValue(data, 'orders'), 'Total comprado': numberValue(data, 'totalPurchased'), Favoritos: numberValue(data, 'wishlistItems'), Estado: stringValue(data, 'status') };
@@ -357,6 +397,7 @@ function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
 
 export const adminTableService = {
   list: async (section: string): Promise<{ id: string; data: AdminTableRecord }[]> => {
+    if (section === 'inventory') return (await inventoryProductRecords()).map((record) => ({ id: record.id, data: toAdminRow('inventory', dataWithId(record)) }));
     if (section === 'users') return (await apiClient.get<ApiUser[]>('/api/users')).map((user) => ({ id: user.id,
       data: { Nombre: user.name, Correo: user.email, Rol: roleLabels[user.role as User['role']] || user.role,
         'Último acceso': user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('es-GT') : 'Nunca', Estado: user.status === 'ACTIVE' ? 'Activo' : user.status === 'PENDING' ? 'Pendiente' : 'Inactivo' } }));
@@ -365,8 +406,8 @@ export const adminTableService = {
     if (section === 'inventory/history') return (await inventoryService.movements()).map((movement) => ({ id: String(movement.id), data: {
       Producto: String(movement.productName), SKU: String(movement.sku), Existencias: Number(movement.quantity), Ubicación: String(movement.reason), Estado: String(movement.type),
     } }));
-    if (section === 'inventory/alerts') return (await productInventoryService.list()).filter((product) => product.status !== 'Inactivo' && product.stock < 10).map((product) => ({ id: product.id,
-      data: { Producto: product.name, SKU: product.sku, Existencias: product.stock, Ubicación: 'Bodega central', Estado: product.status } }));
+    if (section === 'inventory/alerts') return (await inventoryService.products()).filter((product) => product.status !== 'Inactivo' && product.stock < 10).map((product) => ({ id: product.id,
+      data: { Producto: product.name, SKU: product.sku, Existencias: product.stock, Ubicación: product.location || '', Estado: product.status } }));
     if (['transfers', 'payments', 'invoices'].includes(section)) {
       const orders = await business.list('orders');
       const filtered = section === 'transfers' ? orders.filter((record) => stringValue(record.data, 'paymentMethod', 'payment') === 'transfer' || stringValue(record.data, 'payment') === 'Transferencia') : orders;
@@ -384,7 +425,10 @@ export const adminTableService = {
         Rol: roleLabels[role], 'Último acceso': 'Nunca', Estado: 'Pendiente' } };
     }
     if (section === 'roles-permissions') throw new Error('Los roles disponibles se administran desde la matriz de permisos.');
-    const record = await business.create(resourceFor(section), toDomainData(section, row));
+    const domainData = toDomainData(section, row);
+    const record = section === 'inventory'
+      ? await apiClient.post<ApiRecord>('/api/business/inventory/products', domainData)
+      : await business.create(resourceFor(section), domainData);
     return { id: record.id, data: toAdminRow(section, dataWithId(record)) };
   },
   update: async (section: string, id: string, row: AdminTableRecord): Promise<{ id: string; data: AdminTableRecord }> => {
@@ -396,7 +440,7 @@ export const adminTableService = {
       if (!result) throw new Error('El usuario ya no está disponible.'); return result;
     }
     const resource = resourceFor(section);
-    const original = (await business.list(resource)).find((entry) => entry.id === id);
+    const original = (section === 'inventory' ? await inventoryProductRecords() : await business.list(resource)).find((entry) => entry.id === id);
     if (!original) throw new Error('El registro ya no está disponible.');
     let update: JsonRecord;
     if (section === 'orders') update = { ...original.data, status: row.Estado };
@@ -406,11 +450,14 @@ export const adminTableService = {
       update = { ...original.data, paymentStatus, ...(paymentStatus === 'Aprobada' ? { status: 'En preparación' } : {}) };
     } else if (section === 'invoices') update = { ...original.data, ...(row.Estado === 'Cancelada' ? { status: 'Cancelado' } : {}) };
     else update = { ...original.data, ...toDomainData(section, row) };
-    const record = await business.update(resource, id, update);
+    const record = section === 'inventory'
+      ? await apiClient.put<ApiRecord>(`/api/business/inventory/products/${encodeURIComponent(id)}`, update)
+      : await business.update(resource, id, update);
     return { id: record.id, data: toAdminRow(section, dataWithId(record)) };
   },
-  delete: async (section: string, id: string) => {
-    if (section === 'users') throw new Error('Las cuentas de usuario se desactivan para conservar la auditoría.');
+  delete: async (section: string, id: string, options: { pendingInvitation?: boolean } = {}): Promise<{ deleted: boolean } | void> => {
+    if (section === 'users') return options.pendingInvitation ? userService.revokeInvitation(id) : userService.delete(id);
+    if (section === 'inventory') return apiClient.delete<{ deleted: boolean }>(`/api/business/inventory/products/${encodeURIComponent(id)}`);
     await business.delete(resourceFor(section), id);
   },
 };

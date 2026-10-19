@@ -4,6 +4,7 @@ import gt.nexo.commerce.shared.errors.ApiError;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Instant;
+import java.time.Duration;
 import java.util.Arrays;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Value;
@@ -25,6 +26,7 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
 import org.springframework.security.web.authentication.logout.LogoutFilter;
 import org.springframework.security.web.SecurityFilterChain;
+import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.access.AccessDeniedHandler;
 import org.springframework.security.web.authentication.session.ChangeSessionIdAuthenticationStrategy;
 import org.springframework.security.web.authentication.session.CompositeSessionAuthenticationStrategy;
@@ -34,6 +36,7 @@ import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
+import org.springframework.security.web.context.SecurityContextHolderFilter;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 import org.springframework.web.cors.CorsConfiguration;
 import org.springframework.web.cors.CorsConfigurationSource;
@@ -89,7 +92,7 @@ public class SecurityConfiguration {
                 .map(String::trim).filter(origin -> !origin.isEmpty()).toList());
         configuration.setAllowCredentials(true);
         configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
-        configuration.setAllowedHeaders(List.of("Content-Type", "Accept", "X-CSRF-TOKEN", "Authorization"));
+        configuration.setAllowedHeaders(List.of("Content-Type", "Accept", "X-CSRF-TOKEN", "Authorization", "Idempotency-Key"));
         configuration.setMaxAge(3600L);
 
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
@@ -104,19 +107,22 @@ public class SecurityConfiguration {
             CsrfTokenRepository csrfTokenRepository,
             SecurityContextRepository securityContextRepository,
             MobileSessionService mobileSessionService,
+            @Value("${nexo.web.session.absolute-timeout:8h}") Duration absoluteSessionLifetime,
             AuthenticationEntryPoint authenticationEntryPoint,
-            AccessDeniedHandler accessDeniedHandler) throws Exception {
+            AccessDeniedHandler accessDeniedHandler,
+            ObjectMapper objectMapper) throws Exception {
         RequestMatcher mobileLogin = request -> "POST".equals(request.getMethod())
                 && "/api/mobile/auth/login".equals(request.getServletPath());
-        RequestMatcher bearerRequest = request -> {
+        RequestMatcher mobileBearerRequest = request -> {
             String authorization = request.getHeader("Authorization");
-            return authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
+            return request.getServletPath().startsWith("/api/mobile/")
+                    && authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
         };
 
         return http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository)
-                        .ignoringRequestMatchers(mobileLogin, bearerRequest))
+                        .ignoringRequestMatchers(mobileLogin, mobileBearerRequest))
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .sessionManagement(session -> session.sessionFixation(fixation -> fixation.changeSessionId()))
                 .authorizeHttpRequests(authorize -> authorize
@@ -124,11 +130,10 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/accept-invitation").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/catalog/products", "/api/catalog/products/**", "/api/catalog/payment-methods", "/api/catalog/promotions").permitAll()
-                        .requestMatchers(HttpMethod.POST, "/api/catalog/orders", "/api/catalog/discounts/validate").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/catalog/products", "/api/catalog/products/**", "/api/catalog/payment-methods", "/api/catalog/promotions", "/api/catalog/orders/submissions/**").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/catalog/orders", "/api/catalog/orders/quote", "/api/catalog/discounts/validate").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/mobile/auth/login").permitAll()
                         .requestMatchers("/api/mobile/**").authenticated()
-                        .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
                         .anyRequest().authenticated())
                 .exceptionHandling(exceptions -> exceptions
                         .authenticationEntryPoint(authenticationEntryPoint)
@@ -137,6 +142,8 @@ public class SecurityConfiguration {
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
                 .addFilterAfter(new MobileBearerTokenFilter(mobileSessionService), LogoutFilter.class)
+                .addFilterAfter(new AuthenticatedSessionLifetimeFilter(objectMapper, absoluteSessionLifetime), SecurityContextHolderFilter.class)
+                .addFilterBefore(new AnonymousRequestRateLimitFilter(objectMapper), AuthorizationFilter.class)
                 .build();
     }
 

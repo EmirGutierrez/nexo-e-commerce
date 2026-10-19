@@ -5,6 +5,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import java.util.Map;
 import java.util.List;
 import java.util.UUID;
+import org.springframework.web.bind.annotation.RequestHeader;
 import org.springframework.security.core.Authentication;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
 import org.springframework.http.HttpStatus;
@@ -29,13 +30,26 @@ public class PublicCheckoutController {
     @PostMapping("/orders")
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Crea un pedido, calcula importes con precios vigentes y reserva inventario.")
-    public BusinessRecordResponse createOrder(@RequestBody Map<String, Object> input, Authentication authentication) {
+    public OrderSubmissionResponse createOrder(@RequestBody Map<String, Object> input, Authentication authentication,
+                                              @RequestHeader("Idempotency-Key") UUID idempotencyKey) {
         if (authentication != null && authentication.getPrincipal() instanceof NexoUserPrincipal principal && "customer".equals(principal.getRoleCode())) {
             input.put("customerName", principal.getDisplayName());
             input.put("customerEmail", principal.getUsername());
-            return service.createCustomerOrder(input, principal.getId());
+            return service.createCustomerOrder(input, principal.getId(), idempotencyKey);
         }
-        return service.createPublicOrder(input);
+        return service.createPublicOrder(input, idempotencyKey);
+    }
+
+    @PostMapping("/orders/quote")
+    @Operation(summary = "Calcula el total actual del carrito sin reservar inventario ni consumir descuentos.")
+    public OrderQuoteResponse quoteOrder(@RequestBody Map<String, Object> input) {
+        return service.quotePublicOrder(input);
+    }
+
+    @GetMapping("/orders/submissions/{idempotencyKey}")
+    @Operation(summary = "Recupera el resultado mínimo de un pedido mediante su clave de idempotencia.")
+    public OrderSubmissionResponse orderSubmission(@org.springframework.web.bind.annotation.PathVariable UUID idempotencyKey) {
+        return service.publicOrderSubmission(idempotencyKey);
     }
 
     @GetMapping("/my/orders")

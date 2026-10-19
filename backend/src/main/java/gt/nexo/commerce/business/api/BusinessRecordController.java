@@ -40,6 +40,33 @@ public class BusinessRecordController {
         return service.create(resource, data);
     }
 
+    @PostMapping("/inventory/products")
+    @ResponseStatus(HttpStatus.CREATED)
+    @Operation(summary = "Registra un producto desde inventario con sus existencias iniciales e imagen.")
+    public BusinessRecordResponse createInventoryProduct(@RequestBody Map<String, Object> data) {
+        return service.createInventoryProduct(data);
+    }
+
+    @GetMapping("/inventory/products")
+    @Operation(summary = "Lista productos con el permiso de consulta de inventario.")
+    public List<BusinessRecordResponse> inventoryProducts() { return service.listInventoryProducts(); }
+
+    @GetMapping("/inventory/locations")
+    @Operation(summary = "Lista las ubicaciones guardadas desde el inventario autorizado.")
+    public List<String> inventoryLocations() { return service.listInventoryLocations(); }
+
+    @PutMapping("/inventory/products/{id}")
+    @Operation(summary = "Actualiza un producto con el permiso de edición de inventario.")
+    public BusinessRecordResponse updateInventoryProduct(@PathVariable UUID id, @RequestBody Map<String, Object> data) {
+        return service.updateInventoryProduct(id, data);
+    }
+
+    @DeleteMapping("/inventory/products/{id}")
+    @Operation(summary = "Elimina un producto sin historial o lo desactiva para conservar sus relaciones.")
+    public InventoryProductRemovalResponse deleteInventoryProduct(@PathVariable UUID id) {
+        return service.deleteInventoryProduct(id);
+    }
+
     @PutMapping("/{resource}/{id}")
     @Operation(summary = "Actualiza un registro autorizado y registra ajustes de existencias.")
     public BusinessRecordResponse update(@PathVariable String resource, @PathVariable UUID id,

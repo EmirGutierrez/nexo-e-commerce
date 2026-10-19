@@ -26,11 +26,15 @@ public class PublicCatalogController {
 
     @GetMapping
     @Operation(summary = "Lista el catálogo público desde PostgreSQL.")
-    public List<Map<String, Object>> list() { return service.publicProducts(); }
+    public List<PublicProductResponse> list() {
+        return service.publicProducts().stream().map(PublicProductResponse::from).toList();
+    }
 
     @GetMapping("/{id}")
     @Operation(summary = "Consulta un producto activo del catálogo público.")
-    public Map<String, Object> get(@PathVariable UUID id) { return service.publicProduct(id); }
+    public PublicProductResponse get(@PathVariable UUID id) {
+        return PublicProductResponse.from(service.publicProduct(id));
+    }
 
     @GetMapping("/{id}/image")
     @Operation(summary = "Devuelve la imagen pública asociada a un producto.")
