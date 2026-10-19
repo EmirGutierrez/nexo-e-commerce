@@ -39,6 +39,7 @@ import tools.jackson.databind.ObjectMapper;
 class BusinessRecordServicePublicCheckoutTest {
     private static final UUID PRODUCT_ID = UUID.fromString("a9ea99f8-39fd-4ead-97fb-fc86cae96cb5");
     private static final UUID ORDER_ID = UUID.fromString("16f014ab-62f2-45bc-b3a6-73e97b7d6358");
+    private static final UUID CUSTOMER_ID = UUID.fromString("2c284b06-c970-4d1b-a8fa-865b934ff951");
     private static final Instant CREATED_AT = Instant.parse("2026-10-15T12:00:00Z");
 
     private final JdbcTemplate jdbc = mock(JdbcTemplate.class);
@@ -90,11 +91,27 @@ class BusinessRecordServicePublicCheckoutTest {
 
     @Test
     void validatesCustomerNamesWithoutRejectingAccentsOrApostrophes() throws Exception {
-        for (String invalidName : List.of("Cliente 123", "Ana--María", "Ana María-", "-Ana", "Ana@@Maria", "\u0301Ana")) {
+        for (String invalidName : List.of("", "Cliente 123", "Ana--María", "Ana María-", "-Ana", "Ana@@Maria", "\u0301Ana", "A".repeat(161))) {
             Map<String, Object> request = orderInput(null);
             request.put("customerName", invalidName);
             assertThrows(BusinessRuleException.class,
                     () -> service.createPublicOrder(request, null), invalidName);
+        }
+
+        for (String invalidEmail : List.of("", "7777@77777", "ana@example.c", "ana@123.456", "a".repeat(245) + "@example.test")) {
+            Map<String, Object> request = orderInput(null);
+            request.put("customerEmail", invalidEmail);
+            assertThrows(BusinessRuleException.class, () -> service.createPublicOrder(request, null), invalidEmail);
+        }
+        for (String invalidAddress : List.of("123456", "A".repeat(501))) {
+            Map<String, Object> request = orderInput(null);
+            request.put("address", invalidAddress);
+            assertThrows(BusinessRuleException.class, () -> service.createPublicOrder(request, null), invalidAddress);
+        }
+        for (String invalidNit : List.of("X", "123/456", "A".repeat(21))) {
+            Map<String, Object> request = orderInput(null);
+            request.put("nit", invalidNit);
+            assertThrows(BusinessRuleException.class, () -> service.createPublicOrder(request, null), invalidNit);
         }
 
         stubProductReads(productJson(4));
@@ -190,6 +207,81 @@ class BusinessRecordServicePublicCheckoutTest {
 
         assertEquals("card", order.paymentMethod());
         assertEquals(0, new BigDecimal("100.00").compareTo(order.total()));
+    }
+
+    @Test
+    void sendsEmailReceiptForValidGuestCheckout() throws Exception {
+        stubProductReads(productJson(4));
+        when(promotions.priceForProduct(eq(PRODUCT_ID), any(BigDecimal.class))).thenReturn(new BigDecimal("100.00"));
+        when(promotions.useCode("", new BigDecimal("100.00"))).thenReturn(BigDecimal.ZERO);
+        ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+        service.setEventPublisher(events);
+
+        OrderSubmissionResponse order = service.createPublicOrder(orderInput(new BigDecimal("100.00")), null);
+
+        assertTrue(order.reference().matches("NX-[0-9A-F]{8}"));
+        verify(events).publishEvent(any(BusinessEmailService.EmailRequested.class));
+    }
+
+    @Test
+    void returnsCustomerAddressesAndOrderHistoryByNormalizedEmail() throws Exception {
+        Authentication authentication = UsernamePasswordAuthenticationToken.authenticated("staff@nexo.gt", "ignored", List.of());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        when(permissions.has(authentication, "customers", "view")).thenReturn(true);
+        doAnswer(invocation -> {
+            ResultSetExtractor<?> extractor = invocation.getArgument(1);
+            ResultSet row = mock(ResultSet.class);
+            when(row.next()).thenReturn(true);
+            when(row.getString(1)).thenReturn("{\"name\":\"Ana\",\"email\":\"ANA@EXAMPLE.TEST\"}");
+            return extractor.extractData(row);
+        }).when(jdbc).query(org.mockito.ArgumentMatchers.contains("resource_code = 'customers'"), any(ResultSetExtractor.class), eq(CUSTOMER_ID));
+        doAnswer(invocation -> {
+            @SuppressWarnings("unchecked") RowMapper<Map<String, Object>> rowMapper = invocation.getArgument(1);
+            ResultSet row = mock(ResultSet.class);
+            when(row.getString("data")).thenReturn("{\"orderNumber\":\"NX-ORDER\",\"address\":\"Zona 1\",\"total\":75}");
+            when(row.getObject("id", UUID.class)).thenReturn(ORDER_ID);
+            return List.of(rowMapper.mapRow(row, 0));
+        }).when(jdbc).query(org.mockito.ArgumentMatchers.contains("resource_code = 'orders'"), any(RowMapper.class), eq("ana@example.test"));
+
+        Map<String, Object> details = service.customerDetails(CUSTOMER_ID);
+
+        assertEquals("ANA@EXAMPLE.TEST", ((Map<?, ?>) details.get("customer")).get("email"));
+        assertEquals(List.of("Zona 1"), details.get("addresses"));
+        assertEquals(1, ((List<?>) details.get("orders")).size());
+        verify(permissions).has(authentication, "customers", "view");
+    }
+
+    @Test
+    void rejectsInvalidPointOfSaleCustomerDataAndCashBeforeWriting() throws Exception {
+        Authentication authentication = UsernamePasswordAuthenticationToken.authenticated("staff@nexo.gt", "ignored", List.of());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        when(permissions.has(authentication, "sales", "create")).thenReturn(true);
+        Map<String, Object> request = new HashMap<>();
+        request.put("customerName", "Cliente Demo");
+        request.put("customerEmail", "cliente@example.test");
+        request.put("nit", "1234567-8");
+        request.put("paymentMethod", "cash");
+        request.put("amountReceived", "100");
+        request.put("items", List.of(Map.of("productId", PRODUCT_ID.toString(), "quantity", 1)));
+
+        for (String invalidName : List.of("", "Cliente 123", "-Cliente", "Cliente--Demo", "Cliente-", "A".repeat(161))) {
+            request.put("customerName", invalidName);
+            assertThrows(BusinessRuleException.class, () -> service.createInPersonSale(request), invalidName);
+        }
+        request.put("customerName", "Cliente Demo");
+        for (String invalidEmail : List.of("", "7777@77777", "a@b.c", "a".repeat(245) + "@example.test")) {
+            request.put("customerEmail", invalidEmail);
+            assertThrows(BusinessRuleException.class, () -> service.createInPersonSale(request), invalidEmail);
+        }
+        request.put("customerEmail", "cliente@example.test");
+        for (String invalidNit : List.of("X", "123/456", "A".repeat(21))) {
+            request.put("nit", invalidNit);
+            assertThrows(BusinessRuleException.class, () -> service.createInPersonSale(request), invalidNit);
+        }
+        request.put("nit", "1234567-8");
+        request.put("amountReceived", "1");
+        stubProductReads(productJson(4));
+        assertThrows(BusinessRuleException.class, () -> service.createInPersonSale(request));
     }
 
     @Test

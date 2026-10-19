@@ -103,5 +103,13 @@ describe('ventas presenciales e historial', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Guardar cambios' }));
     await waitFor(() => expect(orderService.updateStatus).toHaveBeenCalledWith('ORDER-1', 'En preparación'));
     await waitFor(() => expect(screen.getAllByText('En preparación').length).toBeGreaterThanOrEqual(2));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ver Venta presencial SALE-1' }));
+    const saleDialog = await screen.findByRole('dialog', { name: 'SALE-1' });
+    expect(saleDialog.textContent).toContain('ana@example.com');
+    expect(saleDialog.textContent).toContain('1234567-8');
+    expect(saleDialog.textContent).toContain('Efectivo recibido / cambio');
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar detalle de la venta' }));
+    expect(screen.queryByRole('dialog', { name: 'SALE-1' })).toBeNull();
   });
 });
