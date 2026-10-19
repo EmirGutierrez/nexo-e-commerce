@@ -67,6 +67,7 @@ Todas las escrituras requieren un token CSRF; las operaciones privadas también 
 | `POST /api/auth/login` | Público + CSRF | Envía `mfaCode` si la cuenta tiene MFA activa; la API responde `401` con `MFA_REQUIRED` o `MFA_INVALID` hasta validar el segundo factor |
 | `POST /api/auth/register` | Público + CSRF | Crea un usuario con rol `customer`, inicia sesión y devuelve la cuenta |
 | `GET /api/auth/me` | Sesión | Usuario autenticado y permisos vigentes |
+| `POST /api/auth/me/password` | Sesión + CSRF | Verifica la contraseña actual y, si está activa, MFA; cambia el hash y revoca las sesiones web y los tokens móviles de la cuenta; `204 No Content` |
 | `GET /api/auth/mfa` | Sesión | Estado MFA y cantidad de códigos de recuperación disponibles |
 | `POST /api/auth/mfa/enroll/start` | Sesión + CSRF | Requiere la contraseña actual; devuelve el secreto TOTP y URI de enrolamiento |
 | `POST /api/auth/mfa/enroll/complete` | Sesión + CSRF | Confirma TOTP y devuelve diez códigos de recuperación una sola vez |

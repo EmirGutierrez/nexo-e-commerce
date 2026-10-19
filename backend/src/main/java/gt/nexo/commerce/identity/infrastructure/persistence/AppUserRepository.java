@@ -5,12 +5,20 @@ import java.util.Optional;
 import java.util.UUID;
 import org.springframework.data.jpa.repository.EntityGraph;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Lock;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
+import jakarta.persistence.LockModeType;
 
 public interface AppUserRepository extends JpaRepository<AppUserEntity, UUID> {
     boolean existsByRole_Code(String roleCode);
 
     @EntityGraph(attributePaths = {"role", "role.permissions"})
     Optional<AppUserEntity> findByEmailIgnoreCase(String email);
+
+    @Lock(LockModeType.PESSIMISTIC_WRITE)
+    @Query("select account from AppUserEntity account where account.id = :id")
+    Optional<AppUserEntity> findByIdForPasswordChange(@Param("id") UUID id);
 
     @EntityGraph(attributePaths = {"role", "role.permissions"})
     List<AppUserEntity> findAllByOrderByDisplayNameAsc();

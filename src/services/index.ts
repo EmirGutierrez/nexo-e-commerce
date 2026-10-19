@@ -72,6 +72,10 @@ export const authService = {
     await apiClient.post<void>('/api/auth/accept-invitation', { token, password });
   },
   logout: async (): Promise<void> => { try { await apiClient.post<void>('/api/auth/logout'); } finally { clearCsrfToken(); } },
+  changePassword: async (currentPassword: string, newPassword: string, mfaCode?: string): Promise<void> => {
+    await apiClient.post<void>('/api/auth/me/password', { currentPassword, newPassword, ...(mfaCode ? { mfaCode } : {}) });
+    clearCsrfToken();
+  },
   currentUser: async (): Promise<User | null> => {
     try { return mapApiUser(await apiClient.get<ApiUser>('/api/auth/me')); }
     catch (error) { if (error instanceof ApiError && error.status === 401) return null; throw error; }
