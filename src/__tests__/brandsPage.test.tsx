@@ -1,0 +1,61 @@
+// @vitest-environment jsdom
+
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
+import BrandsPage from '../modules/brands/components/BrandsPage';
+import { brandService, productInventoryService } from '../services';
+import { roleService } from '../services/roleService';
+
+const app = vi.hoisted(() => ({ role: 'superadmin' }));
+vi.mock('../contexts/AppContext', () => ({ useApp: () => app }));
+
+const brands = [
+  { id: 'brand-1', name: 'NEXO Labs', description: 'Equipos de prueba', contact: 'labs@example.com', website: '', status: 'Activa' as const },
+  { id: 'brand-2', name: 'NEXO Home', description: 'Hogar', contact: 'home@example.com', website: '', status: 'Activa' as const },
+];
+const products = [{
+  id: 'product-1', brandId: 'brand-1', name: 'Monitor', category: 'Pantallas', price: 100,
+  image: '', description: 'Monitor', sku: 'MON-1', stock: 3, status: 'Activo' as const,
+}];
+
+beforeEach(() => {
+  vi.spyOn(brandService, 'list').mockResolvedValue(brands);
+  vi.spyOn(brandService, 'create').mockResolvedValue(brands[0]);
+  vi.spyOn(brandService, 'delete').mockResolvedValue({ id: 'brand-1', reassignedProducts: 1 });
+  vi.spyOn(productInventoryService, 'list').mockResolvedValue(products);
+  vi.spyOn(roleService, 'can').mockReturnValue(true);
+});
+
+afterEach(() => {
+  cleanup();
+  vi.restoreAllMocks();
+});
+
+describe('marcas', () => {
+  it('exige descripción y contacto, guarda valores normalizados y permite reasignar productos antes de eliminar', async () => {
+    render(<BrandsPage />);
+    await screen.findByText('NEXO Labs');
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva marca' }));
+
+    fireEvent.change(screen.getByPlaceholderText('Nombre de la marca'), { target: { value: '   ' } });
+    fireEvent.change(screen.getByPlaceholderText('Productos o especialidad de la marca'), { target: { value: 'Equipos' } });
+    fireEvent.change(screen.getByPlaceholderText('Correo o teléfono'), { target: { value: 'contacto@example.com' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar marca' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('nombre, la descripción y el contacto');
+
+    fireEvent.change(screen.getByPlaceholderText('Nombre de la marca'), { target: { value: '  NEXO Nuevo  ' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar marca' }));
+    await waitFor(() => expect(brandService.create).toHaveBeenCalledWith({
+      name: 'NEXO Nuevo', description: 'Equipos', contact: 'contacto@example.com', website: '', status: 'Activa',
+    }));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Ver marca NEXO Labs' }));
+    expect((await screen.findByRole('dialog', { name: 'NEXO Labs' })).textContent).toContain('Monitor');
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar detalle' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar marca NEXO Labs' }));
+    fireEvent.change(screen.getByLabelText('Reasignar a'), { target: { value: 'brand-2' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
+
+    await waitFor(() => expect(brandService.delete).toHaveBeenCalledWith('brand-1', 'brand-2'));
+  });
+});
