@@ -216,6 +216,7 @@ class BusinessRecordServicePublicCheckoutTest {
         Map<String, Object> input = new HashMap<>();
         input.put("customerName", "Cliente Demo");
         input.put("customerEmail", "cliente@example.test");
+        input.put("nit", "1234567-8");
         input.put("customerPhone", "55550101");
         input.put("address", "Zona 1, Guatemala");
         input.put("paymentMethod", "card");

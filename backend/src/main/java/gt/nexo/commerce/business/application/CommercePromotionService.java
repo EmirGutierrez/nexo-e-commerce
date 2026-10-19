@@ -73,9 +73,12 @@ public class CommercePromotionService {
             String title = text(announcement.get("title"));
             String description = text(announcement.get("description"));
             String href = text(announcement.get("href"));
+            String image = text(announcement.get("image"));
             if (title.isBlank() || title.length() > 70 || description.isBlank() || description.length() > 160
                     || href.length() > 500 || !href.startsWith("/") || href.startsWith("//") || href.contains("\\"))
                 throw invalid("El anuncio necesita texto y un enlace interno válidos.");
+            if (!image.isBlank() && (image.length() > 250000 || !image.matches("^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$")))
+                throw invalid("La imagen del anuncio debe ser JPG, PNG o WEBP y pesar menos de 180 KB.");
             if (!Set.of("Activa", "Pausada").contains(text(announcement.get("status")))) throw invalid("El estado del anuncio no es válido.");
         }
         for (Map<String, Object> code : codes) {
@@ -111,9 +114,9 @@ public class CommercePromotionService {
                 """, offer.get("id"), offer.get("productId"), offer.get("originalPrice"), offer.get("discountedPrice"),
                 date(offer.get("startsAt")), date(offer.get("endsAt")), text(offer.get("status")));
         for (Map<String, Object> announcement : announcements) jdbc.update("""
-                INSERT INTO store_announcements (id, title, description, href, status) VALUES (?, ?, ?, ?, ?)
+                INSERT INTO store_announcements (id, title, description, href, status, image_data_url) VALUES (?, ?, ?, ?, ?, ?)
                 """, text(announcement.get("id")), text(announcement.get("title")), text(announcement.get("description")),
-                text(announcement.get("href")), text(announcement.get("status")));
+                text(announcement.get("href")), text(announcement.get("status")), optionalText(announcement.get("image")));
         for (Map<String, Object> code : codes) {
             String name = text(code.get("code"));
             int used = previousUses.getOrDefault(name, 0);
@@ -186,10 +189,14 @@ public class CommercePromotionService {
             item.put("status", rs.getString("status")); return item;
         });
         List<Map<String, Object>> announcements = jdbc.query("""
-                SELECT id, title, description, href, status FROM store_announcements
-                """ + (publicOnly ? " WHERE status = 'Activa'" : "") + " ORDER BY id", (rs, row) -> Map.of(
-                "id", rs.getString("id"), "title", rs.getString("title"), "description", rs.getString("description"),
-                "href", rs.getString("href"), "status", rs.getString("status")));
+                SELECT id, title, description, href, status, image_data_url FROM store_announcements
+                """ + (publicOnly ? " WHERE status = 'Activa'" : "") + " ORDER BY id", (rs, row) -> {
+            Map<String, Object> item = new LinkedHashMap<>();
+            item.put("id", rs.getString("id")); item.put("title", rs.getString("title"));
+            item.put("description", rs.getString("description")); item.put("href", rs.getString("href"));
+            item.put("status", rs.getString("status")); item.put("image", rs.getString("image_data_url"));
+            return item;
+        });
         List<Map<String, Object>> codes = publicOnly ? List.of() : jdbc.query("""
                 SELECT id, code, discount_percent, min_purchase, max_uses, used_count, starts_at, ends_at, status
                 FROM discount_codes ORDER BY code
@@ -262,6 +269,7 @@ public class CommercePromotionService {
     }
 
     private static String text(Object value) { return value == null ? "" : String.valueOf(value).trim(); }
+    private static String optionalText(Object value) { String normalized = text(value); return normalized.isBlank() ? null : normalized; }
     private static BusinessRuleException invalid(String message) { return new BusinessRuleException(HttpStatus.BAD_REQUEST, "VALIDATION_ERROR", message); }
     private static BusinessRuleException conflict(String message) { return new BusinessRuleException(HttpStatus.CONFLICT, "BUSINESS_RULE_VIOLATION", message); }
 }

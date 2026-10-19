@@ -31,7 +31,7 @@ const mapProduct = (item: CatalogProduct): Product => ({
   sku: item.sku,
 });
 
-/** El catálogo público y el panel administrativo leen el mismo catálogo de PostgreSQL. */
+/** El catálogo público y el panel administrativo consultan los mismos productos. */
 export async function fetchCatalogFromApi(): Promise<{ products: Product[]; source: 'api' }> {
   const rows = await apiClient.get<CatalogProduct[]>('/api/catalog/products');
   return { products: rows.map(mapProduct), source: 'api' };
