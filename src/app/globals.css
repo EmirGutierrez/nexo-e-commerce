@@ -1470,6 +1470,7 @@ select:disabled {
 .mfa-settings-state.is-enabled > span { background:#69a172; }
 .mfa-settings-muted { margin:0; color:var(--muted); font-size:11px; }
 .mfa-enrollment-form,.mfa-disable-form { display:grid; max-width:640px; gap:13px; }
+.mfa-enrollment-form .field small { display:block; margin-top:6px; color:var(--muted); font-size:10px; line-height:1.5; }
 .mfa-enrollment-key { display:flex; align-items:flex-start; gap:10px; padding:13px; border:1px solid var(--border); border-radius:10px; color:var(--navy); background:#fbfcfe; }
 .mfa-enrollment-key > div { display:grid; gap:6px; min-width:0; }
 .mfa-enrollment-key strong,.mfa-recovery-panel > strong { color:var(--ink); font-size:11px; }
