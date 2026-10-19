@@ -60,4 +60,54 @@ describe('compras de mercancía', () => {
     await waitFor(() => expect(merchandisePurchaseService.updateStatus).toHaveBeenCalledWith('PUR-1', 'Anulada'));
     expect(screen.getByRole('status').textContent).toContain('el movimiento de stock se revirtió');
   });
+
+  it('rechaza proveedor o fecha vacíos, cantidades fraccionarias y costos que no son positivos', async () => {
+    render(<PurchasesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Registrar compra' }));
+
+    const save = () => fireEvent.click(screen.getByRole('button', { name: 'Guardar compra' }));
+    const supplierSelect = screen.getByLabelText('Proveedor');
+    fireEvent.change(supplierSelect, { target: { value: '' } });
+    save();
+    expect((await screen.findByRole('alert')).textContent).toContain('Selecciona un proveedor');
+
+    fireEvent.change(supplierSelect, { target: { value: supplier.id } });
+    fireEvent.change(screen.getByLabelText('Fecha de compra'), { target: { value: '' } });
+    save();
+    expect(screen.getByRole('alert').textContent).toContain('cantidades enteras');
+
+    fireEvent.change(screen.getByLabelText('Fecha de compra'), { target: { value: '2026-10-19' } });
+    fireEvent.change(screen.getByLabelText('Cantidad'), { target: { value: '1.5' } });
+    save();
+    expect(screen.getByRole('alert').textContent).toContain('cantidades enteras');
+
+    fireEvent.change(screen.getByLabelText('Cantidad'), { target: { value: '2' } });
+    fireEvent.change(screen.getByLabelText('Costo unitario (Q)'), { target: { value: '0' } });
+    save();
+
+    expect(screen.getByRole('alert').textContent).toContain('costos mayores que cero');
+    expect(merchandisePurchaseService.create).not.toHaveBeenCalled();
+  });
+
+  it('agrega otra línea, rechaza el producto duplicado y permite quitarlo', async () => {
+    const secondProduct = { ...product, id: 'product-2', name: 'Teclado', sku: 'TEC-2', cost: 30 };
+    const supplierWithTwoProducts = { ...supplier, productIds: [product.id, secondProduct.id] };
+    vi.mocked(supplierService.list).mockResolvedValueOnce([supplierWithTwoProducts]);
+    vi.mocked(productInventoryService.list).mockResolvedValueOnce([product, secondProduct]);
+
+    render(<PurchasesPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Registrar compra' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Agregar producto' }));
+
+    const productSelects = screen.getAllByLabelText('Producto');
+    expect(productSelects).toHaveLength(2);
+    fireEvent.change(productSelects[1], { target: { value: product.id } });
+    expect((await screen.findByRole('alert')).textContent).toContain('ya está en otra línea');
+
+    fireEvent.change(productSelects[1], { target: { value: secondProduct.id } });
+    expect((screen.getAllByLabelText('Costo unitario (Q)')[1] as HTMLInputElement).value).toBe('30');
+    expect(screen.getByText('Q 50.00')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Quitar Teclado' }));
+    expect(screen.getAllByLabelText('Producto')).toHaveLength(1);
+  });
 });
