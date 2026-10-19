@@ -28,6 +28,8 @@ Cada push a `develop` ejecuta CI, pero no publica automáticamente en producció
 
 El workflow usa `/opt/nexo-commerce` como directorio de despliegue. La primera ejecución requiere que el usuario SSH pueda crear ese directorio y ejecutar Docker; puedes prepararlo con `sudo install -d -o deploy -g deploy /opt/nexo-commerce`.
 
+En el primer despliegue actualizado, el workflow reemplaza la entrada de `VPS_SSH_KEY` en `~deploy/.ssh/authorized_keys` por una entrada `restrict` que fuerza `deploy/nexo-ssh-command.sh`. La llave solo acepta los comandos `health`, `sync-mfa`, `deploy-app` y el bootstrap fijo del workflow; no habilita shell, PTY ni forwarding. El job prueba `health` inmediatamente después de limitar la llave y se detiene si la conexión no funciona. No uses `VPS_SSH_KEY` para administración interactiva. La restricción limita el uso de la llave, pero `deploy` todavía pertenece al grupo `docker`, equivalente a root.
+
 ## Comandos útiles en la VPS
 
 ```bash
@@ -46,4 +48,4 @@ El volumen de PostgreSQL conserva los datos ante el reinicio de contenedores, pe
 
 En DNS, `@` y `api` apuntan a la IPv4 de la VPS y `www` es CNAME al dominio raíz. CAA ya autoriza Let's Encrypt y Sectigo. Hostinger no ofrece DNSSEC para la zona mientras se usen sus nameservers; para activar DNSSEC y un WAF/CDN se debe migrar primero a un proveedor compatible, copiar y validar la zona, actualizar la delegación y publicar el DS que genere ese proveedor. No inventes un valor DS ni cambies nameservers antes de verificar los registros y certificados.
 
-El firewall de red de Contabo `nexo-prod-ingress` está asociado a la VPS. Permite TCP 22/80/443 y UDP 443 desde IPv4 y bloquea el resto del tráfico entrante. SSH sigue accesible desde cualquier IPv4; el usuario `deploy` conserva acceso a Docker, equivalente a root, por lo que la llave debe usarse solo mediante el workflow de despliegue hasta que se aplique un mecanismo restringido.
+El firewall de red de Contabo `nexo-prod-ingress` está asociado a la VPS. Permite TCP 22/80/443 y UDP 443 desde IPv4 y bloquea el resto del tráfico entrante. SSH sigue accesible desde cualquier IPv4; el usuario `deploy` conserva acceso a Docker, equivalente a root. La llave de GitHub Actions queda limitada al wrapper de despliegue al ejecutar el workflow actualizado.

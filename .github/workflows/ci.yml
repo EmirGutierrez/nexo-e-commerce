@@ -180,7 +180,7 @@ jobs:
           install -m 700 -d "$HOME/.ssh"
           printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > "$HOME/.ssh/nexo_deploy"
           chmod 600 "$HOME/.ssh/nexo_deploy"
-          ssh-keygen -y -f "$HOME/.ssh/nexo_deploy" > /dev/null || {
+          ssh-keygen -y -f "$HOME/.ssh/nexo_deploy" > "$HOME/.ssh/nexo_deploy.pub" || {
             echo "El secreto VPS_SSH_KEY no contiene una llave privada SSH válida"
             exit 1
           }
@@ -192,6 +192,32 @@ jobs:
             echo "La huella ED25519 de la VPS no coincide con la huella verificada"
             exit 1
           fi
+
+      - name: Limitar la llave SSH de despliegue
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          cat "$HOME/.ssh/nexo_deploy.pub" |
+            ssh -i "$HOME/.ssh/nexo_deploy" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$VPS_USER@$VPS_HOST" \
+              'cd /opt/nexo-commerce && git pull --ff-only origin develop && ./deploy/nexo-ssh-command.sh bootstrap'
+
+      - name: Verificar que la llave solo ejecuta el wrapper
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/nexo_deploy" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$VPS_USER@$VPS_HOST" health
 
       - name: Sincronizar clave MFA con la VPS
         env:
@@ -206,8 +232,7 @@ jobs:
               -o BatchMode=yes \
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-              "$VPS_USER@$VPS_HOST" \
-              'python3 -c '\''import sys,base64,pathlib,os,tempfile,stat; p=pathlib.Path("/opt/nexo-commerce/deploy/.env.production"); key=sys.stdin.readline().strip(); raw=base64.b64decode(key,validate=True); assert len(raw)==32; lines=[line for line in p.read_text().splitlines() if not line.startswith("MFA_ENCRYPTION_KEY=")]; lines.append("MFA_ENCRYPTION_KEY="+key); data=("\n".join(lines)+"\n").encode(); mode=stat.S_IMODE(p.stat().st_mode); fd,tmp=tempfile.mkstemp(dir=str(p.parent),prefix=".env.production."); os.fchmod(fd,mode); os.write(fd,data); os.fsync(fd); os.close(fd); os.replace(tmp,p); print("Clave MFA sincronizada")'\'''
+              "$VPS_USER@$VPS_HOST" sync-mfa
 
       - name: Actualizar aplicación en la VPS
         env:
@@ -220,7 +245,7 @@ jobs:
           -o StrictHostKeyChecking=yes
           -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
           "$VPS_USER@$VPS_HOST"
-          'if [ ! -d /opt/nexo-commerce/.git ]; then git clone --branch develop --single-branch https://github.com/EmirGutierrez/nexo-e-commerce.git /opt/nexo-commerce; fi && cd /opt/nexo-commerce && git pull --ff-only origin develop && docker compose --env-file deploy/.env.production -f compose.prod.yaml up -d --build --remove-orphans --wait --wait-timeout 300 && docker compose --env-file deploy/.env.production -f compose.prod.yaml up -d --no-deps --force-recreate caddy'
+          deploy-app
 
       - name: Verificar frontend y API públicos
         run: |
