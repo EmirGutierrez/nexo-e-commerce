@@ -10,7 +10,7 @@ interface ApiRecord<T extends JsonRecord = JsonRecord> { id: string; resource: s
 export type AdminTableRecord = Record<string, string | number>;
 export interface CheckoutQuote { subtotal: number; discount: number; total: number; items: { productId: string; productName: string; quantity: number; unitPrice: number; subtotal: number }[] }
 export interface OrderSubmission { reference: string; total: number; paymentMethod: PaymentMethod; paymentStatus: string }
-type CheckoutInput = { customerName: string; customerEmail: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[]; discountCode?: string; receiptImage?: string; receiptFileName?: string; receiptReference?: string };
+type CheckoutInput = { customerName: string; customerEmail: string; nit: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[]; discountCode?: string; receiptImage?: string; receiptFileName?: string; receiptReference?: string };
 
 const business = {
   list: (resource: string) => apiClient.get<ApiRecord[]>(`/api/business/${encodeURIComponent(resource)}`),
@@ -151,7 +151,10 @@ function mapOrder(record: ApiRecord): Order {
     date: stringValue(data, 'date', 'Fecha').slice(0, 10), items: itemDetails.length || numberValue(data, 'itemsCount'), itemDetails,
     total: numberValue(data, 'total', 'Total'),
     status: stringValue(data, 'status', 'Estado') as Order['status'],
-    payment: rawPayment === 'transfer' || rawPayment === 'Transferencia' ? 'Transferencia' : 'Tarjeta' };
+    payment: rawPayment === 'transfer' || rawPayment === 'Transferencia' ? 'Transferencia' : 'Tarjeta',
+    customerEmail: stringValue(data, 'customerEmail'), customerPhone: stringValue(data, 'customerPhone'), address: stringValue(data, 'address'),
+    nit: stringValue(data, 'nit'), paymentStatus: stringValue(data, 'paymentStatus'), subtotal: numberValue(data, 'subtotal'),
+    discountAmount: numberValue(data, 'discountAmount'), discountCode: stringValue(data, 'discountCode') };
 }
 function orderData(order: Partial<Order>): JsonRecord {
   return { customer: order.customer || '', date: order.date || new Date().toISOString(), total: order.total || 0,
@@ -174,12 +177,19 @@ function mapPurchase(record: ApiRecord): MerchandisePurchase {
     date: stringValue(data, 'date').slice(0, 10), items: Array.isArray(data.items) ? data.items as MerchandisePurchase['items'] : [],
     total: numberValue(data, 'total'), status: stringValue(data, 'status') as MerchandisePurchase['status'] };
 }
+export interface CustomerDetails {
+  customer: Record<string, unknown>;
+  addresses: string[];
+  orders: { id: string; orderNumber?: string; date?: string; status?: string; paymentMethod?: string; paymentStatus?: string; total?: number;
+    items?: { productName?: string; quantity?: number; unitPrice?: number; subtotal?: number }[] }[];
+}
 export const customerService = {
   list: async (): Promise<User[]> => (await business.list('customers')).map((record) => {
     const data = record.data; const words = stringValue(data, 'name').trim().split(/\s+/).filter(Boolean);
     return { id: record.id, name: stringValue(data, 'name'), email: stringValue(data, 'email'), role: 'customer',
       initials: words.slice(0, 2).map((word) => word[0]).join('').toUpperCase(), status: stringValue(data, 'status') === 'Inactivo' ? 'Inactivo' : 'Activo' };
   }),
+  details: (id: string) => apiClient.get<CustomerDetails>(`/api/business/customers/${encodeURIComponent(id)}/details`),
 };
 
 export const supplierService = {
@@ -250,14 +260,14 @@ export const salesService = {
   },
   listInPerson: async (): Promise<InPersonSale[]> => (await business.list('sales')).map((record) => {
     const data = record.data;
-    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
+    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), customerEmail: stringValue(data, 'customerEmail'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
       paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], ...(data.amountReceived === undefined ? {} : { amountReceived: numberValue(data, 'amountReceived') }),
       ...(data.change === undefined ? {} : { change: numberValue(data, 'change') }), items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
   }),
-  createInPerson: async (input: { customerName: string; nit: string; paymentMethod: 'cash' | 'card'; amountReceived?: number; items: { productId: string; quantity: number }[] }): Promise<InPersonSale> => {
+  createInPerson: async (input: { customerName: string; customerEmail: string; nit: string; paymentMethod: 'cash' | 'card'; amountReceived?: number; items: { productId: string; quantity: number }[] }): Promise<InPersonSale> => {
     const record = await apiClient.post<ApiRecord>('/api/business/sales/record', input);
     const data = record.data;
-    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
+    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), customerEmail: stringValue(data, 'customerEmail'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
       paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], ...(data.amountReceived === undefined ? {} : { amountReceived: numberValue(data, 'amountReceived') }),
       ...(data.change === undefined ? {} : { change: numberValue(data, 'change') }), items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
   },
@@ -404,7 +414,8 @@ export const adminTableService = {
     if (section === 'inventory') return (await inventoryProductRecords()).map((record) => ({ id: record.id, data: toAdminRow('inventory', dataWithId(record)) }));
     if (section === 'users') return (await apiClient.get<ApiUser[]>('/api/users')).map((user) => ({ id: user.id,
       data: { Nombre: user.name, Correo: user.email, Rol: roleLabels[user.role as User['role']] || user.role,
-        'Último acceso': user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('es-GT') : 'Nunca', Estado: user.status === 'ACTIVE' ? 'Activo' : user.status === 'PENDING' ? 'Pendiente' : 'Inactivo' } }));
+        'Último acceso': user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('es-GT') : 'Nunca', __lastLoginAt: user.lastLoginAt ? Date.parse(user.lastLoginAt) : -1,
+        Estado: user.status === 'ACTIVE' ? 'Activo' : user.status === 'PENDING' ? 'Pendiente' : 'Inactivo' } }));
     if (section === 'roles-permissions') return (await roleService.list()).map((role) => ({ id: role.id,
       data: { Nombre: role.name, Usuarios: role.users, Permisos: Object.values(role.permissions).flat().length, 'Última actualización': '—', Estado: 'Activo' } }));
     if (section === 'inventory/history') return (await inventoryService.movements()).map((movement) => ({ id: String(movement.id), data: {

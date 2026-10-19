@@ -12,6 +12,8 @@ El Compose de producción ejecuta PostgreSQL, Spring Boot, Next.js y Caddy. Cadd
 
 En el primer despliegue, Spring crea el administrador configurado por bootstrap. Cuando confirmes que ya puedes iniciar sesión, cambia `BOOTSTRAP_ADMIN_ENABLED` a `false` y borra nombre, correo y contraseña del archivo. No guardes ese archivo en Git.
 
+Para enviar comprobantes de ventas presenciales, recibos y avisos de estado de pedidos a clientes invitados, configura `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` y `MAIL_FROM` en `.env.production` con las credenciales SMTP del proveedor de correo. Los correos se registran después de confirmar la transacción; si no se configura SMTP, la compra se guarda normalmente, pero no se envía el correo.
+
 ## Configurar GitHub Actions
 
 En el repositorio, abre **Settings → Secrets and variables → Actions → New repository secret** y agrega:

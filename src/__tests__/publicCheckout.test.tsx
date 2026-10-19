@@ -54,6 +54,7 @@ describe('checkout público', () => {
 
     fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Cliente Demo' } });
     fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'cliente@example.test' } });
+    fireEvent.change(screen.getByLabelText('NIT'), { target: { value: 'CF' } });
     fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5555-0101' } });
     fireEvent.change(screen.getByLabelText('Dirección de entrega'), { target: { value: 'Zona 1' } });
     fireEvent.change(screen.getByLabelText('Ciudad'), { target: { value: 'Guatemala' } });
@@ -240,6 +241,7 @@ describe('checkout del flujo administrativo heredado', () => {
 function fillCommerceCheckout() {
   fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Cliente Demo' } });
   fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'cliente@example.test' } });
+  fireEvent.change(screen.getByLabelText('NIT'), { target: { value: 'CF' } });
   fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5555-0101' } });
   fireEvent.change(screen.getByLabelText('Dirección de entrega'), { target: { value: 'Zona 1' } });
   fireEvent.change(screen.getByLabelText('Ciudad'), { target: { value: 'Guatemala' } });
@@ -254,6 +256,7 @@ function submitCommerceCheckout() {
 function fillLegacyCheckout() {
   fireEvent.change(screen.getByLabelText('Nombre completo'), { target: { value: 'Cliente Demo' } });
   fireEvent.change(screen.getByLabelText('Correo electrónico'), { target: { value: 'cliente@example.test' } });
+  fireEvent.change(screen.getByLabelText('NIT'), { target: { value: 'CF' } });
   fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '5555-0101' } });
   fireEvent.change(screen.getByLabelText('Dirección de entrega'), { target: { value: 'Zona 1, Guatemala' } });
 }

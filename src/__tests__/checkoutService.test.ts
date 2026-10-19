@@ -19,7 +19,7 @@ describe('servicio de checkout', () => {
     const response = { reference: 'NX-ABC12345', total: 180, paymentMethod: 'card', paymentStatus: 'Simulada' };
     const post = vi.spyOn(apiClient, 'post').mockResolvedValueOnce(response as never);
     const input = {
-      customerName: 'Cliente Demo', customerEmail: 'cliente@example.test', address: 'Zona 1', paymentMethod: 'card' as const,
+      customerName: 'Cliente Demo', customerEmail: 'cliente@example.test', nit: 'CF', address: 'Zona 1', paymentMethod: 'card' as const,
       items: [{ productId: 'p-1', quantity: 2 }],
     };
 
