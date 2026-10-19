@@ -188,6 +188,16 @@ describe('detalle de pedido del cliente', () => {
 });
 
 describe('historial de compras del cliente', () => {
+  it('permite cambiar la contraseña desde el perfil de cliente', async () => {
+    window.history.replaceState({}, '', '/account');
+    vi.mocked(customerPortalService.orders).mockResolvedValueOnce([]);
+    vi.spyOn(customerPortalService, 'wishlist').mockResolvedValueOnce([]);
+    render(<CustomerAccountPage />);
+
+    expect(await screen.findByRole('heading', { name: 'Cambiar contraseña' })).toBeTruthy();
+    expect(screen.getByLabelText('Confirmar nueva contraseña')).toBeTruthy();
+  });
+
   it('enlaza pedidos y presenta valores alternativos cuando faltan datos', async () => {
     window.history.replaceState({}, '', '/account?section=orders');
     vi.mocked(customerPortalService.orders).mockResolvedValueOnce([
