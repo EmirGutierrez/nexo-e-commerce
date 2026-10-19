@@ -2,12 +2,14 @@ package gt.nexo.commerce.business.application;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.doReturn;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 import gt.nexo.commerce.business.api.BusinessRecordResponse;
@@ -23,10 +25,12 @@ import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.atomic.AtomicReference;
+import org.springframework.context.ApplicationEventPublisher;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.AfterEach;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.jdbc.core.ResultSetExtractor;
+import org.springframework.jdbc.core.RowMapper;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -82,6 +86,79 @@ class BusinessRecordServicePublicCheckoutTest {
         assertThrows(BusinessRuleException.class, () -> service.quotePublicOrder(Map.of("items", List.of(
                 Map.of("productId", PRODUCT_ID.toString(), "quantity", 70),
                 Map.of("productId", PRODUCT_ID.toString(), "quantity", 31)))));
+    }
+
+    @Test
+    void validatesCustomerNamesWithoutRejectingAccentsOrApostrophes() throws Exception {
+        for (String invalidName : List.of("Cliente 123", "Ana--María", "Ana María-", "-Ana", "Ana@@Maria", "\u0301Ana")) {
+            Map<String, Object> request = orderInput(null);
+            request.put("customerName", invalidName);
+            assertThrows(BusinessRuleException.class,
+                    () -> service.createPublicOrder(request, null), invalidName);
+        }
+
+        stubProductReads(productJson(4));
+        when(promotions.priceForProduct(eq(PRODUCT_ID), any(BigDecimal.class))).thenReturn(new BigDecimal("100.00"));
+        when(promotions.useCode("", new BigDecimal("100.00"))).thenReturn(BigDecimal.ZERO);
+        doReturn(1).when(jdbc).update(org.mockito.ArgumentMatchers.startsWith("INSERT INTO public_order_idempotency"), any(Object[].class));
+        Map<String, Object> request = orderInput(new BigDecimal("100.00"));
+        request.put("customerName", "María O’Connor");
+
+        OrderSubmissionResponse order = service.createPublicOrder(request, UUID.randomUUID());
+
+        assertTrue(order.reference().matches("NX-[0-9A-F]{8}"));
+    }
+
+    @Test
+    void sendsReceiptForCashSaleAndRecordsChangeAndStockMovement() throws Exception {
+        Authentication authentication = UsernamePasswordAuthenticationToken.authenticated("staff@nexo.gt", "ignored", List.of());
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        when(permissions.has(authentication, "sales", "create")).thenReturn(true);
+        stubProductReads(productJson(5));
+        ApplicationEventPublisher events = mock(ApplicationEventPublisher.class);
+        service.setEventPublisher(events);
+
+        BusinessRecordResponse sale = service.createInPersonSale(Map.of(
+                "customerName", "María O’Connor",
+                "customerEmail", "CLIENTE@example.test",
+                "nit", "1234567-8",
+                "paymentMethod", "cash",
+                "amountReceived", "120.00",
+                "items", List.of(Map.of("productId", PRODUCT_ID.toString(), "quantity", 1))));
+
+        assertEquals("sales", sale.resource());
+        assertEquals(0, new BigDecimal("100.00").compareTo((BigDecimal) sale.data().get("total")));
+        assertEquals(0, new BigDecimal("20.00").compareTo((BigDecimal) sale.data().get("change")));
+        assertEquals("cliente@example.test", sale.data().get("customerEmail"));
+        verify(events).publishEvent(any(BusinessEmailService.EmailRequested.class));
+        verify(jdbc).update(org.mockito.ArgumentMatchers.contains("INSERT INTO inventory_movements"), any(Object[].class));
+    }
+
+    @Test
+    void publicCatalogOmitsInactiveAndOutOfStockProducts() throws Exception {
+        String active = mapper.writeValueAsString(Map.of("name", "Disponible", "stock", 3, "status", "Activo"));
+        String empty = mapper.writeValueAsString(Map.of("name", "Agotado", "stock", 0, "status", "Activo"));
+        String inactive = mapper.writeValueAsString(Map.of("name", "Oculto", "stock", 5, "status", "Inactivo"));
+        UUID activeId = UUID.randomUUID();
+        when(jdbc.query(anyString(), any(RowMapper.class))).thenAnswer(invocation -> {
+            @SuppressWarnings("unchecked") RowMapper<Map<String, Object>> mapper = invocation.getArgument(1);
+            List<String> records = List.of(active, empty, inactive);
+            List<UUID> ids = List.of(activeId, UUID.randomUUID(), UUID.randomUUID());
+            java.util.ArrayList<Map<String, Object>> result = new java.util.ArrayList<>();
+            for (int index = 0; index < records.size(); index++) {
+                ResultSet row = mock(ResultSet.class);
+                when(row.getString("data")).thenReturn(records.get(index));
+                when(row.getObject("id", UUID.class)).thenReturn(ids.get(index));
+                result.add(mapper.mapRow(row, index));
+            }
+            return result;
+        });
+
+        List<Map<String, Object>> products = service.publicProducts();
+
+        assertEquals(1, products.size());
+        assertEquals(activeId.toString(), products.getFirst().get("id"));
+        assertEquals("Disponible", products.getFirst().get("name"));
     }
 
     @Test

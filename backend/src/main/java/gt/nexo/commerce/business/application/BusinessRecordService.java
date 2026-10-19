@@ -1666,9 +1666,28 @@ public class BusinessRecordService {
     }
     private static String text(Object value) { return value == null ? "" : String.valueOf(value).trim(); }
     private static boolean validPersonName(String value) {
-        return value != null && value.length() <= 160
-                && value.matches("[\\p{L}\\p{M}]+(?:[ '\\u2019-][\\p{L}\\p{M}]+)*");
+        if (value == null || value.isEmpty() || value.length() > 160) return false;
+        boolean expectingNameCharacter = true;
+        for (int offset = 0; offset < value.length();) {
+            int codePoint = value.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+            int characterType = Character.getType(codePoint);
+            boolean isCombiningMark = characterType == Character.NON_SPACING_MARK
+                    || characterType == Character.COMBINING_SPACING_MARK
+                    || characterType == Character.ENCLOSING_MARK;
+            if (Character.isLetter(codePoint)) {
+                expectingNameCharacter = false;
+            } else if (isCombiningMark && !expectingNameCharacter) {
+                // Combining marks can decorate a name character, but cannot start a name or follow a separator.
+            } else if (isNameSeparator(codePoint) && !expectingNameCharacter) {
+                expectingNameCharacter = true;
+            } else {
+                return false;
+            }
+        }
+        return !expectingNameCharacter;
     }
+    private static boolean isNameSeparator(int codePoint) { return codePoint == ' ' || codePoint == '\'' || codePoint == '\u2019' || codePoint == '-'; }
     private static boolean validEmail(String value) {
         return value != null && value.length() <= 254
                 && value.matches("(?i)^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$")
