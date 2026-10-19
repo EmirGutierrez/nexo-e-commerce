@@ -253,7 +253,7 @@ jobs:
           api_headers="$(mktemp)"
           trap 'rm -f "$frontend_headers" "$api_headers"' EXIT
           curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors --dump-header "$frontend_headers" https://nexo-e-commerce.com/ -o /dev/null
-          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors --dump-header "$api_headers" https://api.nexo-e-commerce.com/api/catalog/payment-methods -o /dev/null
+          curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors --dump-header "$api_headers" https://api.nexo-e-commerce.com/api/catalog/products -o /dev/null
           grep --ignore-case --quiet '^Content-Security-Policy:' "$frontend_headers"
           grep --ignore-case --quiet '^X-Content-Type-Options: *nosniff' "$frontend_headers"
           grep --ignore-case --quiet '^Content-Security-Policy:' "$api_headers"
