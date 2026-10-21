@@ -142,6 +142,25 @@ services:
       - site
       - api
 
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.2@sha256:0e56c13c7058fcef9c4f0e7d83372f82330548dbf8f8b366f3d8b506526d93b2
+    profiles:
+      - cloudflare-tunnel
+    command: ["tunnel", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cloudflare-egress
+
 volumes:
   nexo-commerce-prod-data:
   nexo-commerce-caddy-data:
@@ -157,3 +176,4 @@ networks:
     internal: true
   database:
     internal: true
+  cloudflare-egress:

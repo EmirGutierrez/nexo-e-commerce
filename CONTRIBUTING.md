@@ -9,16 +9,16 @@ El Scrum Master coordina tickets, revisiones, merges e integración del producto
 ## Flujo oficial
 
 ```text
-origin/develop → rama personal → pruebas → commit → push → revisión → merge directo a develop → push de develop
+origin/develop → rama feature → pruebas → commit → push → PR a develop → CI + aprobación independiente → merge → despliegue
 ```
 
 - `master`: versión estable. No se utiliza para el trabajo diario.
 - `develop`: rama principal de integración.
 - `feature/*`: rama personal de cada compañero para un ticket o funcionalidad.
 
-El trabajo diario se integrará mediante revisión y merge directo de la rama personal hacia `develop`, sin Pull Requests por cada funcionalidad. Los lanzamientos estables se proponen mediante un Pull Request de `develop` a `master`.
+Todo cambio hacia `develop` o `master` debe entrar mediante Pull Request. La protección de ambas ramas exige una aprobación de otra persona, los checks `Compilar frontend`, `Probar backend` y `Construir imágenes Docker` al día, y que quien hizo el último push no apruebe su propio cambio. Las aprobaciones anteriores se descartan si hay nuevos commits. Los lanzamientos estables se proponen mediante un Pull Request de `develop` a `master`.
 
-No se debe modificar directamente `develop` ni `master`. Tampoco se utilizará una rama `main`.
+No se debe hacer push directo, force-push ni borrar `develop` o `master`. Tampoco se utilizará una rama `main`.
 
 ## Preparar el entorno
 
@@ -103,7 +103,7 @@ git push -u origin feature/nombre-descriptivo
 
 No hagas commits, resets ni reversiones destructivas sin que el Scrum Master lo solicite o autorice.
 
-## Revisión y merge directo a develop
+## Revisión y merge a develop mediante PR
 
 Después del push, informa al Scrum Master:
 
@@ -113,17 +113,9 @@ Después del push, informa al Scrum Master:
 - Pruebas y validaciones ejecutadas.
 - Riesgos, decisiones o conflictos pendientes.
 
-El Scrum Master revisará la rama y, desde una copia local controlada, integrará los cambios:
+Abre un Pull Request de la rama personal hacia `develop`. El Scrum Master coordina la revisión; una persona distinta de quien hizo el último push debe aprobarlo. Espera la aprobación, la resolución de comentarios y los tres checks requeridos antes de hacer merge. Si agregas commits después de la aprobación, vuelve a solicitar revisión.
 
-```bash
-git fetch origin
-git switch develop
-git pull origin develop
-git merge origin/feature/nombre-descriptivo
-git push origin develop
-```
-
-La rama personal no debe mergearse si hay conflictos sin resolver, pruebas fallidas o cambios fuera del ticket.
+La rama no debe mergearse si hay conflictos sin resolver, pruebas fallidas, checks pendientes o cambios fuera del ticket. Después de integrar en `develop`, el despliegue de producción requiere completar el flujo protegido del entorno `production`.
 
 Para actualizar una rama personal antes de la revisión:
 
@@ -156,7 +148,8 @@ Cada ticket debe quedar documentado con:
 - Se verificó responsive en escritorio y móvil cuando aplique.
 - No hay credenciales, tarjetas, CVV, tokens ni datos reales.
 - La documentación se actualizó si el ticket introdujo una decisión técnica.
-- El Scrum Master realizó la revisión.
+- Una persona distinta de quien hizo el último push aprobó el PR.
+- `Compilar frontend`, `Probar backend` y `Construir imágenes Docker` pasaron con la rama actualizada.
 
 ## Fases del proyecto
 
@@ -171,7 +164,7 @@ Cada ticket debe quedar documentado con:
 9. Backend con Spring Boot y Spring Security.
 10. Integración con APIs y base de datos.
 
-Cada fase debe desarrollarse en tickets separados, usando ramas `feature/*` y el flujo de integración directo a `develop` definido arriba.
+Cada fase debe desarrollarse en tickets separados, usando ramas `feature/*` y el flujo de Pull Request hacia `develop` definido arriba.
 
 ## Reglas técnicas
 
