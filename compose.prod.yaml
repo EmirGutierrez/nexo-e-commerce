@@ -176,6 +176,7 @@ services:
       - ALL
     cap_add:
       - NET_ADMIN
+      - DAC_READ_SEARCH
     read_only: true
     tmpfs:
       - /run:rw,noexec,nosuid,nodev,size=8m
