@@ -71,6 +71,14 @@ Este bloque conserva la línea base histórica. Los cambios posteriores de DNS, 
 - Las comprobaciones públicas actuales devolvieron `301` de HTTP a HTTPS y `200` para la tienda y el catálogo de la API. Desde la red de auditoría TCP 22 respondió; 80, 443, 5432 y 8080 no respondieron directamente en el origen. La VPS tiene asignado un prefijo IPv6 `/64`; la regla `DROP` activa del firewall cubre cualquier protocolo, puerto y origen. Contabo documenta que `Cualquiera` incluye IPv4 e IPv6 ([documentación del firewall](https://docs.contabo.com/docs/network-services/firewall/)). La red de auditoría no ofrece conectividad IPv6, por lo que no se hizo una prueba externa de ese protocolo.
 - Las pantallas actuales de Hostinger, Cloudflare, GitHub y el perfil de NEXO siguen mostrando 2FA/MFA apagado o pendiente de confirmación. El titular debe completar esos enrolamientos y guardar los códigos de recuperación; las contraseñas, semillas TOTP y códigos no deben compartirse.
 
+## Verificación complementaria (2026-10-21)
+
+- La ejecución de producción #194 fue aprobada por DannyVH24 y terminó correctamente; sincronizó el token del túnel y verificó frontend/API. Cloudflare muestra el túnel `nexo-production` como `Healthy`, con una réplica, pero sin rutas publicadas. Esto no protege SSH por Cloudflare Access.
+- TCP 22 sigue respondiendo desde Internet. La regla del firewall de Contabo permite SSH desde cualquier IPv4; el resto de las conexiones directas evaluadas sigue bloqueado. No cerré TCP 22 ni cambié reglas del firewall.
+- El usuario eligió una alternativa gratuita autogestionada con WireGuard. La rama de trabajo `codex/wireguard-deploy` prepara un peer de GitHub Actions limitado a la VPS. Aún no se ha desplegado en producción ni está abierto UDP 51820; la migración requiere el PR aprobado, configuración del firewall, llaves privadas en el entorno `production`, bootstrap aprobado por DannyVH24 y un despliegue normal exitoso por VPN.
+- Tras confirmar ese despliegue y la consola de recuperación, se puede eliminar TCP 22 del firewall de Contabo. El peer preparado es para CI; si se requiere SSH interactivo desde el equipo del titular, se debe crear otro peer de administración antes de cerrar TCP 22. Hasta entonces, Contabo Console es la vía de recuperación.
+- WireGuard no quita a `deploy` del grupo `docker`, que equivale a root, y no sustituye el respaldo externo ni la restauración aislada que el titular decidió no contratar. No hay evidencia para afirmar que la VPS o el sitio sean impenetrables o que toda la infraestructura esté cerrada.
+
 ## Operación y verificación
 
 - Después de desplegar, comprobar que cada respuesta HTML incluya un nonce distinto en CSP y en los scripts de Next; comprobar que el CSP no contenga `script-src ... unsafe-inline`.

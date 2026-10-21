@@ -9,6 +9,15 @@ on:
       - develop
       - master
   workflow_dispatch:
+    inputs:
+      operation:
+        description: Operación de producción
+        required: true
+        type: choice
+        options:
+          - deploy
+          - bootstrap-wireguard
+        default: deploy
 
 permissions:
   contents: read
@@ -143,6 +152,188 @@ jobs:
       - name: Construir imagen del backend
         run: docker build --file backend/Dockerfile --tag nexo-commerce-backend:ci backend
 
+      - name: Construir imagen del túnel WireGuard
+        run: docker build --file deploy/wireguard/Dockerfile --tag nexo-wireguard:ci deploy/wireguard
+
+      - name: Probar configuración y permisos WireGuard
+        run: python3 -m unittest discover --start-directory deploy/tests --pattern 'test_*.py' --verbose
+
+  bootstrap-wireguard:
+    name: Preparar acceso SSH privado
+    needs:
+      - frontend
+      - backend
+      - sonar
+      - docker
+    if: >-
+      ${{
+        always() &&
+        github.event_name == 'workflow_dispatch' &&
+        github.ref == 'refs/heads/develop' &&
+        inputs.operation == 'bootstrap-wireguard' &&
+        needs.frontend.result == 'success' &&
+        needs.backend.result == 'success' &&
+        needs.docker.result == 'success' &&
+        needs.sonar.result == 'success'
+      }}
+    runs-on: ubuntu-24.04
+    environment:
+      name: production
+    concurrency:
+      group: nexo-production-deploy
+      cancel-in-progress: false
+    timeout-minutes: 25
+    steps:
+      - name: Validar secretos y preparar SSH temporal
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
+          WIREGUARD_DEPLOY_PRIVATE_KEY: ${{ secrets.WIREGUARD_DEPLOY_PRIVATE_KEY }}
+        run: |
+          test -n "$VPS_HOST" || { echo "Falta VPS_HOST en production"; exit 1; }
+          test -n "$VPS_USER" || { echo "Falta VPS_USER en production"; exit 1; }
+          test -n "$VPS_SSH_KEY" || { echo "Falta VPS_SSH_KEY en production"; exit 1; }
+          test -n "$WIREGUARD_DEPLOY_PRIVATE_KEY" || { echo "Falta WIREGUARD_DEPLOY_PRIVATE_KEY en production"; exit 1; }
+          sudo apt-get update
+          sudo apt-get install --yes wireguard-tools
+          install -m 700 -d "$HOME/.ssh" "$HOME/.config/nexo-wireguard"
+          printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > "$HOME/.ssh/nexo_deploy"
+          printf '%s\n' "$WIREGUARD_DEPLOY_PRIVATE_KEY" | tr -d '\r' > "$HOME/.config/nexo-wireguard/privatekey"
+          chmod 600 "$HOME/.ssh/nexo_deploy" "$HOME/.config/nexo-wireguard/privatekey"
+          ssh-keygen -y -f "$HOME/.ssh/nexo_deploy" > "$HOME/.ssh/nexo_deploy.pub" || {
+            echo "VPS_SSH_KEY no contiene una llave privada SSH válida"
+            exit 1
+          }
+          wg pubkey < "$HOME/.config/nexo-wireguard/privatekey" > "$HOME/.config/nexo-wireguard/deploy.pub"
+          chmod 600 "$HOME/.config/nexo-wireguard/deploy.pub"
+          echo "WIREGUARD_DEPLOY_PUBLIC_KEY=$(cat "$HOME/.config/nexo-wireguard/deploy.pub")" >> "$GITHUB_ENV"
+          expected_fingerprint="SHA256:fHpDmhjPDYdpv7Gz7nJtymZtrDFdmiO1WPMmmj8wTO4"
+          ssh-keyscan -T 30 -p 22 -t ed25519 "$VPS_HOST" > "$HOME/.ssh/known_hosts"
+          chmod 600 "$HOME/.ssh/known_hosts"
+          observed_fingerprints="$(ssh-keygen -lf "$HOME/.ssh/known_hosts" 2>/dev/null | awk '{print $2}' || true)"
+          if ! printf '%s\n' "$observed_fingerprints" | grep -Fxq "$expected_fingerprint"; then
+            echo "La huella ED25519 de la VPS no coincide con la huella verificada"
+            exit 1
+          fi
+
+      - name: Actualizar el wrapper restringido por SSH público
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          cat "$HOME/.ssh/nexo_deploy.pub" |
+            ssh -i "$HOME/.ssh/nexo_deploy" \
+              -p 22 \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$VPS_USER@$VPS_HOST" \
+              'cd /opt/nexo-commerce && git pull --ff-only origin develop && ./deploy/nexo-ssh-command.sh bootstrap'
+
+      - name: Sincronizar configuración WireGuard al host
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          printf '%s\n' "$WIREGUARD_DEPLOY_PUBLIC_KEY" |
+            ssh -i "$HOME/.ssh/nexo_deploy" \
+              -p 22 \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$VPS_USER@$VPS_HOST" sync-wireguard
+
+      - name: Iniciar el servicio WireGuard
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/nexo_deploy" \
+            -p 22 \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$VPS_USER@$VPS_HOST" deploy-app
+
+      - name: Obtener la llave pública WireGuard desde la VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          server_public_key="$(ssh -i "$HOME/.ssh/nexo_deploy" \
+            -p 22 \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$VPS_USER@$VPS_HOST" wireguard-public-key)"
+          test -n "$server_public_key" || { echo "La VPS no devolvió la llave pública WireGuard"; exit 1; }
+          printf 'WIREGUARD_SERVER_PUBLIC_KEY=%s\n' "$server_public_key" >> "$GITHUB_ENV"
+
+      - name: Conectar el runner a la VPN
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+        run: |
+          sudo ip link add dev wg0 type wireguard
+          sudo ip address add dev wg0 10.77.0.2/32 peer 10.77.0.1
+          sudo wg set wg0 listen-port 48123 private-key "$HOME/.config/nexo-wireguard/privatekey" \
+            peer "$WIREGUARD_SERVER_PUBLIC_KEY" allowed-ips 10.77.0.1/32 \
+            endpoint "$VPS_HOST:51820" persistent-keepalive 25
+          sudo ip link set up dev wg0
+          ssh-keyscan -T 30 -p 22 -t ed25519 10.77.0.1 > "$HOME/.ssh/wireguard_known_hosts"
+          chmod 600 "$HOME/.ssh/wireguard_known_hosts"
+          expected_fingerprint="SHA256:fHpDmhjPDYdpv7Gz7nJtymZtrDFdmiO1WPMmmj8wTO4"
+          observed_fingerprints="$(ssh-keygen -lf "$HOME/.ssh/wireguard_known_hosts" 2>/dev/null | awk '{print $2}' || true)"
+          if ! printf '%s\n' "$observed_fingerprints" | grep -Fxq "$expected_fingerprint"; then
+            echo "La huella SSH por WireGuard no coincide con la huella verificada"
+            exit 1
+          fi
+
+      - name: Verificar SSH privado y publicar la llave pública del servidor
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: |
+          ssh -i "$HOME/.ssh/nexo_deploy" \
+            -p 22 \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 \
+            -o UserKnownHostsFile="$HOME/.ssh/wireguard_known_hosts" \
+            "$VPS_USER@10.77.0.1" health
+          server_public_key="$WIREGUARD_SERVER_PUBLIC_KEY"
+          remote_public_key="$(ssh -i "$HOME/.ssh/nexo_deploy" \
+            -p 22 \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o UserKnownHostsFile="$HOME/.ssh/wireguard_known_hosts" \
+            "$VPS_USER@10.77.0.1" wireguard-public-key)"
+          test "$remote_public_key" = "$server_public_key" || {
+            echo "La llave pública WireGuard del servidor no coincide"
+            exit 1
+          }
+          {
+            echo "## WireGuard activo"
+            echo
+            echo "Agrega el siguiente valor como variable `WIREGUARD_SERVER_PUBLIC_KEY` del entorno `production` en GitHub:"
+            echo
+            echo "```text"
+            echo "$server_public_key"
+            echo "```"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Limpiar llaves temporales del runner
+        if: ${{ always() }}
+        run: |
+          rm -rf -- "$HOME/.config/nexo-wireguard"
+          rm -f -- "$HOME/.ssh/nexo_deploy" "$HOME/.ssh/nexo_deploy.pub" \
+            "$HOME/.ssh/known_hosts" "$HOME/.ssh/wireguard_known_hosts"
+
   deploy:
     name: Desplegar producción
     needs:
@@ -155,6 +346,7 @@ jobs:
         always() &&
         github.ref == 'refs/heads/develop' &&
         github.event_name == 'workflow_dispatch' &&
+        inputs.operation != 'bootstrap-wireguard' &&
         needs.frontend.result == 'success' &&
         needs.backend.result == 'success' &&
         needs.docker.result == 'success' &&
@@ -166,43 +358,37 @@ jobs:
     concurrency:
       group: nexo-production-deploy
       cancel-in-progress: false
-    timeout-minutes: 15
+    timeout-minutes: 25
     steps:
-      - name: Validar y preparar transporte SSH
+      - name: Validar y preparar túnel WireGuard y SSH
         env:
           VPS_HOST: ${{ secrets.VPS_HOST }}
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-          CF_ACCESS_CLIENT_ID: ${{ secrets.CF_ACCESS_CLIENT_ID }}
-          CF_ACCESS_CLIENT_SECRET: ${{ secrets.CF_ACCESS_CLIENT_SECRET }}
+          WIREGUARD_DEPLOY_PRIVATE_KEY: ${{ secrets.WIREGUARD_DEPLOY_PRIVATE_KEY }}
+          WIREGUARD_SERVER_PUBLIC_KEY: ${{ vars.WIREGUARD_SERVER_PUBLIC_KEY }}
         run: |
+          test -n "$VPS_HOST" || { echo "Falta el secreto VPS_HOST para el endpoint UDP de WireGuard"; exit 1; }
           test -n "$VPS_USER" || { echo "Falta el secreto VPS_USER"; exit 1; }
           test -n "$VPS_SSH_KEY" || { echo "Falta el secreto VPS_SSH_KEY"; exit 1; }
-          if [ -n "$CF_ACCESS_CLIENT_ID" ] || [ -n "$CF_ACCESS_CLIENT_SECRET" ]; then
-            test -n "$CF_ACCESS_CLIENT_ID" || { echo "Falta CF_ACCESS_CLIENT_ID en el entorno production"; exit 1; }
-            test -n "$CF_ACCESS_CLIENT_SECRET" || { echo "Falta CF_ACCESS_CLIENT_SECRET en el entorno production"; exit 1; }
-            # 2026.6.0 has a reported SSH/TCP service-token regression; pin a known-working client until fixed.
-            docker run --pull=always --detach --rm --name nexo-cloudflare-access --network host \
-              cloudflare/cloudflared:2026.5.1@sha256:a5b5e6fd9a372f054b9a843c219bfbcdceb54691605312a8b1ee72978bdf1aa1 \
-              access tcp --hostname ssh.nexo-e-commerce.com --url 127.0.0.1:2222 \
-              --service-token-id "$CF_ACCESS_CLIENT_ID" \
-              --service-token-secret "$CF_ACCESS_CLIENT_SECRET"
-            NEXO_SSH_HOST=127.0.0.1
-            NEXO_SSH_PORT=2222
-            NEXO_SSH_MODE=access
-          else
-            test -n "$VPS_HOST" || { echo "Falta VPS_HOST para el acceso de inicialización"; exit 1; }
-            NEXO_SSH_HOST=$VPS_HOST
-            NEXO_SSH_PORT=22
-            NEXO_SSH_MODE=direct
-          fi
+          test -n "$WIREGUARD_DEPLOY_PRIVATE_KEY" || { echo "Falta WIREGUARD_DEPLOY_PRIVATE_KEY en production"; exit 1; }
+          test -n "$WIREGUARD_SERVER_PUBLIC_KEY" || { echo "Falta la variable WIREGUARD_SERVER_PUBLIC_KEY en production"; exit 1; }
+          sudo apt-get update
+          sudo apt-get install --yes wireguard-tools
           {
-            echo "NEXO_SSH_HOST=$NEXO_SSH_HOST"
-            echo "NEXO_SSH_PORT=$NEXO_SSH_PORT"
-            echo "NEXO_SSH_MODE=$NEXO_SSH_MODE"
+            echo "NEXO_SSH_HOST=10.77.0.1"
+            echo "NEXO_SSH_PORT=22"
           } >> "$GITHUB_ENV"
-          install -m 700 -d "$HOME/.ssh"
+          install -m 700 -d "$HOME/.ssh" "$HOME/.config/nexo-wireguard"
+          printf '%s\n' "$WIREGUARD_DEPLOY_PRIVATE_KEY" | tr -d '\r' > "$HOME/.config/nexo-wireguard/privatekey"
+          printf '%s\n' "$WIREGUARD_SERVER_PUBLIC_KEY" | tr -d '\r' > "$HOME/.config/nexo-wireguard/server.pub"
+          chmod 600 "$HOME/.config/nexo-wireguard/privatekey" "$HOME/.config/nexo-wireguard/server.pub"
+          sudo ip link add dev wg0 type wireguard
+          sudo ip address add dev wg0 10.77.0.2/32 peer 10.77.0.1
+          sudo wg set wg0 listen-port 48123 private-key "$HOME/.config/nexo-wireguard/privatekey" \
+            peer "$WIREGUARD_SERVER_PUBLIC_KEY" allowed-ips 10.77.0.1/32 \
+            endpoint "$VPS_HOST:51820" persistent-keepalive 25
+          sudo ip link set up dev wg0
           printf '%s\n' "$VPS_SSH_KEY" | tr -d '\r' > "$HOME/.ssh/nexo_deploy"
           chmod 600 "$HOME/.ssh/nexo_deploy"
           ssh-keygen -y -f "$HOME/.ssh/nexo_deploy" > "$HOME/.ssh/nexo_deploy.pub" || {
@@ -217,6 +403,50 @@ jobs:
             echo "La huella ED25519 de la VPS no coincide con la huella verificada"
             exit 1
           fi
+
+      - name: Confirmar conectividad SSH por WireGuard
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          WIREGUARD_SERVER_PUBLIC_KEY: ${{ vars.WIREGUARD_SERVER_PUBLIC_KEY }}
+        run: |
+          ssh -i "$HOME/.ssh/nexo_deploy" \
+            -p "$NEXO_SSH_PORT" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$VPS_USER@$NEXO_SSH_HOST" health
+          observed_public_key="$(ssh -i "$HOME/.ssh/nexo_deploy" \
+            -p "$NEXO_SSH_PORT" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$VPS_USER@$NEXO_SSH_HOST" wireguard-public-key)"
+          test "$observed_public_key" = "$WIREGUARD_SERVER_PUBLIC_KEY" || {
+            echo "La llave pública WireGuard del servidor no coincide con la variable production"
+            exit 1
+          }
+
+      - name: Sincronizar token del túnel
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
+            echo "No hay token de Tunnel configurado; se omite la sincronización."
+            exit 0
+          fi
+          printf '%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" |
+            ssh -i "$HOME/.ssh/nexo_deploy" \
+              -p "$NEXO_SSH_PORT" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$VPS_USER@$NEXO_SSH_HOST" sync-tunnel
 
       - name: Limitar la llave SSH de despliegue
         env:
@@ -243,25 +473,6 @@ jobs:
             -o StrictHostKeyChecking=yes \
             -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
             "$VPS_USER@$NEXO_SSH_HOST" health
-
-      - name: Sincronizar token del túnel en el arranque inicial
-        if: ${{ env.NEXO_SSH_MODE == 'direct' }}
-        env:
-          VPS_USER: ${{ secrets.VPS_USER }}
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-        run: |
-          if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
-            echo "No hay token de Tunnel configurado; se conserva el acceso directo de inicialización."
-            exit 0
-          fi
-          printf '%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" |
-            ssh -i "$HOME/.ssh/nexo_deploy" \
-              -p "$NEXO_SSH_PORT" \
-              -o IdentitiesOnly=yes \
-              -o BatchMode=yes \
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-              "$VPS_USER@$NEXO_SSH_HOST" sync-tunnel
 
       - name: Sincronizar clave MFA con la VPS
         env:
@@ -302,3 +513,9 @@ jobs:
           grep --ignore-case --quiet '^X-Content-Type-Options: *nosniff' "$frontend_headers"
           grep --ignore-case --quiet '^Content-Security-Policy:' "$api_headers"
           grep --ignore-case --quiet '^X-Content-Type-Options: *nosniff' "$api_headers"
+
+      - name: Limpiar llaves temporales del runner
+        if: ${{ always() }}
+        run: |
+          rm -rf -- "$HOME/.config/nexo-wireguard"
+          rm -f -- "$HOME/.ssh/nexo_deploy" "$HOME/.ssh/nexo_deploy.pub" "$HOME/.ssh/known_hosts"

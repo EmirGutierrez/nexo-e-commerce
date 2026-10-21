@@ -161,6 +161,33 @@ services:
     networks:
       - cloudflare-egress
 
+  wireguard:
+    build:
+      context: ./deploy/wireguard
+      dockerfile: Dockerfile
+    profiles:
+      - wireguard
+    restart: unless-stopped
+    logging: *default-logging
+    network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    volumes:
+      - ./deploy/.runtime/wireguard/wg0.conf:/etc/wireguard/wg0.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "ip link show wg0 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   nexo-commerce-prod-data:
   nexo-commerce-caddy-data:

@@ -12,4 +12,7 @@ coverage/
 *.local
 .DS_Store
 *.log
+__pycache__/
+*.py[cod]
 /.codex/context.local.md
+/deploy/.runtime/
