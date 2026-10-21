@@ -155,6 +155,24 @@ jobs:
       - name: Construir imagen del túnel WireGuard
         run: docker build --file deploy/wireguard/Dockerfile --tag nexo-wireguard:ci deploy/wireguard
 
+      - name: Probar lectura de la configuración WireGuard protegida
+        run: |
+          set -eu
+          config_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$config_dir"' EXIT
+          chmod 700 "$config_dir"
+          printf 'configuración de prueba\n' > "$config_dir/wg0.conf"
+          chmod 600 "$config_dir/wg0.conf"
+          docker run --rm \
+            --read-only \
+            --security-opt no-new-privileges:true \
+            --cap-drop ALL \
+            --cap-add NET_ADMIN \
+            --cap-add DAC_READ_SEARCH \
+            --mount "type=bind,src=$config_dir,dst=/etc/wireguard,readonly" \
+            --entrypoint /bin/cat \
+            nexo-wireguard:ci /etc/wireguard/wg0.conf | grep --fixed-strings --quiet 'configuración de prueba'
+
       - name: Probar configuración y permisos WireGuard
         run: python3 -m unittest discover --start-directory deploy/tests --pattern 'test_*.py' --verbose
 

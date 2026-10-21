@@ -39,7 +39,7 @@ En el primer despliegue actualizado, el workflow reemplaza la entrada de `VPS_SS
 
 ## Migrar SSH de producción a WireGuard
 
-La migración usa GitHub-hosted runners y el perfil Compose `wireguard` en la VPS, sin agregar un proveedor ni costo mensual. La configuración limita el peer de Actions a la IP `10.77.0.2/32`, y el runner solo enruta `10.77.0.1/32`. No permite usar la VPS como salida a Internet ni enrutar a la base de datos. El servicio necesita `NET_ADMIN` y red host para crear `wg0`; la imagen WireGuard se construye desde Alpine oficial fijado por digest. Sigue estos pasos:
+La migración usa GitHub-hosted runners y el perfil Compose `wireguard` en la VPS, sin agregar un proveedor ni costo mensual. La configuración limita el peer de Actions a la IP `10.77.0.2/32`, y el runner solo enruta `10.77.0.1/32`. No permite usar la VPS como salida a Internet ni enrutar a la base de datos. El servicio necesita `NET_ADMIN` y red host para crear `wg0`; recibe además `DAC_READ_SEARCH` para leer la configuración montada con permisos `600` dentro de su directorio `700`, sin hacer pública la llave privada. La imagen WireGuard se construye desde Alpine oficial fijado por digest. Sigue estos pasos:
 
 1. En el firewall de Contabo `nexo-prod-ingress`, agrega **UDP 51820** con origen `0.0.0.0/0`. El WireGuard descarta paquetes sin clave válida; el firewall del host aplica una excepción solo para ese puerto durante la vida del servicio. Conserva TCP 22 durante esta fase.
 2. Genera una pareja de llaves para GitHub Actions con `wg genkey` y `wg pubkey`; guarda su llave privada como secreto `WIREGUARD_DEPLOY_PRIVATE_KEY` en `production`. La privada del servidor se genera en la VPS. No guardes llaves privadas en Git ni en la bitácora de Actions.
