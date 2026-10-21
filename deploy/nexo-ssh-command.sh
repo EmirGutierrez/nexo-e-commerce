@@ -15,6 +15,7 @@ if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
   case "$SSH_ORIGINAL_COMMAND" in
     "$BOOTSTRAP_COMMAND") action=bootstrap ;;
     sync-mfa) action=sync-mfa ;;
+    sync-tunnel) action=sync-tunnel ;;
     deploy-app) action=deploy-app ;;
     health) action=health ;;
     *) echo "Comando SSH no permitido." >&2; exit 126 ;;
@@ -42,11 +43,19 @@ sync_mfa() {
   exec python3 -c 'import base64,os,pathlib,stat,sys,tempfile; p=pathlib.Path("/opt/nexo-commerce/deploy/.env.production"); key=sys.stdin.readline().strip(); raw=base64.b64decode(key,validate=True); assert len(raw)==32; lines=[line for line in p.read_text().splitlines() if not line.startswith("MFA_ENCRYPTION_KEY=")]; lines.append("MFA_ENCRYPTION_KEY="+key); data=("\n".join(lines)+"\n").encode(); mode=stat.S_IMODE(p.stat().st_mode); fd,tmp=tempfile.mkstemp(dir=str(p.parent),prefix=".env.production."); os.fchmod(fd,mode); os.write(fd,data); os.fsync(fd); os.close(fd); os.replace(tmp,p); print("Clave MFA sincronizada")'
 }
 
+sync_tunnel() {
+  exec python3 -c 'import os,pathlib,stat,sys,tempfile; p=pathlib.Path("/opt/nexo-commerce/deploy/.env.production"); token=sys.stdin.readline().rstrip("\r\n"); assert 32 <= len(token) <= 4096 and token.isascii() and not any(ch.isspace() for ch in token), "Token de Cloudflare inválido"; lines=[line for line in p.read_text().splitlines() if not line.startswith("CLOUDFLARE_TUNNEL_TOKEN=")]; lines.append("CLOUDFLARE_TUNNEL_TOKEN="+token); data=("\n".join(lines)+"\n").encode(); mode=stat.S_IMODE(p.stat().st_mode); fd,tmp=tempfile.mkstemp(dir=str(p.parent),prefix=".env.production."); os.fchmod(fd,mode); os.write(fd,data); os.fsync(fd); os.close(fd); os.replace(tmp,p); print("Token del túnel sincronizado")'
+}
+
 deploy_app() {
   git -C "$REPO_DIR" pull --ff-only origin develop
   install -d -m 700 "$WRAPPER_DIR"
   install -m 700 "$REPO_DIR/deploy/nexo-ssh-command.sh" "$WRAPPER_PATH"
-  docker compose --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" up -d --build --remove-orphans --wait --wait-timeout 300
+  set --
+  if grep -Eq '^CLOUDFLARE_TUNNEL_TOKEN=[^[:space:]]+' "$REPO_DIR/deploy/.env.production"; then
+    set -- --profile cloudflare-tunnel
+  fi
+  docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" up -d --build --remove-orphans --wait --wait-timeout 300
   docker compose --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" up -d --no-deps --force-recreate caddy
 }
 
@@ -57,6 +66,7 @@ health() {
 case "$action" in
   bootstrap) bootstrap ;;
   sync-mfa) sync_mfa ;;
+  sync-tunnel) sync_tunnel ;;
   deploy-app) deploy_app ;;
   health) health ;;
 esac
