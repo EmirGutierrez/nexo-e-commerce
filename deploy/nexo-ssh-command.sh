@@ -64,7 +64,11 @@ deploy_app() {
   if [ -s "$REPO_DIR/deploy/.runtime/wireguard/wg0.conf" ]; then
     set -- "$@" --profile wireguard
   fi
-  docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" up -d --build --remove-orphans --wait --wait-timeout 300
+  if ! docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" up -d --build --remove-orphans --wait --wait-timeout 300; then
+    docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" ps --all || true
+    docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" logs --tail=100 wireguard || true
+    exit 1
+  fi
   docker compose --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" up -d --no-deps --force-recreate caddy
 }
 

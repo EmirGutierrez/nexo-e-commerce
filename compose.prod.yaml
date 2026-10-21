@@ -178,6 +178,7 @@ services:
       - NET_ADMIN
     read_only: true
     tmpfs:
+      - /run:rw,noexec,nosuid,nodev,size=8m
       - /tmp:rw,noexec,nosuid,nodev,size=16m
     volumes:
       - ./deploy/.runtime/wireguard/wg0.conf:/etc/wireguard/wg0.conf:ro
