@@ -7,7 +7,6 @@ import org.springframework.context.annotation.Profile;
 import org.springframework.core.annotation.Order;
 import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
-import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
@@ -23,7 +22,6 @@ public class ProductionPrometheusSecurityConfiguration {
             @Value("${nexo.metrics.prometheus-token}") String prometheusToken) throws Exception {
         return http
                 .securityMatcher("/actuator/prometheus")
-                .csrf(AbstractHttpConfigurer::disable)
                 .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
                 .addFilterBefore(new PrometheusTokenFilter(prometheusToken), AuthorizationFilter.class)
                 .authorizeHttpRequests(authorize -> authorize
