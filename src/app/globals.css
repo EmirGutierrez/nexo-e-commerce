@@ -1573,3 +1573,12 @@ select:disabled {
 .sales-history-detail-backdrop > .modal-backdrop-dismiss { position: absolute; inset: 0; width: 100%; height: 100%; padding: 0; border: 0; background: transparent; cursor: default; }
 .sales-history-detail-backdrop > .sales-history-detail { position: relative; z-index: 1; }
 .support-contact-card > p { color: var(--muted); font-size: 12px; line-height: 1.5; }
+.auth-forgot-password { display: flex; justify-content: flex-end; margin: -7px 0 18px; color: var(--navy); font-size: 11px; font-weight: 800; }
+.auth-forgot-password:hover { text-decoration: underline; }
+.password-recovery-page .admin-form-inner { margin-top: 100px; margin-bottom: 60px; }
+.password-recovery-page .admin-form-inner > p { line-height: 1.7; }
+.password-recovery-page .field input { background: white; }
+.password-reset-hint { margin: -8px 0 16px; color: var(--muted); font-size: 10px; }
+.reset-success { display: flex; align-items: flex-start; gap: 8px; padding: 12px; border-radius: 9px; background: #edf6ee; color: #365b3a !important; }
+.reset-success svg { flex: 0 0 auto; margin-top: 1px; }
+.reset-return { margin-top: 20px; }
