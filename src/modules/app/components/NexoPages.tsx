@@ -16,6 +16,7 @@ import { authService, businessSettingsService, checkoutService, dashboardService
 import { ApiError } from '../../../shared/services/http-client';
 import type { OrderSubmission } from '../../../services';
 import type { PaymentMethod, Product, Role, User } from '../../../types';
+import { getDashboardGreeting } from '../utils/dashboardGreeting';
 import AccountingPage from '../../accounting/components/AccountingPage';
 import PurchasesPage from '../../purchases/components/PurchasesPage';
 import SalesPage from '../../sales/components/SalesPage';
@@ -536,8 +537,9 @@ function Dashboard() {
   const p = summary?.products || { products: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 };
   const healthy = Math.max(0, p.products - p.lowStock - p.outOfStock);
   const dateLabel = new Intl.DateTimeFormat('es-GT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+  const greeting = getDashboardGreeting(new Date());
   return <div className="dashboard">
-    <div className="admin-page-heading"><div><span className="eyebrow">{dateLabel}</span><h1>Buenos días, {user?.name.split(' ')[0] || 'equipo'} <span>✦</span></h1><p>Indicadores calculados con los movimientos guardados correctamente.</p></div><div className="heading-actions"><button className="button button-outline" onClick={exportCsv} disabled={!summary}><Download size={16} /> Exportar</button></div></div>
+    <div className="admin-page-heading"><div><span className="eyebrow">{dateLabel}</span><h1>{greeting}, {user?.name.split(' ')[0] || 'equipo'} <span>✦</span></h1><p>Indicadores calculados con los movimientos guardados correctamente.</p></div><div className="heading-actions"><button className="button button-outline" onClick={exportCsv} disabled={!summary}><Download size={16} /> Exportar</button></div></div>
     {error && <div className="crud-error" role="alert">{error}</div>}
     <div className="metric-grid"><Metric title="Ventas del periodo" value={summary ? formatQ(summary.sales) : '—'} change="NEXO" positive icon={CircleDollarSign} tone="blue" /><Metric title="Pedidos y ventas" value={summary ? String(summary.orders) : '—'} change="Transacciones" positive icon={ShoppingBag} tone="purple" /><Metric title="Clientes nuevos" value={summary ? String(summary.newCustomers) : '—'} change="En el periodo" positive icon={Users} tone="green" /><Metric title="Ticket promedio" value={summary ? formatQ(summary.averageTicket) : '—'} change="En el periodo" positive icon={BarChart3} tone="orange" /></div>
     <div className="dashboard-grid"><section className="panel sales-panel"><div className="panel-heading"><div><h2>Rendimiento de ventas</h2><span>Ventas registradas diariamente en el periodo.</span></div><select value={period} onChange={(event) => setPeriod(event.target.value as typeof period)}><option value="30d">Últimos 30 días</option><option value="7d">Últimos 7 días</option><option value="year">Último año</option></select></div><div className="chart-legend"><span><i className="legend-blue" /> Ventas (Q)</span><span>{summary ? `${summary.series.length} días del periodo` : 'Actualizando periodo…'}</span></div>{summary ? <SalesChart series={summary.series} /> : <div className="empty-state">{error ? 'No se pudo cargar la actividad.' : 'Cargando actividad…'}</div>}</section>
