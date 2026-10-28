@@ -113,6 +113,9 @@ public class SecurityConfiguration {
             ObjectMapper objectMapper) throws Exception {
         RequestMatcher mobileLogin = request -> "POST".equals(request.getMethod())
                 && "/api/mobile/auth/login".equals(request.getServletPath());
+        RequestMatcher publicPasswordRecovery = request -> "POST".equals(request.getMethod())
+                && ("/api/auth/password-reset/request".equals(request.getServletPath())
+                || "/api/auth/password-reset/complete".equals(request.getServletPath()));
         RequestMatcher mobileBearerRequest = request -> {
             String authorization = request.getHeader("Authorization");
             return request.getServletPath().startsWith("/api/mobile/")
@@ -122,7 +125,7 @@ public class SecurityConfiguration {
         return http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
                 .csrf(csrf -> csrf.csrfTokenRepository(csrfTokenRepository)
-                        .ignoringRequestMatchers(mobileLogin, mobileBearerRequest))
+                        .ignoringRequestMatchers(mobileLogin, mobileBearerRequest, publicPasswordRecovery))
                 .securityContext(context -> context.securityContextRepository(securityContextRepository))
                 .sessionManagement(session -> session.sessionFixation(fixation -> fixation.changeSessionId()))
                 .authorizeHttpRequests(authorize -> authorize
@@ -130,6 +133,7 @@ public class SecurityConfiguration {
                         .requestMatchers(HttpMethod.POST, "/api/auth/login").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/register").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/auth/accept-invitation").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/api/auth/password-reset/request", "/api/auth/password-reset/complete").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/catalog/products", "/api/catalog/products/**", "/api/catalog/payment-methods", "/api/catalog/promotions", "/api/catalog/orders/submissions/**").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/catalog/orders", "/api/catalog/orders/quote", "/api/catalog/discounts/validate").permitAll()
                         .requestMatchers(HttpMethod.POST, "/api/mobile/auth/login").permitAll()

@@ -71,6 +71,12 @@ export const authService = {
   acceptInvitation: async (token: string, password: string): Promise<void> => {
     await apiClient.post<void>('/api/auth/accept-invitation', { token, password });
   },
+  requestPasswordReset: (email: string): Promise<void> =>
+    apiClient.post<void>('/api/auth/password-reset/request', { email }),
+  completePasswordReset: async (token: string, newPassword: string): Promise<void> => {
+    await apiClient.post<void>('/api/auth/password-reset/complete', { token, newPassword });
+    clearCsrfToken();
+  },
   logout: async (): Promise<void> => { try { await apiClient.post<void>('/api/auth/logout'); } finally { clearCsrfToken(); } },
   changePassword: async (currentPassword: string, newPassword: string, mfaCode?: string): Promise<void> => {
     await apiClient.post<void>('/api/auth/me/password', { currentPassword, newPassword, ...(mfaCode ? { mfaCode } : {}) });

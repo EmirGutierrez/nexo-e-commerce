@@ -136,6 +136,21 @@ class AnonymousRequestRateLimitFilterTest {
     }
 
     @Test
+    void rateLimitsPasswordResetRequestsByClientIp() throws Exception {
+        AnonymousRequestRateLimitFilter filter = new AnonymousRequestRateLimitFilter(mock(ObjectMapper.class));
+        MockHttpServletResponse lastResponse = null;
+
+        for (int attempt = 0; attempt < 6; attempt++) {
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            filter.doFilter(postRequest("/api/auth/password-reset/request", "203.0.113.46"), response, new MockFilterChain());
+            lastResponse = response;
+        }
+
+        assertEquals(429, lastResponse.getStatus());
+        assertEquals("600", lastResponse.getHeader("Retry-After"));
+    }
+
+    @Test
     void groupsIpv6VisitorsByNetworkPrefixToLimitAddressRotation() throws Exception {
         AnonymousRequestRateLimitFilter filter = new AnonymousRequestRateLimitFilter(mock(ObjectMapper.class));
 

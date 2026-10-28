@@ -16,7 +16,7 @@ flowchart LR
     Next -->|REST, cookies de sesión y CSRF| Spring["Spring Boot<br/>monolito modular"]
     Mobile["Cliente móvil compatible"] -->|REST + Bearer token| Spring
     Spring -->|JPA / JDBC| PG[("PostgreSQL")]
-Flyway["Flyway<br/>migraciones V1–V20"] --> PG
+Flyway["Flyway<br/>migraciones V1–V24"] --> PG
     Browser -->|carrito y vistos recientes| Local["localStorage del navegador"]
 ```
 
@@ -41,7 +41,7 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 ### Datos y migraciones
 
 - PostgreSQL es la fuente compartida para usuarios, roles, catálogo, inventario, pedidos, ventas y demás registros del negocio.
-- Las migraciones viven en `backend/src/main/resources/db/migration`. El repositorio contiene las versiones V1 a V20; el backend ejecuta las pendientes al arrancar. V19 incorpora el permiso `inventory:delete` para administradores y superadministradores. V20 crea el catálogo persistente de ubicaciones y recupera los valores existentes.
+- Las migraciones viven en `backend/src/main/resources/db/migration`. El backend ejecuta las pendientes al arrancar. V19 incorpora el permiso `inventory:delete` para administradores y superadministradores. V20 crea el catálogo persistente de ubicaciones; V24 guarda hashes y vencimientos de enlaces de recuperación de contraseña.
 - Las imágenes de producto pueden almacenarse en PostgreSQL; el servicio limita las imágenes cargadas como datos embebidos a 140 KB.
 - El equipo puede usar una base PostgreSQL compartida en Neon con el perfil Spring `team`. La configuración privada va en `backend/.env.team`, excluido por Git. Este documento no incluye la URL del servidor ni credenciales.
 - `backend/README.md` explica la inicialización local y compartida, los perfiles y las variables requeridas. Coordina los arranques contra la base compartida: iniciar Spring puede aplicar migraciones pendientes.
@@ -54,6 +54,7 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 - Carrito local, validación de descuentos, cotización vigente del checkout y confirmación de pedido. Si cambian los precios o el descuento, la persona revisa el nuevo total antes de confirmar.
 - Los pedidos públicos usan una clave de idempotencia persistida; la repetición de un envío no vuelve a descontar inventario. La recuperación solo devuelve referencia, total y estado de pago.
 - Registro e inicio de sesión de clientes, historial de pedidos propios, lista de deseos y notificaciones.
+- Recuperación de contraseña desde el acceso web y móvil mediante un enlace de correo de un solo uso; el token vence en 30 minutos y el backend invalida las sesiones existentes al guardar la nueva contraseña.
 
 ### Panel administrativo y operación
 

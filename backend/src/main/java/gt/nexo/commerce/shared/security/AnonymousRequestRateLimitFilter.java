@@ -28,6 +28,8 @@ final class AnonymousRequestRateLimitFilter extends OncePerRequestFilter {
             Map.entry("/api/mobile/auth/login", new Policy("authentication", 10)),
             Map.entry("/api/auth/register", new Policy("registration", 8)),
             Map.entry("/api/auth/accept-invitation", new Policy("invitation", 10)),
+            Map.entry("/api/auth/password-reset/request", new Policy("password-reset-request", 5)),
+            Map.entry("/api/auth/password-reset/complete", new Policy("password-reset-complete", 10)),
             Map.entry("/api/catalog/orders", new Policy("orders", 12)),
             Map.entry("/api/catalog/orders/quote", new Policy("order-quote", 80)),
             Map.entry("/api/catalog/discounts/validate", new Policy("discount-validation", 60)));

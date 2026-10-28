@@ -154,7 +154,7 @@ describe('Next.js API BFF route', () => {
     expect((await Promise.all(pending)).every((response) => response.status === 200)).toBe(true);
   });
 
-  it('returns 502 when the backend is unavailable and expires a tab cookie after logout or password change', async () => {
+  it('returns 502 when the backend is unavailable and expires a tab cookie after logout or password changes', async () => {
     vi.mocked(fetch).mockRejectedValueOnce(new Error('offline'));
     const unavailable = await GET(request('/api/catalog/products'), context(['catalog', 'products']));
     expect(unavailable.status).toBe(502);
@@ -177,6 +177,15 @@ describe('Next.js API BFF route', () => {
     expect(passwordChange.status).toBe(204);
     expect(passwordChange.cookies.get(TAB_COOKIE)?.maxAge).toBe(0);
     expect(passwordChange.cookies.get('NEXOSESSION')?.maxAge).toBe(0);
+
+    vi.mocked(fetch).mockResolvedValueOnce(new Response(null, { status: 204 }));
+    const passwordResetRequest = request('/api/auth/password-reset/complete', {
+      method: 'POST', headers: { 'x-nexo-tab-session': TAB_ID, cookie: `${TAB_COOKIE}=active` },
+    });
+    const passwordReset = await POST(passwordResetRequest, context(['auth', 'password-reset', 'complete']));
+    expect(passwordReset.status).toBe(204);
+    expect(passwordReset.cookies.get(TAB_COOKIE)?.maxAge).toBe(0);
+    expect(passwordReset.cookies.get('NEXOSESSION')?.maxAge).toBe(0);
   });
 
   it('allows loopback and explicitly enabled Docker HTTP backends only in their intended contexts', async () => {
