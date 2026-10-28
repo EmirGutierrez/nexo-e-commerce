@@ -56,6 +56,7 @@ services:
       SESSION_COOKIE_SAME_SITE: Lax
       OPENAPI_ENABLED: "false"
       MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
+      PROMETHEUS_SCRAPE_TOKEN: ${PROMETHEUS_SCRAPE_TOKEN:?Define PROMETHEUS_SCRAPE_TOKEN in deploy/.env.production}
       MAIL_HOST: ${MAIL_HOST:-}
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
@@ -74,6 +75,7 @@ services:
       - app
       - database
       - api
+      - monitoring
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/api/catalog/payment-methods || exit 1"]
       interval: 10s
@@ -137,10 +139,94 @@ services:
     depends_on:
       frontend:
         condition: service_healthy
+      grafana:
+        condition: service_started
     networks:
       - edge
       - site
       - api
+
+  prometheus:
+    image: prom/prometheus:v3.15.1
+    restart: unless-stopped
+    user: nobody
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    environment:
+      PROMETHEUS_SCRAPE_TOKEN: ${PROMETHEUS_SCRAPE_TOKEN:?Define PROMETHEUS_SCRAPE_TOKEN in deploy/.env.production}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --config.expand-env
+      - --web.enable-remote-write-receiver
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=7d
+    volumes:
+      - ./monitoring/prometheus/prometheus.prod.yml:/etc/prometheus/prometheus.yml:ro
+      - nexo-commerce-prod-prometheus-data:/prometheus
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:13.3.0
+    restart: unless-stopped
+    user: "472"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Define GRAFANA_ADMIN_PASSWORD in deploy/.env.production}
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: lax
+      GF_SECURITY_DISABLE_BRUTE_FORCE_LOGIN_PROTECTION: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_ROOT_URL: https://${SITE_DOMAIN:?Define SITE_DOMAIN in deploy/.env.production}/monitoring/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SERVER_ENFORCE_DOMAIN: "true"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - nexo-commerce-prod-grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - site
+      - monitoring
+
+  k6:
+    image: grafana/k6:2.3.0
+    profiles:
+      - loadtest
+    restart: "no"
+    environment:
+      BASE_URL: ${BASE_URL:-http://frontend:3000}
+      TEST_ID: ${K6_TEST_ID:-nexo-prod-smoke}
+      K6_PROFILE: ${K6_PROFILE:-production}
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      K6_PROMETHEUS_RW_TREND_STATS: p(95),p(99),min,max
+      K6_PROMETHEUS_RW_LABELS: environment=production
+    volumes:
+      - ./tests/load:/scripts:ro
+    command: ["run", "--out", "experimental-prometheus-rw", "/scripts/store.js"]
+    depends_on:
+      prometheus:
+        condition: service_started
+      frontend:
+        condition: service_healthy
+    networks:
+      - site
+      - monitoring
 
   cloudflared:
     image: cloudflare/cloudflared:2026.10.2@sha256:0e56c13c7058fcef9c4f0e7d83372f82330548dbf8f8b366f3d8b506526d93b2
@@ -194,6 +280,8 @@ volumes:
   nexo-commerce-prod-data:
   nexo-commerce-caddy-data:
   nexo-commerce-caddy-config:
+  nexo-commerce-prod-prometheus-data:
+  nexo-commerce-prod-grafana-data:
 
 networks:
   edge:
@@ -204,5 +292,7 @@ networks:
   api:
     internal: true
   database:
+    internal: true
+  monitoring:
     internal: true
   cloudflare-egress:

@@ -520,6 +520,19 @@ jobs:
           "$VPS_USER@$NEXO_SSH_HOST"
           deploy-app
 
+      - name: Probar tienda en producción con k6 y guardar métricas
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+        run: >-
+          ssh -i "$HOME/.ssh/nexo_deploy"
+          -p "$NEXO_SSH_PORT"
+          -o IdentitiesOnly=yes
+          -o BatchMode=yes
+          -o StrictHostKeyChecking=yes
+          -o UserKnownHostsFile="$HOME/.ssh/known_hosts"
+          "$VPS_USER@$NEXO_SSH_HOST"
+          monitor-smoke
+
       - name: Verificar frontend y API públicos
         run: |
           frontend_headers="$(mktemp)"

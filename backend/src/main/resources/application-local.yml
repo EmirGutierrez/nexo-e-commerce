@@ -10,3 +10,21 @@ springdoc:
     enabled: ${OPENAPI_ENABLED:true}
   swagger-ui:
     enabled: ${OPENAPI_ENABLED:true}
+
+management:
+  endpoints:
+    access:
+      default: none
+    web:
+      exposure:
+        include: prometheus
+  endpoint:
+    prometheus:
+      access: read-only
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+    tags:
+      environment: local
+      application: nexo-commerce-backend

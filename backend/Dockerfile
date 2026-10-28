@@ -9,5 +9,5 @@ WORKDIR /app
 RUN addgroup -S spring && adduser -S spring -G spring
 COPY --from=build --chown=spring:spring /workspace/target/nexo-commerce-backend-0.1.0-SNAPSHOT.jar ./app.jar
 USER spring
-EXPOSE 8080
+EXPOSE 8080 8081
 ENTRYPOINT ["java", "-jar", "/app/app.jar"]

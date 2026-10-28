@@ -18,6 +18,7 @@ if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
     sync-tunnel) action=sync-tunnel ;;
     sync-wireguard) action=sync-wireguard ;;
     deploy-app) action=deploy-app ;;
+    monitor-smoke) action=monitor-smoke ;;
     wireguard-public-key) action=wireguard-public-key ;;
     health) action=health ;;
     *) echo "Comando SSH no permitido." >&2; exit 126 ;;
@@ -80,12 +81,28 @@ wireguard_public_key() {
   docker compose --profile wireguard --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" exec -T wireguard wg show wg0 public-key
 }
 
+monitor_smoke() {
+  test_id="nexo-prod-$(date -u +%Y%m%dT%H%M%SZ)"
+  docker compose --env-file "$REPO_DIR/deploy/.env.production" \
+    -f "$REPO_DIR/compose.prod.yaml" \
+    exec -T frontend node -e '(async()=>{for(let i=0;i<30;i++){try{const response=await fetch("http://grafana:3000/api/health");if(response.ok)process.exit(0)}catch{}await new Promise(resolve=>setTimeout(resolve,1000))}process.exit(1)})()'
+  docker compose --profile loadtest \
+    --env-file "$REPO_DIR/deploy/.env.production" \
+    -f "$REPO_DIR/compose.prod.yaml" \
+    run --rm \
+    -e BASE_URL=http://frontend:3000 \
+    -e K6_TEST_ID="$test_id" \
+    -e K6_PROFILE=production \
+    k6
+}
+
 case "$action" in
   bootstrap) bootstrap ;;
   sync-mfa) sync_mfa ;;
   sync-tunnel) sync_tunnel ;;
   sync-wireguard) sync_wireguard ;;
   deploy-app) deploy_app ;;
+  monitor-smoke) monitor_smoke ;;
   wireguard-public-key) wireguard_public_key ;;
   health) health ;;
 esac

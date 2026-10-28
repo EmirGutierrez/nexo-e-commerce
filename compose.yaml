@@ -74,5 +74,58 @@ services:
       retries: 15
       start_period: 30s
 
+  prometheus:
+    profiles:
+      - monitoring
+    image: prom/prometheus:v3.15.1
+    restart: unless-stopped
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --web.enable-remote-write-receiver
+      - --storage.tsdb.retention.time=24h
+    ports:
+      - "127.0.0.1:19090:9090"
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - nexo-commerce-dev-prometheus-data:/prometheus
+
+  grafana:
+    profiles:
+      - monitoring
+    image: grafana/grafana:13.3.0
+    restart: unless-stopped
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_ADMIN_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-nexo-local-only}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+    ports:
+      - "127.0.0.1:13001:3000"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - nexo-commerce-dev-grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+
+  k6:
+    profiles:
+      - loadtest
+    image: grafana/k6:2.3.0
+    environment:
+      BASE_URL: ${BASE_URL:-http://frontend:3000}
+      TEST_ID: ${K6_TEST_ID:-nexo-store}
+      K6_PROMETHEUS_RW_SERVER_URL: http://prometheus:9090/api/v1/write
+      K6_PROMETHEUS_RW_TREND_STATS: p(95),p(99),min,max
+      K6_PROMETHEUS_RW_LABELS: ${K6_PROMETHEUS_RW_LABELS:-environment=local}
+    volumes:
+      - ./tests/load:/scripts:ro
+    command: ["run", "--out", "experimental-prometheus-rw", "/scripts/store.js"]
+    depends_on:
+      prometheus:
+        condition: service_started
 volumes:
   nexo-commerce-dev-data:
+  nexo-commerce-dev-prometheus-data:
+  nexo-commerce-dev-grafana-data:
