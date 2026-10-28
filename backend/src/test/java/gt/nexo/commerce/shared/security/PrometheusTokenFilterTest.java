@@ -33,7 +33,30 @@ class PrometheusTokenFilterTest {
     void rejectsMissingOrIncorrectToken() throws ServletException, IOException {
         PrometheusTokenFilter filter = new PrometheusTokenFilter(TOKEN);
         MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/prometheus");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, new MockFilterChain());
+
+        assertEquals(HttpServletResponse.SC_UNAUTHORIZED, response.getStatus());
+    }
+
+    @Test
+    void rejectsIncorrectBearerToken() throws ServletException, IOException {
+        PrometheusTokenFilter filter = new PrometheusTokenFilter(TOKEN);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/prometheus");
         request.addHeader("Authorization", "Bearer incorrect-token");
+        MockHttpServletResponse response = new MockHttpServletResponse();
+
+        filter.doFilter(request, response, new MockFilterChain());
+
+        assertEquals(HttpServletResponse.SC_UNAUTHORIZED, response.getStatus());
+    }
+
+    @Test
+    void rejectsAuthorizationSchemesOtherThanBearer() throws ServletException, IOException {
+        PrometheusTokenFilter filter = new PrometheusTokenFilter(TOKEN);
+        MockHttpServletRequest request = new MockHttpServletRequest("GET", "/actuator/prometheus");
+        request.addHeader("Authorization", "Basic " + TOKEN);
         MockHttpServletResponse response = new MockHttpServletResponse();
 
         filter.doFilter(request, response, new MockFilterChain());
@@ -56,5 +79,10 @@ class PrometheusTokenFilterTest {
     @Test
     void refusesWeakTokensAtStartup() {
         assertThrows(IllegalStateException.class, () -> new PrometheusTokenFilter("short"));
+    }
+
+    @Test
+    void refusesMissingTokenAtStartup() {
+        assertThrows(IllegalStateException.class, () -> new PrometheusTokenFilter(null));
     }
 }
