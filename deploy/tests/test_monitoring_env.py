@@ -3,7 +3,7 @@ from __future__ import annotations
 import importlib.util
 import os
 import pathlib
-import stat
+import secrets
 import tempfile
 import unittest
 
@@ -16,6 +16,9 @@ SPEC.loader.exec_module(VALIDATOR)
 
 
 class MonitoringEnvironmentTests(unittest.TestCase):
+    def random_secret(self) -> str:
+        return secrets.token_hex(32)
+
     def validate_text(self, text: str) -> None:
         with tempfile.TemporaryDirectory() as temporary_directory:
             env_path = pathlib.Path(temporary_directory) / ".env.production"
@@ -25,23 +28,28 @@ class MonitoringEnvironmentTests(unittest.TestCase):
             VALIDATOR.validate(env_path)
 
     def test_accepts_distinct_64_character_hex_secrets(self) -> None:
+        prometheus_token = self.random_secret()
+        grafana_password = self.random_secret()
+        while grafana_password == prometheus_token:
+            grafana_password = self.random_secret()
+
         self.validate_text(
-            "PROMETHEUS_SCRAPE_TOKEN=" + "a" * 64 + "\n"
-            "GRAFANA_ADMIN_PASSWORD=" + "b" * 64 + "\n"
+            f"PROMETHEUS_SCRAPE_TOKEN={prometheus_token}\n"
+            f"GRAFANA_ADMIN_PASSWORD={grafana_password}\n"
         )
 
     def test_rejects_missing_or_placeholder_secrets(self) -> None:
         with self.assertRaisesRegex(ValueError, "PROMETHEUS_SCRAPE_TOKEN"):
-            self.validate_text("GRAFANA_ADMIN_PASSWORD=" + "b" * 64 + "\n")
+            self.validate_text(f"GRAFANA_ADMIN_PASSWORD={self.random_secret()}\n")
 
         with self.assertRaisesRegex(ValueError, "GRAFANA_ADMIN_PASSWORD"):
             self.validate_text(
-                "PROMETHEUS_SCRAPE_TOKEN=" + "a" * 64 + "\n"
+                f"PROMETHEUS_SCRAPE_TOKEN={self.random_secret()}\n"
                 "GRAFANA_ADMIN_PASSWORD=replace-with-a-random-password\n"
             )
 
     def test_rejects_reused_secrets_and_duplicate_definitions(self) -> None:
-        secret = "a" * 64
+        secret = self.random_secret()
         with self.assertRaisesRegex(ValueError, "deben ser distintos"):
             self.validate_text(
                 f"PROMETHEUS_SCRAPE_TOKEN={secret}\nGRAFANA_ADMIN_PASSWORD={secret}\n"
@@ -51,7 +59,7 @@ class MonitoringEnvironmentTests(unittest.TestCase):
             self.validate_text(
                 f"PROMETHEUS_SCRAPE_TOKEN={secret}\n"
                 f"PROMETHEUS_SCRAPE_TOKEN={secret}\n"
-                "GRAFANA_ADMIN_PASSWORD=" + "b" * 64 + "\n"
+                f"GRAFANA_ADMIN_PASSWORD={self.random_secret()}\n"
             )
 
     @unittest.skipIf(os.name == "nt", "Permisos POSIX se validan en Linux")
@@ -59,8 +67,8 @@ class MonitoringEnvironmentTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as temporary_directory:
             env_path = pathlib.Path(temporary_directory) / ".env.production"
             env_path.write_text(
-                "PROMETHEUS_SCRAPE_TOKEN=" + "a" * 64 + "\n"
-                "GRAFANA_ADMIN_PASSWORD=" + "b" * 64 + "\n",
+                f"PROMETHEUS_SCRAPE_TOKEN={self.random_secret()}\n"
+                f"GRAFANA_ADMIN_PASSWORD={self.random_secret()}\n",
                 encoding="utf-8",
             )
 
