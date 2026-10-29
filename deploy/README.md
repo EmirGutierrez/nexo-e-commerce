@@ -1,12 +1,12 @@
 # Despliegue en Contabo
 
-El Compose de producción ejecuta PostgreSQL, Spring Boot, Next.js y Caddy; `cloudflare-tunnel` conserva el túnel `cloudflared` existente y `wireguard` agrega el acceso privado de despliegue. Caddy publica el sitio con HTTPS automático en el dominio raíz y `www`; `api.<dominio>` publica la API para los clientes móviles. PostgreSQL y Spring no publican puertos del host.
+El Compose de producción ejecuta PostgreSQL, Spring Boot, Next.js, Caddy, Prometheus y Grafana; `cloudflare-tunnel` conserva el túnel `cloudflared` existente y `wireguard` agrega el acceso privado de despliegue. Caddy publica el sitio con HTTPS automático en el dominio raíz y `www`; `api.<dominio>` publica la API para los clientes móviles. PostgreSQL, Spring Actuator y Prometheus no publican puertos del host.
 
 ## Preparar el servidor una vez
 
 1. Instala Docker Engine y el plugin de Docker Compose v2 en Ubuntu. Confirma que `docker compose version` responda.
 2. Crea un usuario `deploy` con acceso SSH por llave y permiso para ejecutar Docker. No uses `root` en el secreto de GitHub.
-3. Crea `/opt/nexo-commerce/deploy/.env.production` a partir de `deploy/production.env.example`. Configura el dominio, una contraseña aleatoria larga para la base de datos y una clave MFA persistente (`openssl rand -base64 32`). Guarda la clave en un gestor de secretos y en un respaldo seguro; sin ella no se puede enrolar MFA y cambiarla después deja inaccesibles las cuentas que ya lo usen. Para el primer arranque, configura las cuatro variables de bootstrap del administrador. Protege el archivo con `chmod 600`.
+3. Crea `/opt/nexo-commerce/deploy/.env.production` a partir de `deploy/production.env.example`. Configura el dominio, una contraseña aleatoria larga para la base de datos, una clave MFA persistente (`openssl rand -base64 32`), `PROMETHEUS_SCRAPE_TOKEN` y `GRAFANA_ADMIN_PASSWORD` con valores independientes de `openssl rand -hex 32`. El wrapper valida que el archivo tenga permisos `600` o más restrictivos y que los dos secretos de monitoreo sean hexadecimales de 64 caracteres, distintos y estén presentes antes de iniciar Compose; si falla alguna validación, aborta antes de cambiar contenedores y sin mostrar los secretos. Guarda la clave MFA en un gestor de secretos y en un respaldo seguro; sin ella no se puede enrolar MFA y cambiarla después deja inaccesibles las cuentas que ya lo usen. Para el primer arranque, configura las cuatro variables de bootstrap del administrador. Protege el archivo con `chmod 600`.
 4. Da propiedad de `/opt/nexo-commerce` al usuario `deploy`. El workflow clona el repositorio ahí la primera vez y, después, actualiza la rama `develop`.
 5. Configura la zona en Cloudflare y mantén `@`, `www` y `api` en modo proxy. En el firewall de Contabo, permite TCP 80/443 y UDP 443 solo desde los rangos oficiales de Cloudflare que soporte la instancia. Para la migración gradual a WireGuard, conserva TCP 22 hasta que el workflow complete un despliegue por VPN y hayas comprobado la consola de recuperación de Contabo.
 
@@ -29,13 +29,15 @@ En el repositorio, abre **Settings → Environments → production → Environme
 
 Además, en **Settings → Environments → production → Environment variables**, crea `WIREGUARD_SERVER_PUBLIC_KEY` con la llave pública que muestra el resumen del bootstrap. No es una llave secreta. La llave privada del servidor se genera en la VPS y no se envía a GitHub.
 
+`PROMETHEUS_SCRAPE_TOKEN` y `GRAFANA_ADMIN_PASSWORD` pertenecen al `.env.production` privado de la VPS, no a GitHub Actions. Genera valores nuevos para producción; no uses los marcadores de `production.env.example`.
+
 No compartas la llave privada en el repositorio ni en mensajes. El workflow elimina retornos de carro al cargarla para admitir copias desde Windows y valida su formato antes de conectar. La huella ED25519 de la VPS se fija en el workflow y se compara con la respuesta de `ssh-keyscan`; si Contabo cambia la llave del host, actualiza la huella solo después de verificarla desde la consola de la VPS.
 
 Cada push a `develop` ejecuta CI, pero no publica automáticamente en producción. Para desplegar, inicia manualmente el workflow seleccionando `develop`; se exige que pasen pruebas frontend y backend, SonarQube Cloud y la construcción de imágenes. Configura el entorno `production` en GitHub para pedir aprobación de responsables antes de entregar sus secretos al job. Los pushes a otras ramas y los Pull Requests ejecutan CI, pero no despliegan.
 
 El workflow usa `/opt/nexo-commerce` como directorio de despliegue. La primera ejecución requiere que el usuario SSH pueda crear ese directorio y ejecutar Docker; puedes prepararlo con `sudo install -d -o deploy -g deploy /opt/nexo-commerce`.
 
-En el primer despliegue actualizado, el workflow reemplaza la entrada de `VPS_SSH_KEY` en `~deploy/.ssh/authorized_keys` por una entrada `restrict` que fuerza `deploy/nexo-ssh-command.sh`. La llave solo acepta `health`, `sync-mfa`, `sync-tunnel`, `sync-wireguard`, `wireguard-public-key`, `deploy-app` y el bootstrap fijo; no habilita shell, PTY ni forwarding. El workflow normal valida la huella ED25519 y llega por WireGuard únicamente a `10.77.0.1/32`; no tiene una ruta a otras redes. No uses `VPS_SSH_KEY` para administración interactiva. `deploy` todavía pertenece al grupo `docker`, equivalente a root.
+En el primer despliegue actualizado, el workflow reemplaza la entrada de `VPS_SSH_KEY` en `~deploy/.ssh/authorized_keys` por una entrada `restrict` que fuerza `deploy/nexo-ssh-command.sh`. La llave solo acepta `health`, `monitor-smoke`, `sync-mfa`, `sync-tunnel`, `sync-wireguard`, `wireguard-public-key`, `deploy-app` y el bootstrap fijo; no habilita shell, PTY ni forwarding. El workflow normal valida la huella ED25519 y llega por WireGuard únicamente a `10.77.0.1/32`; no tiene una ruta a otras redes. No uses `VPS_SSH_KEY` para administración interactiva. `deploy` todavía pertenece al grupo `docker`, equivalente a root.
 
 ## Migrar SSH de producción a WireGuard
 
@@ -59,7 +61,9 @@ docker compose --env-file deploy/.env.production -f compose.prod.yaml ps
 docker compose --env-file deploy/.env.production -f compose.prod.yaml logs -f frontend backend postgres caddy
 ```
 
-La base de datos persiste en el volumen `nexo-commerce-prod-data`. No uses `docker compose down -v` en producción: elimina ese volumen y sus datos.
+La base de datos persiste en el volumen `nexo-commerce-prod-data`; Prometheus conserva siete días de métricas y Grafana mantiene su configuración en volúmenes separados. No uses `docker compose down -v` en producción: elimina esos volúmenes y sus datos.
+
+La consola de Grafana se sirve en `https://<SITE_DOMAIN>/monitoring/`, requiere el usuario y contraseña definidos en `.env.production` y no permite registro anónimo. Caddy preserva el prefijo `/monitoring` al enviarlo a Grafana, que sirve explícitamente desde ese subpath. Prometheus no publica puertos del host. Spring expone sus métricas por el puerto interno 8081 y exige `PROMETHEUS_SCRAPE_TOKEN`; Caddy no enruta ese puerto. Después de cada despliegue, el workflow ejecuta un smoke test k6 de 40 segundos con un máximo de dos usuarios virtuales, solo contra `GET /store`, y almacena sus métricas en Prometheus.
 
 ## Seguridad perimetral y respaldos
 

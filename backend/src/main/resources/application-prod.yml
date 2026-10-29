@@ -5,6 +5,25 @@ server:
       cookie:
         secure: ${SESSION_COOKIE_SECURE:true}
         same-site: ${SESSION_COOKIE_SAME_SITE:Lax}
+management:
+  server:
+    port: 8081
+  endpoints:
+    access:
+      default: none
+    web:
+      exposure:
+        include: prometheus
+  endpoint:
+    prometheus:
+      access: read-only
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
+    tags:
+      environment: production
+      application: nexo-commerce-backend
 springdoc:
   api-docs:
     enabled: ${OPENAPI_ENABLED:false}
@@ -16,5 +35,7 @@ spring:
     username: ${DATABASE_USERNAME}
     password: ${DATABASE_PASSWORD}
 nexo:
+  metrics:
+    prometheus-token: ${PROMETHEUS_SCRAPE_TOKEN}
   web:
     allowed-origins: ${CORS_ALLOWED_ORIGINS}
