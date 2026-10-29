@@ -235,6 +235,7 @@ class BusinessRecordServicePublicCheckoutTest {
             when(row.getString(1)).thenReturn("{\"name\":\"Ana\",\"email\":\"ANA@EXAMPLE.TEST\"}");
             return extractor.extractData(row);
         }).when(jdbc).query(org.mockito.ArgumentMatchers.contains("resource_code = 'customers'"), any(ResultSetExtractor.class), eq(CUSTOMER_ID));
+        when(jdbc.queryForObject(org.mockito.ArgumentMatchers.contains("customer_wishlist_items"), eq(Long.class), eq("ana@example.test"))).thenReturn(2L);
         doAnswer(invocation -> {
             @SuppressWarnings("unchecked") RowMapper<Map<String, Object>> rowMapper = invocation.getArgument(1);
             ResultSet row = mock(ResultSet.class);
@@ -246,6 +247,7 @@ class BusinessRecordServicePublicCheckoutTest {
         Map<String, Object> details = service.customerDetails(CUSTOMER_ID);
 
         assertEquals("ANA@EXAMPLE.TEST", ((Map<?, ?>) details.get("customer")).get("email"));
+        assertEquals(2L, details.get("wishlistItems"));
         assertEquals(List.of("Zona 1"), details.get("addresses"));
         assertEquals(1, ((List<?>) details.get("orders")).size());
         verify(permissions).has(authentication, "customers", "view");

@@ -5,6 +5,7 @@ import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.contains;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -48,6 +49,16 @@ class UserAccountServiceTest {
         when(user.getStatus()).thenReturn(UserStatus.ACTIVE);
         when(user.getRole()).thenReturn(targetRole);
         when(targetRole.getCode()).thenReturn("admin");
+    }
+
+    @Test
+    void rejectsMarkupWhenUpdatingAProfileNameBeforeSaving() {
+        BusinessRuleException exception = assertThrows(BusinessRuleException.class,
+                () -> service.updateOwnProfile(userId, "<img src=x onerror=alert(1)>"));
+
+        assertEquals("INVALID_PROFILE_NAME", exception.getCode());
+        verify(users, never()).findById(userId);
+        verify(user, never()).changeDisplayName(anyString());
     }
 
     @Test

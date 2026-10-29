@@ -146,6 +146,24 @@ describe('tienda y detalle de productos', () => {
     expect(screen.queryByText('No encontramos resultados')).toBeNull();
   });
 
+  it('deshabilita sumar cuando el carrito ya contiene todo el stock y permite agregar con disponibilidad', async () => {
+    state.cart = [{ ...monitor, quantity: monitor.stock }];
+    const view = render(<Storefront />);
+    const capped = await screen.findByRole('button', { name: `Máximo disponible en el carrito: ${monitor.name}` });
+
+    expect((capped as HTMLButtonElement).disabled).toBe(true);
+    expect(screen.getByText(`Ya tienes las ${monitor.stock} unidades disponibles en el carrito.`)).toBeTruthy();
+    fireEvent.click(capped);
+    expect(state.addToCart).not.toHaveBeenCalled();
+
+    state.cart = [{ ...monitor, quantity: monitor.stock - 1 }];
+    view.rerender(<Storefront />);
+    const available = screen.getByRole('button', { name: `Agregar ${monitor.name} al carrito` });
+    expect((available as HTMLButtonElement).disabled).toBe(false);
+    fireEvent.click(available);
+    expect(state.addToCart).toHaveBeenCalledWith(expect.objectContaining({ id: monitor.id }));
+  });
+
   it('registra visita, limita cantidad y agrega el producto al carrito', async () => {
     commerce.applyOffer.mockImplementation((product: Product) => ({ ...product, compareAt: 125 }));
     render(<ProductDetail />);

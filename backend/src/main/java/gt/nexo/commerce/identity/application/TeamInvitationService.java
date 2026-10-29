@@ -1,6 +1,7 @@
 package gt.nexo.commerce.identity.application;
 
 import gt.nexo.commerce.business.application.BusinessRuleException;
+import gt.nexo.commerce.shared.validation.DisplayNamePolicy;
 import gt.nexo.commerce.identity.api.dto.TeamInvitationRequest;
 import gt.nexo.commerce.identity.api.dto.TeamInvitationResponse;
 import gt.nexo.commerce.identity.infrastructure.persistence.AppUserEntity;
@@ -48,7 +49,7 @@ public class TeamInvitationService {
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         String name = request.name().trim();
         String roleCode = request.role().trim().toLowerCase(Locale.ROOT);
-        if (name.isBlank() || !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Revisa el nombre y el correo de la invitación.");
+        if (!DisplayNamePolicy.isValid(name) || !hasValidEmailShape(email)) throw invalid("Revisa el nombre y el correo de la invitación.");
         if (roleCode.equals("customer") || roleCode.equals("superadmin")) throw invalid("El rol de la invitación no está permitido.");
         var role = roles.findById(roleCode).orElseThrow(() -> invalid("El rol solicitado no existe."));
         var existing = users.findByEmailIgnoreCase(email);
@@ -124,6 +125,19 @@ public class TeamInvitationService {
 
     private static UUID principalId(Authentication authentication) {
         return authentication != null && authentication.getPrincipal() instanceof NexoUserPrincipal principal ? principal.getId() : null;
+    }
+
+    private static boolean hasValidEmailShape(String email) {
+        int at = email.indexOf('@');
+        if (at <= 0 || at != email.lastIndexOf('@') || at == email.length() - 1) return false;
+        int domainDot = email.indexOf('.', at + 1);
+        if (domainDot <= at + 1 || domainDot == email.length() - 1) return false;
+        for (int offset = 0; offset < email.length();) {
+            int codePoint = email.codePointAt(offset);
+            if (Character.isWhitespace(codePoint)) return false;
+            offset += Character.charCount(codePoint);
+        }
+        return true;
     }
 
     private static String hash(String token) {

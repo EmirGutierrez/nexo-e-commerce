@@ -6,6 +6,7 @@ import AccountingPage from '../modules/accounting/components/AccountingPage';
 import SuppliersPage from '../modules/suppliers/components/SuppliersPage';
 import { accountingService, merchandisePurchaseService, productInventoryService, supplierService } from '../services';
 import { roleService } from '../services/roleService';
+import { businessToday } from '../shared/utils/businessDate';
 
 const app = vi.hoisted(() => ({ role: 'superadmin' }));
 vi.mock('../contexts/AppContext', () => ({ useApp: () => app }));
@@ -60,7 +61,7 @@ describe('ingresos y egresos', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Registrar ingreso o egreso' }));
     fireEvent.change(screen.getByLabelText('Tipo de movimiento'), { target: { value: 'Egreso' } });
     fireEvent.change(screen.getByLabelText('Concepto'), { target: { value: 'Compra de cajas' } });
-    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'Suministros' } });
+    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'Servicios' } });
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '0' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
     expect((await screen.findByRole('alert')).textContent).toContain('monto mayor que cero');
@@ -68,6 +69,26 @@ describe('ingresos y egresos', () => {
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '75' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
     expect((await screen.findByRole('alert')).textContent).toContain('No se pudo guardar el movimiento');
+  });
+
+  it('exige confirmación para fechas retroactivas y conserva la fecha actual sin aviso', async () => {
+    render(<AccountingPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Registrar ingreso o egreso' }));
+    const date = screen.getByLabelText('Fecha') as HTMLInputElement;
+    expect(date.value).toBe(businessToday());
+    fireEvent.change(screen.getByLabelText('Concepto'), { target: { value: 'Caja de archivo' } });
+    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'Servicios' } });
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '75' } });
+    fireEvent.change(date, { target: { value: '2026-10-19' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Confirma que este movimiento');
+    expect(accountingService.create).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText('Confirmo que es un registro histórico'));
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
+    await waitFor(() => expect(accountingService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ date: '2026-10-19', amount: 75 }), { confirmHistoricalDate: true },
+    ));
   });
 });
 

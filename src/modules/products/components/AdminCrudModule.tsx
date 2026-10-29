@@ -5,6 +5,8 @@ import { formatQ } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
 import { roleLabels, type Brand, type Role } from '../../../types';
 import { roleService } from '../../../services/roleService';
+import { PRODUCT_IMAGE_MAX_DATA_URL_LENGTH, PRODUCT_IMAGE_MIN_SIDE, productImageCompressionDimensions } from '../utils/productImageProcessing';
+import { isValidPersonName } from '../../../shared/utils/personName';
 
 export interface AdminModuleConfig {
   title: string;
@@ -208,6 +210,9 @@ export default function AdminCrudModule({ section, config }: { section: string; 
         nextRecord[column] = parsed;
       } else nextRecord[column] = value;
     }
+    if ((section === 'customers' || section === 'users') && !isValidPersonName(String(nextRecord.Nombre || ''))) {
+      setError('El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.'); return;
+    }
     if (section === 'inventory') {
       const quantity = Number(nextRecord.Existencias);
       if (nextRecord.Estado === 'En stock' && quantity <= 0) { setError('Un producto En stock debe tener al menos una existencia.'); return; }
@@ -332,9 +337,9 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   </div>;
 }
 
-function CustomerDetail({ details, onClose }: { details: { customer: Record<string, unknown>; addresses: string[]; orders: { id: string; orderNumber?: string; date?: string; status?: string; paymentMethod?: string; paymentStatus?: string; total?: number; items?: { productName?: string; quantity?: number; unitPrice?: number; subtotal?: number }[] }[] }; onClose: () => void }) {
+function CustomerDetail({ details, onClose }: { details: { customer: Record<string, unknown>; wishlistItems: number; addresses: string[]; orders: { id: string; orderNumber?: string; date?: string; status?: string; paymentMethod?: string; paymentStatus?: string; total?: number; items?: { productName?: string; quantity?: number; unitPrice?: number; subtotal?: number }[] }[] }; onClose: () => void }) {
   const { customer, addresses, orders } = details;
-  return <div className="customer-detail"><dl className="crud-detail-list"><div><span>Nombre</span><strong>{String(customer.name || '—')}</strong></div><div><span>Correo</span><strong>{String(customer.email || '—')}</strong></div><div><span>Teléfono</span><strong>{String(customer.phone || '—')}</strong></div><div><span>Estado</span><strong>{String(customer.status || 'Activo')}</strong></div><div><span>Pedidos</span><strong>{orders.length}</strong></div></dl><section><h3>Direcciones</h3>{addresses.length ? <ul>{addresses.map((address) => <li key={address}>{address}</li>)}</ul> : <p>No hay direcciones registradas.</p>}</section><section><h3>Historial de compras</h3>{orders.length ? orders.map((order) => <article className="customer-order-detail" key={order.id}><header><strong>{String(order.orderNumber || order.id)}</strong><span>{String(order.status || '—')} · {formatQ(Number(order.total || 0))}</span></header><small>{order.date ? new Date(order.date).toLocaleString('es-GT') : 'Fecha no disponible'} · {String(order.paymentStatus || order.paymentMethod || '—')}</small>{order.items?.map((item, index) => <p key={String(item.productName || index)}>{String(item.productName || 'Producto')} · {Number(item.quantity || 0)} × {formatQ(Number(item.unitPrice || 0))}</p>)}</article>) : <p>Aún no hay compras asociadas a este cliente.</p>}</section><div className="modal-actions"><button className="button button-outline" onClick={onClose}>Cerrar</button></div></div>;
+  return <div className="customer-detail"><dl className="crud-detail-list"><div><span>Nombre</span><strong>{String(customer.name || '—')}</strong></div><div><span>Correo</span><strong>{String(customer.email || '—')}</strong></div><div><span>Teléfono</span><strong>{String(customer.phone || '—')}</strong></div><div><span>Estado</span><strong>{String(customer.status || 'Activo')}</strong></div><div><span>Pedidos</span><strong>{orders.length}</strong></div><div><span>Favoritos</span><strong>{details.wishlistItems}</strong></div></dl><section><h3>Direcciones</h3>{addresses.length ? <ul>{addresses.map((address) => <li key={address}>{address}</li>)}</ul> : <p>No hay direcciones registradas.</p>}</section><section><h3>Historial de compras</h3>{orders.length ? orders.map((order) => <article className="customer-order-detail" key={order.id}><header><strong>{String(order.orderNumber || order.id)}</strong><span>{String(order.status || '—')} · {formatQ(Number(order.total || 0))}</span></header><small>{order.date ? new Date(order.date).toLocaleString('es-GT') : 'Fecha no disponible'} · {String(order.paymentStatus || order.paymentMethod || '—')}</small>{order.items?.map((item, index) => <p key={String(item.productName || index)}>{String(item.productName || 'Producto')} · {Number(item.quantity || 0)} × {formatQ(Number(item.unitPrice || 0))}</p>)}</article>) : <p>Aún no hay compras asociadas a este cliente.</p>}</section><div className="modal-actions"><button className="button button-outline" onClick={onClose}>Cerrar</button></div></div>;
 }
 function CrudCell({ value, column, image, onSelect }: { value: string | number | undefined; column: string; image?: string; onSelect?: () => void }) {
   if (column === 'Estado' || column === 'Estado de pago') return <span className={`status-pill ${String(value).includes('Complet') || value === 'Activo' || value === 'En stock' || value === 'Emitida' || value === 'Aprobada' ? 'success' : String(value).includes('Anul') || String(value).includes('Cancel') || value === 'Inactivo' || value === 'Sin stock' ? 'danger' : 'warning'}`}><i />{value}</span>;
@@ -381,20 +386,21 @@ async function prepareProductImage(file: File): Promise<string> {
     image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen.')); };
     image.src = url;
   });
+  const dimensions = productImageCompressionDimensions(source.width, source.height);
+  if (!dimensions.length) throw new Error(`La imagen original debe medir al menos ${PRODUCT_IMAGE_MIN_SIDE} × ${PRODUCT_IMAGE_MIN_SIDE} px. No se ampliarán imágenes pequeñas.`);
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   if (!context) throw new Error('No se pudo preparar la imagen.');
-  for (const maxDimension of [1280, 1024, 840, 680, 520]) {
-    const scale = Math.min(1, maxDimension / Math.max(source.width, source.height));
-    canvas.width = Math.max(1, Math.round(source.width * scale));
-    canvas.height = Math.max(1, Math.round(source.height * scale));
+  for (const target of dimensions) {
+    canvas.width = target.width;
+    canvas.height = target.height;
     context.drawImage(source, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.72, 0.62, 0.52, 0.42]) {
+    for (const quality of [0.88, 0.84, 0.8, 0.76]) {
       const image = canvas.toDataURL('image/jpeg', quality);
-      if (image.length <= 180_000) return image;
+      if (image.length <= PRODUCT_IMAGE_MAX_DATA_URL_LENGTH) return image;
     }
   }
-  throw new Error('No se pudo comprimir la imagen al tamaño permitido. Prueba una imagen más pequeña.');
+  throw new Error('La imagen supera 140 KB después de comprimirla sin reducirla por debajo de la resolución mínima. Usa una imagen optimizada o un recorte más ajustado.');
 }
 
 function AdminCrudEmptyState({ search }: { search: string }) { return <div className="empty-state"><Search size={28} /><h3>{search ? 'No encontramos resultados' : 'No hay registros disponibles'}</h3><p>{search ? 'Prueba con otra búsqueda.' : 'Crea un registro para comenzar.'}</p></div>; }
