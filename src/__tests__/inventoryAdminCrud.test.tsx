@@ -230,6 +230,8 @@ describe('configuración y formularios de inventario', () => {
 
   it('muestra la acción de eliminar inventario y conserva el producto como inactivo si tiene historial', async () => {
     const remove = vi.spyOn(adminTableService, 'delete').mockResolvedValue({ deleted: false });
+    const inactiveProduct = { ...inventoryProduct, status: 'Inactivo' as const };
+    vi.mocked(inventoryService.products).mockResolvedValueOnce([inventoryProduct]).mockResolvedValueOnce([inactiveProduct]);
     render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
     await screen.findByText('Monitor');
 
@@ -240,6 +242,7 @@ describe('configuración y formularios de inventario', () => {
     expect(screen.getByText('Monitor')).toBeTruthy();
     expect(screen.getByRole('status').textContent).toContain('desactivó para conservar su historial');
     expect(screen.getAllByText('Inactivo').some((element) => element.closest('.table-row'))).toBe(true);
+    await waitFor(() => expect(appContext.reportLowStock).toHaveBeenLastCalledWith([inactiveProduct]));
   });
 
   it('usa las columnas del listado como formulario de catálogo y agrega una sola entrada de imagen', async () => {
@@ -391,6 +394,7 @@ describe('acciones y detalles de registros administrativos', () => {
 
   it('elimina un inventario sin relaciones y muestra el estado vacío resultante', async () => {
     vi.spyOn(adminTableService, 'delete').mockResolvedValue({ deleted: true });
+    vi.mocked(inventoryService.products).mockResolvedValueOnce([inventoryProduct]).mockResolvedValueOnce([]);
     render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
     fireEvent.click(await screen.findByRole('button', { name: 'Eliminar Inventario: Monitor' }));
     fireEvent.click(screen.getByRole('button', { name: 'Eliminar producto' }));
@@ -398,6 +402,7 @@ describe('acciones y detalles de registros administrativos', () => {
     await waitFor(() => expect(screen.queryByText('Monitor')).toBeNull());
     expect(screen.getByRole('status').textContent).toContain('Registro eliminado correctamente');
     expect(screen.getByText('No hay registros disponibles')).toBeTruthy();
+    await waitFor(() => expect(appContext.reportLowStock).toHaveBeenLastCalledWith([]));
   });
 
   it('muestra la ficha completa de cliente y maneja datos opcionales del historial', async () => {

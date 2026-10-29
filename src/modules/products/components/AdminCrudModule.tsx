@@ -68,6 +68,10 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const [customerDetailLoading, setCustomerDetailLoading] = useState(false);
   const { reportLowStock, assignRole, user, role } = useApp();
   const isProductSection = section === 'products' || section === 'inventory';
+  const refreshLowStockAlert = useCallback(async () => {
+    try { reportLowStock(await inventoryService.products()); }
+    catch { /* Conserva el último aviso hasta poder validar un inventario nuevo. */ }
+  }, [reportLowStock]);
   const loadBrandOptions = useCallback(async () => {
     setBrandOptionsLoading(true);
     setBrandOptionsError('');
@@ -263,7 +267,10 @@ export default function AdminCrudModule({ section, config }: { section: string; 
         if (selectedRole && activeId === user?.id) assignRole(activeId, selectedRole);
         replaceEntries((current) => current.map((entry) => entry.id === activeId ? result : entry)); setFeedback('Cambios guardados correctamente.');
       }
-      if (section === 'inventory') await loadLocationOptions();
+      if (section === 'inventory') {
+        await loadLocationOptions();
+        await refreshLowStockAlert();
+      }
       closeDialog();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar el registro. Intenta nuevamente.'); }
     finally { setBusy(false); }
@@ -322,6 +329,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
         const nextStatus = section === 'sales' ? 'Cancelado' : section === 'invoices' ? 'Cancelada' : 'Rechazada';
         const updated = { ...entry.data, [statusKey]: nextStatus }; const result = await adminTableService.update(section, activeId, updated); replaceEntries((current) => current.map((item) => item.id === activeId ? result : item)); setFeedback('Estado actualizado correctamente.');
       }
+      if (section === 'inventory') await refreshLowStockAlert();
       closeDialog();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo completar la acción. Intenta nuevamente.'); }
     finally { setBusy(false); }

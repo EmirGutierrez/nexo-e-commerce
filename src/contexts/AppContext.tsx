@@ -31,7 +31,7 @@ interface AppContextValue {
   adminAlert: AdminAlert | null;
   notifyAdmin: (alert: Omit<AdminAlert, 'id'>) => void;
   dismissAdminAlert: () => void;
-  reportLowStock: (products: Pick<Product, 'id' | 'name' | 'stock'>[]) => void;
+  reportLowStock: (products: Pick<Product, 'id' | 'name' | 'stock' | 'status'>[]) => void;
 }
 
 export interface AdminAlert {
@@ -43,6 +43,31 @@ export interface AdminAlert {
   message: string;
   nextAction: string;
   actionTo?: string;
+}
+
+const LOW_STOCK_ALERT_PREFIX = 'low-stock:';
+const LOW_STOCK_ALERT_MAX_ENTITY_LENGTH = 180;
+const LOW_STOCK_ALERT_MAX_PRODUCTS = 3;
+const LOW_STOCK_ALERT_MAX_PRODUCT_NAME_LENGTH = 44;
+
+function truncateAlertText(value: string, limit: number): string {
+  const characters = Array.from(value);
+  if (characters.length <= limit) return value;
+  return `${characters.slice(0, limit - 1).join('').trimEnd()}…`;
+}
+
+function summarizeLowStockProducts(products: Pick<Product, 'name' | 'stock'>[]): string {
+  const preview = products.slice(0, LOW_STOCK_ALERT_MAX_PRODUCTS).map(({ name, stock }) => {
+    const normalizedName = name.trim().replace(/\s+/g, ' ') || 'Producto sin nombre';
+    return `${truncateAlertText(normalizedName, LOW_STOCK_ALERT_MAX_PRODUCT_NAME_LENGTH)} (${stock})`;
+  });
+  const remaining = products.length - preview.length;
+  const summary = `${preview.join(', ')}${remaining > 0 ? ` y ${remaining} más` : ''}`;
+  return truncateAlertText(summary, LOW_STOCK_ALERT_MAX_ENTITY_LENGTH);
+}
+
+function isLowStockAlert(alert: AdminAlert): boolean {
+  return alert.dedupeKey.startsWith(LOW_STOCK_ALERT_PREFIX);
 }
 
 const AppContext = createContext<AppContextValue | null>(null);
@@ -67,21 +92,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     setAdminAlerts((current) => [...current, { ...alert, id: Date.now() + current.length }]);
   }, []);
   const dismissAdminAlert = useCallback(() => setAdminAlerts((current) => current.slice(1)), []);
-  const reportLowStock = useCallback((rows: Pick<Product, 'id' | 'name' | 'stock'>[]) => {
-    const low = rows.filter((product) => product.stock < 10).sort((a, b) => a.id.localeCompare(b.id));
+  const reportLowStock = useCallback((rows: Pick<Product, 'id' | 'name' | 'stock' | 'status'>[]) => {
+    const low = rows.filter((product) => product.status !== 'Inactivo' && product.stock < 10).sort((a, b) => a.id.localeCompare(b.id));
     const previousKey = currentLowStockKey.current;
     if (!low.length) {
       if (previousKey) seenAdminAlerts.current.delete(previousKey);
       currentLowStockKey.current = null;
+      setAdminAlerts((current) => current.filter((alert) => !isLowStockAlert(alert)));
       return;
     }
-    const dedupeKey = `low-stock:${low.map((product) => `${product.id}:${product.stock}`).join('|')}`;
-    if (dedupeKey === previousKey) return;
+    const dedupeKey = `${LOW_STOCK_ALERT_PREFIX}${low.map((product) => `${product.id}:${product.stock}`).join('|')}`;
+    const title = `${low.length} producto${low.length === 1 ? '' : 's'} requieren revisión de stock`;
+    const entity = summarizeLowStockProducts(low);
+    if (dedupeKey === previousKey) {
+      // Mantén la tarjeta al día si el nombre cambió, sin reabrir un aviso descartado.
+      setAdminAlerts((current) => current.map((alert) => alert.dedupeKey === dedupeKey ? { ...alert, title, entity } : alert));
+      return;
+    }
     if (previousKey) seenAdminAlerts.current.delete(previousKey);
     currentLowStockKey.current = dedupeKey;
-    const names = low.slice(0, 4).map((product) => `${product.name} (${product.stock})`).join(', ');
-    notifyAdmin({ dedupeKey, type: 'warning', title: `${low.length} producto${low.length === 1 ? '' : 's'} requieren revisión de stock`, entity: names + (low.length > 4 ? ` y ${low.length - 4} más` : ''), message: 'Hay productos con menos de 10 unidades o agotados en el inventario.', nextAction: 'Revisar existencias y planificar reposición.', actionTo: '/admin/inventory/alerts' });
-  }, [notifyAdmin]);
+    seenAdminAlerts.current.add(dedupeKey);
+    setAdminAlerts((current) => [
+      ...current.filter((alert) => !isLowStockAlert(alert)),
+      { id: Date.now() + current.length, dedupeKey, type: 'warning', title, entity,
+        message: 'Hay productos con menos de 10 unidades o agotados en el inventario.',
+        nextAction: 'Revisar existencias y planificar reposición.', actionTo: '/admin/inventory/alerts' },
+    ]);
+  }, []);
 
   useEffect(() => {
     try {
