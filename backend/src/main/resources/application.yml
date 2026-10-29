@@ -64,6 +64,8 @@ nexo:
       absolute-timeout: ${SESSION_ABSOLUTE_TIMEOUT:8h}
   mobile:
     access-token-lifetime: ${MOBILE_ACCESS_TOKEN_LIFETIME:7d}
+  auth:
+    password-reset-url: ${NEXO_PASSWORD_RESET_URL:http://localhost:3000/reset-password}
   bootstrap:
     admin:
       enabled: ${BOOTSTRAP_ADMIN_ENABLED:false}

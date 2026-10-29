@@ -22,6 +22,11 @@ const dataWithId = <T extends JsonRecord>(record: ApiRecord<T>): T & { id: strin
 const value = (data: JsonRecord, ...keys: string[]) => keys.map((key) => data[key]).find((entry) => entry !== undefined && entry !== null);
 const stringValue = (data: JsonRecord, ...keys: string[]) => String(value(data, ...keys) ?? '');
 const numberValue = (data: JsonRecord, ...keys: string[]) => Number(value(data, ...keys) ?? 0);
+function parseRequiredCount(raw: unknown, label: string): number {
+  const count = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error(`La API devolvió un conteo de ${label} inválido o incompleto.`);
+  return count;
+}
 
 function mapProduct(record: ApiRecord): Product {
   const data = record.data;
@@ -70,6 +75,12 @@ export const authService = {
   },
   acceptInvitation: async (token: string, password: string): Promise<void> => {
     await apiClient.post<void>('/api/auth/accept-invitation', { token, password });
+  },
+  requestPasswordReset: (email: string): Promise<void> =>
+    apiClient.post<void>('/api/auth/password-reset/request', { email }),
+  completePasswordReset: async (token: string, newPassword: string): Promise<void> => {
+    await apiClient.post<void>('/api/auth/password-reset/complete', { token, newPassword });
+    clearCsrfToken();
   },
   logout: async (): Promise<void> => { try { await apiClient.post<void>('/api/auth/logout'); } finally { clearCsrfToken(); } },
   changePassword: async (currentPassword: string, newPassword: string, mfaCode?: string): Promise<void> => {
@@ -163,7 +174,9 @@ function orderData(order: Partial<Order>): JsonRecord {
 
 export const merchandisePurchaseService = {
   list: async (): Promise<MerchandisePurchase[]> => (await business.list('purchases')).map(mapPurchase),
-  create: async (purchase: Omit<MerchandisePurchase, 'id'>): Promise<MerchandisePurchase> => mapPurchase(await business.create('purchases', purchase as unknown as JsonRecord)),
+  create: async (purchase: Omit<MerchandisePurchase, 'id'>, options: { confirmHistoricalDate?: boolean } = {}): Promise<MerchandisePurchase> => mapPurchase(await business.create('purchases', {
+    ...purchase, ...(options.confirmHistoricalDate ? { confirmHistoricalDate: true } : {}),
+  } as unknown as JsonRecord)),
   updateStatus: async (id: string, status: MerchandisePurchase['status']) => {
     const record = (await business.list('purchases')).find((entry) => entry.id === id);
     if (!record) throw new Error('No se encontró la compra.');
@@ -179,6 +192,7 @@ function mapPurchase(record: ApiRecord): MerchandisePurchase {
 }
 export interface CustomerDetails {
   customer: Record<string, unknown>;
+  wishlistItems: number;
   addresses: string[];
   orders: { id: string; orderNumber?: string; date?: string; status?: string; paymentMethod?: string; paymentStatus?: string; total?: number;
     items?: { productName?: string; quantity?: number; unitPrice?: number; subtotal?: number }[] }[];
@@ -189,7 +203,15 @@ export const customerService = {
     return { id: record.id, name: stringValue(data, 'name'), email: stringValue(data, 'email'), role: 'customer',
       initials: words.slice(0, 2).map((word) => word[0]).join('').toUpperCase(), status: stringValue(data, 'status') === 'Inactivo' ? 'Inactivo' : 'Activo' };
   }),
-  details: (id: string) => apiClient.get<CustomerDetails>(`/api/business/customers/${encodeURIComponent(id)}/details`),
+  details: async (id: string): Promise<CustomerDetails> => {
+    const response = await apiClient.get<Record<string, unknown>>(`/api/business/customers/${encodeURIComponent(id)}/details`);
+    const wishlistItems = parseRequiredCount(response.wishlistItems, 'favoritos');
+    if (!response.customer || typeof response.customer !== 'object' || Array.isArray(response.customer)
+      || !Array.isArray(response.addresses) || !Array.isArray(response.orders)) {
+      throw new Error('La API devolvió un detalle de cliente incompleto.');
+    }
+    return { ...response, wishlistItems } as unknown as CustomerDetails;
+  },
 };
 
 export const supplierService = {
@@ -348,8 +370,10 @@ export const accountingService = {
   list: async (): Promise<AccountingMovement[]> => (await business.list('accounting')).map((record) => ({ id: record.id, date: stringValue(record.data, 'date'),
     concept: stringValue(record.data, 'concept'), category: stringValue(record.data, 'category'), type: stringValue(record.data, 'type') as AccountingMovement['type'],
     amount: numberValue(record.data, 'amount'), status: stringValue(record.data, 'status') as AccountingMovement['status'] })),
-  create: async (movement: Omit<AccountingMovement, 'id'>): Promise<AccountingMovement> => {
-    const record = await business.create('accounting', movement as unknown as JsonRecord);
+  create: async (movement: Omit<AccountingMovement, 'id'>, options: { confirmHistoricalDate?: boolean } = {}): Promise<AccountingMovement> => {
+    const record = await business.create('accounting', {
+      ...movement, ...(options.confirmHistoricalDate ? { confirmHistoricalDate: true } : {}),
+    } as unknown as JsonRecord);
     return { ...movement, id: record.id };
   },
   updateStatus: async (id: string, status: AccountingMovement['status']) => {
@@ -401,7 +425,7 @@ function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
     Ubicación: stringValue(data, 'location', 'Ubicación'), Descripción: stringValue(data, 'description', 'Descripción'),
   };
   if (section === 'categories') return { Nombre: stringValue(data, 'name'), Productos: numberValue(data, 'products'), 'Ventas del mes': numberValue(data, 'monthlySales'), Estado: stringValue(data, 'status') };
-  if (section === 'customers') return { Nombre: stringValue(data, 'name'), Correo: stringValue(data, 'email'), Pedidos: numberValue(data, 'orders'), 'Total comprado': numberValue(data, 'totalPurchased'), Favoritos: numberValue(data, 'wishlistItems'), Estado: stringValue(data, 'status') };
+  if (section === 'customers') return { Nombre: stringValue(data, 'name'), Correo: stringValue(data, 'email'), Pedidos: numberValue(data, 'orders'), 'Total comprado': numberValue(data, 'totalPurchased'), Favoritos: parseRequiredCount(value(data, 'wishlistItems'), 'favoritos'), Estado: stringValue(data, 'status') };
   if (section === 'orders' || section === 'sales') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };
   if (section === 'transfers' || section === 'payments') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Valor: numberValue(data, 'total'), 'Estado de pago': stringValue(data, 'paymentStatus') };
   if (section === 'invoices') return { Referencia: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };

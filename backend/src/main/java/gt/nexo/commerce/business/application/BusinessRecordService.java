@@ -6,12 +6,14 @@ import gt.nexo.commerce.business.api.OrderQuoteResponse;
 import gt.nexo.commerce.business.api.OrderSubmissionResponse;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
 import gt.nexo.commerce.identity.application.PermissionAuthorizer;
+import gt.nexo.commerce.shared.validation.DisplayNamePolicy;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -101,6 +103,7 @@ public class BusinessRecordService {
             return readMap(rs.getString(1));
         }, id);
         String email = text(customer.get("email")).toLowerCase(Locale.ROOT);
+        long wishlistItems = jdbc.queryForObject("SELECT COUNT(*) FROM customer_wishlist_items w JOIN app_user u ON u.id = w.customer_user_id WHERE LOWER(u.email) = LOWER(?)", Long.class, email);
         List<Map<String, Object>> orders = jdbc.query("""
                 SELECT id, data::text AS data FROM business_records
                 WHERE resource_code = 'orders' AND LOWER(COALESCE(data ->> 'customerEmail', '')) = ?
@@ -113,6 +116,7 @@ public class BusinessRecordService {
         List<String> addresses = orders.stream().map(order -> text(order.get("address"))).filter(value -> !value.isBlank()).distinct().toList();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("customer", customer);
+        result.put("wishlistItems", wishlistItems);
         result.put("addresses", addresses);
         result.put("orders", orders);
         return result;
@@ -155,7 +159,7 @@ public class BusinessRecordService {
         if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);
-        validate(normalized, data);
+        validate(normalized, data, true);
         ensureUnique(normalized, data, null);
         UUID id = normalized.equals("customers") ? customerRecordId(data) : UUID.randomUUID();
         ProductImageService.ImageUpload productImage = normalized.equals("products") ? decodeProductImage(data) : null;
@@ -233,7 +237,7 @@ public class BusinessRecordService {
         Map<String, Object> old = lockedRecord(normalized, id);
         String previousImage = text(old.get("image"));
         if (productImage != null) data.put("image", productImagePath(id));
-        validate(normalized, data);
+        validate(normalized, data, false);
         ensureUnique(normalized, data, id);
         if (normalized.equals("categories")) {
             String previousName = text(field(old, "name", "Nombre"));
@@ -351,9 +355,10 @@ public class BusinessRecordService {
         for (Object item : rawItems) {
             if (!(item instanceof Map<?, ?> map)) throw invalid("Uno de los artículos no es válido.");
             UUID productId = parseUuid(map.get("productId"));
-            int quantity = number(map.get("quantity"), 0);
-            if (quantity < 1) throw invalid("Las cantidades deben ser enteros mayores que cero.");
-            quantities.merge(productId, quantity, Integer::sum);
+            int quantity = requiredInteger(map.get("quantity"), "La cantidad", 1);
+            int previousQuantity = quantities.getOrDefault(productId, 0);
+            if (previousQuantity > Integer.MAX_VALUE - quantity) throw invalid("La cantidad total supera el límite permitido.");
+            quantities.put(productId, previousQuantity + quantity);
         }
 
         UUID saleId = UUID.randomUUID();
@@ -381,7 +386,7 @@ public class BusinessRecordService {
         BigDecimal amountReceived = null;
         BigDecimal changeAmount = null;
         if (method.equals("cash")) {
-            amountReceived = decimal(input.get("amountReceived")).setScale(2, java.math.RoundingMode.HALF_UP);
+            amountReceived = validatedMoney(input.get("amountReceived"), "El efectivo recibido");
             if (amountReceived.compareTo(total) < 0) throw invalid("El efectivo recibido debe cubrir el total de la venta.");
             changeAmount = amountReceived.subtract(total);
         }
@@ -908,8 +913,9 @@ public class BusinessRecordService {
         String phone = text(data.get("phone"));
         String address = text(data.get("address"));
         if (name.isBlank() || name.length() > 160) throw invalid("El nombre comercial debe tener entre 1 y 160 caracteres.");
-        if (!email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Ingresa un correo de contacto válido.");
-        if (phone.length() > 40 || address.length() > 500) throw invalid("El teléfono o la dirección superan el tamaño permitido.");
+        if (!validEmail(email)) throw invalid("Ingresa un correo de contacto válido.");
+        if ((!phone.isBlank() && (phone.length() > 40 || !validPhone(phone))) || address.length() > 500 || !validFreeText(address)) throw invalid("El teléfono debe tener entre 7 y 15 dígitos y la dirección admite hasta 500 caracteres.");
+        if (!validMixedLabel(name, 160)) throw invalid("El nombre comercial debe contener letras o números y no superar 160 caracteres.");
         Object rawNotifications = data.get("notifications");
         if (!(rawNotifications instanceof Map<?, ?> notifications)
                 || !(notifications.get("orders") instanceof Boolean) || !(notifications.get("stock") instanceof Boolean)) {
@@ -1491,18 +1497,29 @@ public class BusinessRecordService {
         }, id, resource);
     }
 
-    private void validate(String resource, Map<String, Object> data) {
+    private void validate(String resource, Map<String, Object> data, boolean creating) {
         if (data.isEmpty()) throw invalid("El registro no puede estar vacío.");
         if (resource.equals("products")) {
             required(data, "name", "Producto"); required(data, "sku", "SKU");
+            validMixedLabel(field(data, "name", "Producto"), 180, "El nombre del producto");
+            String sku = text(field(data, "sku", "SKU"));
+            if (sku.length() > 80 || !sku.matches("(?i)^[a-z0-9][a-z0-9._/-]{0,79}$")) throw invalid("El SKU solo puede contener letras, números, punto, guion, guion bajo o diagonal, hasta 80 caracteres.");
+            data.put(data.containsKey("sku") ? "sku" : "SKU", sku.toUpperCase(Locale.ROOT));
+            Object categoryValue = field(data, "category", "Categoría");
+            if (categoryValue != null && !text(categoryValue).isBlank()) validMixedLabel(categoryValue, 100, "La categoría");
+            Object locationValue = field(data, "location", "Ubicación");
+            if (locationValue != null && !text(locationValue).isBlank()) validMixedLabel(locationValue, 120, "La ubicación");
+            String productDescription = text(field(data, "description", "Descripción"));
+            if (productDescription.length() > 1000 || !validFreeText(productDescription)) throw invalid("La descripción del producto admite hasta 1000 caracteres de texto.");
             String image = text(data.get("image"));
             if (image.length() > 1000 && !image.startsWith("data:image/")) throw invalid("La dirección de imagen del producto es demasiado larga.");
-            BigDecimal price = decimal(field(data, "price", "Valor"));
+            BigDecimal price = validatedMoney(field(data, "price", "Valor"), "El precio");
             if (price.signum() < 0) throw invalid("El precio no puede ser negativo.");
             Object rawCost = field(data, "cost", "Costo unitario");
-            if (rawCost != null && !String.valueOf(rawCost).isBlank() && decimal(rawCost).signum() <= 0)
+            if (rawCost != null && !String.valueOf(rawCost).isBlank() && validatedMoney(rawCost, "El costo unitario").signum() <= 0)
                 throw invalid("El costo unitario debe ser mayor que cero.");
-            int stock = number(field(data, "stock", "Existencias"), 0);
+            Object rawStock = field(data, "stock", "Existencias");
+            int stock = rawStock == null || String.valueOf(rawStock).isBlank() ? 0 : requiredInteger(rawStock, "Las existencias", 0);
             if (stock < 0) throw invalid("Las existencias no pueden ser negativas.");
             String requestedStatus = defaultText(field(data, "status", "Estado"), "Activo");
             if (!Set.of("Activo", "Inactivo", "Bajo stock", "Agotado").contains(requestedStatus)) throw invalid("El estado del producto no es válido.");
@@ -1518,13 +1535,36 @@ public class BusinessRecordService {
             required(data, "name", "Nombre");
             required(data, "description", "Descripción");
             required(data, "contact", "Contacto");
+            validMixedLabel(field(data, "name", "Nombre"), 120, "El nombre de la marca");
+            String description = text(field(data, "description", "Descripción"));
+            if (description.length() > 1000 || !validFreeText(description)) throw invalid("La descripción de la marca admite hasta 1000 caracteres de texto.");
+            String contact = text(field(data, "contact", "Contacto"));
+            if (contact.length() > 160 || !(validEmail(contact) || validPhone(contact))) throw invalid("El contacto debe ser un correo válido o un teléfono de 7 a 15 dígitos.");
+            String website = text(field(data, "website", "Sitio web"));
+            if (!website.isBlank() && (website.length() > 300 || !validPublicUrl(website))) throw invalid("El sitio web debe ser una dirección HTTP o HTTPS válida de hasta 300 caracteres.");
         }
-        if (resource.equals("categories")) required(data, "name", "Nombre");
-        if (resource.equals("suppliers")) required(data, "name", "Empresa");
+        if (resource.equals("categories")) {
+            required(data, "name", "Nombre");
+            validMixedLabel(field(data, "name", "Nombre"), 100, "El nombre de la categoría");
+        }
+        if (resource.equals("suppliers")) {
+            required(data, "name", "Empresa");
+            validMixedLabel(field(data, "name", "Empresa"), 160, "El nombre de la empresa");
+            String contactPerson = text(field(data, "contactPerson", "Contacto"));
+            if (!contactPerson.isBlank() && !validPersonName(contactPerson)) throw invalid("La persona de contacto solo puede contener letras, tildes, espacios, guiones y apóstrofes.");
+            String phone = text(field(data, "phone", "Teléfono"));
+            if (!phone.isBlank() && !validPhone(phone)) throw invalid("El teléfono debe contener entre 7 y 15 dígitos.");
+            String email = text(field(data, "email", "Correo")).toLowerCase(Locale.ROOT);
+            if (!email.isBlank() && !validEmail(email)) throw invalid("Ingresa un correo válido para el proveedor.");
+        }
         if (resource.equals("customers")) {
             required(data, "name", "Nombre");
+            if (!DisplayNamePolicy.isValid(text(field(data, "name", "Nombre"))))
+                throw invalid("El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.");
             String email = String.valueOf(field(data, "email", "Correo")).trim();
-            if (email.isBlank() || !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Ingresa un correo válido para el cliente.");
+            if (!validEmail(email)) throw invalid("Ingresa un correo válido para el cliente.");
+            String phone = text(field(data, "phone", "Teléfono"));
+            if (!phone.isBlank() && !validPhone(phone)) throw invalid("El teléfono del cliente debe contener entre 7 y 15 dígitos.");
             if (!Set.of("Activo", "Inactivo", "Pendiente").contains(defaultText(field(data, "status", "Estado"), "Activo"))) throw invalid("El estado del cliente no es válido.");
         }
         if (resource.equals("brands") && !Set.of("Activa", "Inactiva").contains(defaultText(field(data, "status", "Estado"), "Activa"))) throw invalid("El estado de la marca no es válido.");
@@ -1533,18 +1573,41 @@ public class BusinessRecordService {
         if (resource.equals("accounting")) {
             required(data, "date", "Fecha"); required(data, "concept", "Concepto"); required(data, "category", "Categoría");
             if (!Set.of("Ingreso", "Egreso").contains(defaultText(field(data, "type", "Tipo"), "Ingreso"))) throw invalid("El tipo de movimiento no es válido.");
-            BigDecimal amount = decimal(field(data, "amount", "Monto"));
+            String concept = text(field(data, "concept", "Concepto"));
+            if (concept.length() > 180 || !validFreeText(concept)) throw invalid("El concepto admite hasta 180 caracteres de texto.");
+            validMixedLabel(field(data, "category", "Categoría"), 100, "La categoría contable");
+            BigDecimal amount = validatedMoney(field(data, "amount", "Monto"), "El monto");
             if (amount.signum() <= 0) throw invalid("El monto debe ser mayor que cero.");
             if (!Set.of("Registrado", "Pendiente", "Anulado").contains(defaultText(field(data, "status", "Estado"), "Registrado"))) throw invalid("El estado del movimiento no es válido.");
-            try { LocalDate.parse(text(field(data, "date", "Fecha"))); }
+            LocalDate movementDate;
+            try { movementDate = LocalDate.parse(text(field(data, "date", "Fecha"))); }
             catch (Exception exception) { throw invalid("La fecha del movimiento no es válida."); }
+            if (creating && movementDate.isBefore(LocalDate.now(ZoneId.of("America/Guatemala")))
+                    && !Boolean.TRUE.equals(data.get("confirmHistoricalDate"))) {
+                throw invalid("La fecha es anterior a hoy. Confirma que este movimiento corresponde a un registro histórico.");
+            }
+            data.remove("confirmHistoricalDate");
         }
         if (resource.equals("purchases")) {
             required(data, "supplier", "Proveedor");
+            validMixedLabel(field(data, "supplier", "Proveedor"), 160, "El nombre del proveedor");
+            required(data, "date", "Fecha");
+            LocalDate purchaseDate;
+            try { purchaseDate = LocalDate.parse(text(field(data, "date", "Fecha"))); }
+            catch (Exception exception) { throw invalid("La fecha de la compra no es válida."); }
+            if (creating && purchaseDate.isBefore(LocalDate.now(ZoneId.of("America/Guatemala")))
+                    && !Boolean.TRUE.equals(data.get("confirmHistoricalDate"))) {
+                throw invalid("La fecha es anterior a hoy. Confirma que esta compra corresponde a un registro histórico.");
+            }
+            data.remove("confirmHistoricalDate");
             if (items(data).isEmpty()) throw invalid("La compra necesita al menos un producto.");
             parseUuid(data.get("supplierId"));
             for (Map<String, Object> item : items(data)) {
-                if (number(item.get("quantity"), 0) < 1 || decimal(item.get("unitCost")).signum() <= 0) throw invalid("Cada producto de la compra necesita cantidad y costo unitario mayores que cero.");
+                int quantity = requiredInteger(item.get("quantity"), "La cantidad de cada producto", 1);
+                BigDecimal unitCost = validatedMoney(item.get("unitCost"), "El costo unitario de cada producto");
+                if (unitCost.signum() <= 0) throw invalid("Cada producto de la compra necesita un costo unitario mayor que cero.");
+                item.put("quantity", quantity);
+                item.put("unitCost", unitCost);
                 parseUuid(item.get("productId"));
             }
         }
@@ -1689,9 +1752,94 @@ public class BusinessRecordService {
     }
     private static boolean isNameSeparator(int codePoint) { return codePoint == ' ' || codePoint == '\'' || codePoint == '\u2019' || codePoint == '-'; }
     private static boolean validEmail(String value) {
-        return value != null && value.length() <= 254
-                && value.matches("(?i)^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$")
-                && value.substring(value.indexOf('@') + 1).matches("(?s).*\\p{L}.*");
+        if (value == null || value.length() > 254) return false;
+        int at = value.indexOf('@');
+        if (at <= 0 || at != value.lastIndexOf('@') || at == value.length() - 1) return false;
+
+        String local = value.substring(0, at);
+        for (int index = 0; index < local.length(); index++) {
+            char character = local.charAt(index);
+            if (isAsciiAlphaNumeric(character)) continue;
+            if ("._%+-".indexOf(character) < 0 || index == 0 || index == local.length() - 1
+                    || !isAsciiAlphaNumeric(local.charAt(index - 1)) || !isAsciiAlphaNumeric(local.charAt(index + 1))) return false;
+        }
+
+        String[] labels = value.substring(at + 1).split("\\.", -1);
+        if (labels.length < 2) return false;
+        for (int index = 0; index < labels.length - 1; index++) {
+            String label = labels[index];
+            if (label.isEmpty() || label.length() > 63 || !isAsciiAlphaNumeric(label.charAt(0))
+                    || !isAsciiAlphaNumeric(label.charAt(label.length() - 1))) return false;
+            for (int offset = 0; offset < label.length(); offset++) {
+                char character = label.charAt(offset);
+                if (!isAsciiAlphaNumeric(character) && character != '-') return false;
+            }
+        }
+        String topLevelDomain = labels[labels.length - 1];
+        if (topLevelDomain.length() < 2) return false;
+        for (int offset = 0; offset < topLevelDomain.length(); offset++) {
+            char character = topLevelDomain.charAt(offset);
+            if (!isAsciiLetter(character)) return false;
+        }
+        return true;
+    }
+    private static boolean isAsciiAlphaNumeric(char value) { return isAsciiLetter(value) || value >= '0' && value <= '9'; }
+    private static boolean isAsciiLetter(char value) { return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'; }
+    private static boolean validPhone(String value) {
+        if (value == null || value.length() > 40 || !value.matches("^\\+?\\d[\\d\\s()-]*$")) return false;
+        long digits = value.chars().filter(Character::isDigit).count();
+        return digits >= 7 && digits <= 15;
+    }
+    private static boolean validMixedLabel(Object rawValue, int maxLength, String fieldName) {
+        String value = text(rawValue);
+        if (!validMixedLabel(value, maxLength)) throw invalid(fieldName + " debe contener letras o números y solo separadores habituales (máximo " + maxLength + " caracteres).");
+        return true;
+    }
+    private static boolean validMixedLabel(String value, int maxLength) {
+        if (value == null || value.isBlank() || value.length() > maxLength) return false;
+        boolean hasLetterOrDigit = false;
+        String punctuation = "-&.,'’()/+_#:%!?=~[]–—";
+        for (int offset = 0; offset < value.length();) {
+            int codePoint = value.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+            int type = Character.getType(codePoint);
+            if (Character.isLetterOrDigit(codePoint)) hasLetterOrDigit = true;
+            else if (type == Character.NON_SPACING_MARK || type == Character.COMBINING_SPACING_MARK
+                    || type == Character.ENCLOSING_MARK || Character.isWhitespace(codePoint)) continue;
+            else if (codePoint < Character.MAX_VALUE && punctuation.indexOf((char) codePoint) >= 0) continue;
+            else return false;
+        }
+        return hasLetterOrDigit;
+    }
+    private static boolean validFreeText(String value) {
+        return value != null && value.codePoints().noneMatch(codePoint -> Character.isISOControl(codePoint)
+                && codePoint != '\n' && codePoint != '\r' && codePoint != '\t');
+    }
+    private static BigDecimal validatedMoney(Object value, String fieldName) {
+        if (value == null || value instanceof String text && !text.matches("^[0-9]+(?:\\.[0-9]{1,2})?$"))
+            throw invalid(fieldName + " debe ser un número con hasta dos decimales.");
+        BigDecimal amount = decimal(value);
+        BigDecimal normalized = amount.stripTrailingZeros();
+        if (normalized.scale() > 2 || normalized.precision() - normalized.scale() > 12)
+            throw invalid(fieldName + " supera la precisión permitida de 12 enteros y 2 decimales.");
+        return amount.setScale(2, java.math.RoundingMode.UNNECESSARY);
+    }
+    private static int requiredInteger(Object value, String fieldName, int minimum) {
+        if (value == null || !String.valueOf(value).matches("^[0-9]+$"))
+            throw invalid(fieldName + " debe ser un número entero.");
+        try {
+            int result = new BigDecimal(String.valueOf(value)).intValueExact();
+            if (result < minimum) throw invalid(fieldName + " debe ser igual o mayor que " + minimum + ".");
+            return result;
+        } catch (BusinessRuleException exception) { throw exception; }
+        catch (Exception exception) { throw invalid(fieldName + " debe ser un número entero dentro del límite permitido."); }
+    }
+    private static boolean validPublicUrl(String value) {
+        try {
+            java.net.URI uri = new java.net.URI(value);
+            return uri.getUserInfo() == null && uri.getHost() != null && uri.getHost().contains(".")
+                    && Set.of("http", "https").contains(uri.getScheme() == null ? "" : uri.getScheme().toLowerCase(Locale.ROOT));
+        } catch (java.net.URISyntaxException exception) { return false; }
     }
     private static boolean isInactive(Map<String, Object> data) { return Set.of("Inactivo", "Inactiva", "Inactive", "DISABLED").contains(String.valueOf(field(data, "status", "Estado"))); }
     private static String optionalText(Object value) { String text = text(value); return text.isBlank() ? null : text; }

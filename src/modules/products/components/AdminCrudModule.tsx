@@ -5,6 +5,9 @@ import { formatQ } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
 import { roleLabels, type Brand, type Role } from '../../../types';
 import { roleService } from '../../../services/roleService';
+import { PRODUCT_IMAGE_MAX_DATA_URL_LENGTH, PRODUCT_IMAGE_MIN_SIDE, productImageCompressionDimensions } from '../utils/productImageProcessing';
+import { isValidPersonName } from '../../../shared/utils/personName';
+import { isValidEmailInput, isValidIntegerInput, isValidMixedLabel, isValidMoneyDraft, isValidMoneyInput, isValidPhoneInput, isValidSkuInput, sanitizeDecimalInput, sanitizeEmailInput, sanitizeFreeTextInput, sanitizeIntegerInput, sanitizeMixedLabelInput, sanitizePersonNameInput, sanitizePhoneInput, sanitizeSkuInput } from '../../../shared/utils/adminFieldValidation';
 
 export interface AdminModuleConfig {
   title: string;
@@ -26,6 +29,9 @@ export const statusChoices = (section: string) => section === 'products' || sect
 const viewOnlySections = new Set(['inventory/alerts', 'inventory/history']);
 const updateOnlySections = new Set(['settings', 'profile']);
 const numericColumns = new Set(['Valor', 'Precio de venta', 'Costo unitario', 'Ventas del mes', 'Total comprado', 'Pedidos', 'Usuarios', 'Productos', 'Existencias']);
+const integerColumns = new Set(['Existencias', 'Pedidos', 'Usuarios', 'Productos']);
+const mixedLabelColumns = new Set(['Producto', 'Categoría', 'Ubicación', 'Empresa', 'Concepto']);
+const fieldMaxLengths: Record<string, number> = { Producto: 180, SKU: 80, Categoría: 100, Ubicación: 120, Nombre: 160, Correo: 254, Empresa: 160, Contacto: 160, Teléfono: 40, Descripción: 1000, Descripcion: 1000 };
 export const tableColumnWidth = (column: string) => {
   if (['Producto', 'Nombre', 'Descripción', 'Cliente'].includes(column)) return 210;
   if (['Acciones'].includes(column)) return 132;
@@ -155,6 +161,24 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const statusOptions = stateColumn ? ['Todos', ...Array.from(new Set(entries.map(({ data }) => String(data[stateColumn] ?? ''))))] : ['Todos'];
 
   const replaceEntries = (change: (current: Entry[]) => Entry[]) => setEntries(change);
+  const updateDraftField = (column: string, value: string) => {
+    let normalized = value;
+    if (integerColumns.has(column)) {
+      if (value && !/^[0-9]+$/.test(value)) return;
+      normalized = sanitizeIntegerInput(value);
+    }
+    else if (numericColumns.has(column)) {
+      if (value && !isValidMoneyDraft(value)) return;
+      normalized = sanitizeDecimalInput(value);
+    }
+    else if (column === 'Correo') normalized = sanitizeEmailInput(value);
+    else if (column === 'Teléfono') normalized = sanitizePhoneInput(value);
+    else if (column === 'SKU') normalized = sanitizeSkuInput(value);
+    else if (column === 'Nombre' && (section === 'users' || section === 'customers')) normalized = /[<>]/.test(value) ? value : sanitizePersonNameInput(value);
+    else if (mixedLabelColumns.has(column) || column === 'Nombre' || column === 'Empresa') normalized = sanitizeMixedLabelInput(value);
+    else if (column === 'Descripción' || column === 'Descripcion') normalized = sanitizeFreeTextInput(value);
+    setDraft((current) => ({ ...current, [column]: normalized }));
+  };
   const closeDialog = () => { setMode(null); setError(''); setConfirmMessage(''); setActiveId(''); };
   const openCreate = () => {
     if (isProductSection) void loadBrandOptions();
@@ -202,11 +226,25 @@ export default function AdminCrudModule({ section, config }: { section: string; 
       if (!value) { setError(`Completa el campo «${column}».`); return; }
       const original = entries.find((entry) => entry.id === activeId)?.data[column];
       if (typeof original === 'number' || numericColumns.has(column)) {
+        if (integerColumns.has(column) ? !isValidIntegerInput(value) : !isValidMoneyInput(value)) {
+          setError(`${column} debe contener ${integerColumns.has(column) ? 'un número entero' : 'un monto con hasta dos decimales'}.`); return;
+        }
         const parsed = Number(value);
         if (!Number.isFinite(parsed) || parsed < 0) { setError(`${column} debe ser un número igual o mayor que cero.`); return; }
         if (['Costo unitario', 'Precio de venta', 'Valor'].includes(column) && parsed <= 0) { setError(`${column} debe ser mayor que cero.`); return; }
         nextRecord[column] = parsed;
-      } else nextRecord[column] = value;
+      } else {
+        if (column === 'Correo' && !isValidEmailInput(value)) { setError('Ingresa un correo electrónico válido.'); return; }
+        if (column === 'Teléfono' && value && !isValidPhoneInput(value)) { setError('El teléfono debe contener entre 7 y 15 dígitos.'); return; }
+        if (column === 'SKU' && !isValidSkuInput(value)) { setError('El SKU solo puede contener letras, números, punto, guion, guion bajo o diagonal, sin espacios.'); return; }
+        if (mixedLabelColumns.has(column) || (column === 'Nombre' && section !== 'users' && section !== 'customers') || column === 'Empresa') {
+          if (!isValidMixedLabel(value)) { setError(`El campo «${column}» debe iniciar con una letra o número y solo puede contener texto, números y separadores habituales.`); return; }
+        }
+        nextRecord[column] = value;
+      }
+    }
+    if ((section === 'customers' || section === 'users') && !isValidPersonName(String(nextRecord.Nombre || ''))) {
+      setError('El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.'); return;
     }
     if (section === 'inventory') {
       const quantity = Number(nextRecord.Existencias);
@@ -326,15 +364,24 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     </section>
     {mode && <div className="modal-backdrop" onClick={closeDialog}><div className={`modal crud-modal${mode === 'view' && isProductSection ? ' product-preview-modal' : ''}`} role="dialog" aria-modal="true" aria-labelledby="crud-dialog-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">{mode === 'view' ? 'Detalle' : mode === 'edit' ? 'Actualizar registro' : mode === 'create' ? 'Nuevo registro' : 'Confirmar acción'}</span><h2 id="crud-dialog-title">{mode === 'view' ? config.title : mode === 'confirm' ? `Confirmar ${actionLabel}` : mode === 'edit' ? `Editar ${config.title}` : config.action || `Crear ${config.title}`}</h2></div><button type="button" className="icon-button" aria-label="Cerrar" onClick={closeDialog}><X size={18} /></button></div>
       {mode === 'view' && section === 'customers' && activeEntry ? customerDetailLoading ? <p>Cargando detalle del cliente…</p> : customerDetail ? <CustomerDetail details={customerDetail} onClose={closeDialog} /> : error ? <div className="crud-error" role="alert">{error}</div> : <p>No hay historial disponible.</p> : mode === 'view' && activeEntry && isProductSection ? <ProductPreview entry={activeEntry.data} brandName={brandOptions.find((brand) => brand.id === activeEntry.data.Marca)?.name || 'Sin marca'} onClose={closeDialog} /> : mode === 'view' && activeEntry && <div className="crud-detail-list">{config.columns.map((column) => <div key={column}><span>{column}</span><strong>{String(activeEntry.data[column] ?? '—')}</strong></div>)}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Cerrar</button></div></div>}
-      {(mode === 'create' || mode === 'edit') && <form className="crud-form" onSubmit={saveRecord} noValidate><div className="crud-fields">{formColumns.map((column) => <label className={column === 'Descripción' || column === 'Descripcion' || column === 'Imagen' ? 'field crud-field-wide' : 'field'} key={column}><span>{column === 'Estado' && section === 'inventory' ? 'Estado actual' : column === 'Estado' && section === 'products' ? 'Publicación en tienda' : column === 'SKU' && section === 'inventory' ? 'Código del producto (SKU)' : column}</span>{column === 'Rol' && section === 'users' ? <select value={draft.Rol ?? ''} onChange={(event) => setDraft({ ...draft, Rol: event.target.value })}><option value="">Selecciona un rol</option>{(Object.keys(roleLabels) as Role[]).filter((role) => role !== 'customer' && (mode !== 'create' || role !== 'superadmin')).map((role) => <option key={role} value={roleLabels[role]}>{roleLabels[role]}</option>)}</select> : column === 'Marca' && isProductSection ? <><select value={draft.Marca ?? ''} disabled={brandOptionsLoading} onChange={(event) => setDraft({ ...draft, Marca: event.target.value })}><option value="">{brandOptionsLoading ? 'Cargando marcas…' : 'Sin marca'}</option>{brandOptions.filter((brand) => brand.status === 'Activa').map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select>{brandOptionsError && <small role="alert">{brandOptionsError} <button type="button" className="text-link" onClick={() => void loadBrandOptions()}>Reintentar</button></small>}</> : column === 'Ubicación' && section === 'inventory' ? <><input type="text" aria-label={column} list="inventory-location-options" value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={locationOptionsLoading ? 'Cargando ubicaciones…' : locationOptions.length ? 'Selecciona o escribe una ubicación' : 'Escribe una ubicación nueva'} /><datalist id="inventory-location-options">{locationOptions.map((location) => <option key={location} value={location} />)}</datalist>{locationOptionsError ? <small role="alert">{locationOptionsError} <button type="button" className="text-link" onClick={() => void loadLocationOptions()}>Reintentar</button></small> : <small>Las ubicaciones disponibles aparecen aquí. Puedes escribir una nueva; se agregará al catálogo al guardar el producto.</small>}</> : column === 'Imagen' && isProductSection ? <><input type="file" accept="image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setError(''); try { const image = await prepareProductImage(file); setDraft((current) => ({ ...current, Imagen: image })); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo preparar la imagen.'); } }} />{draft.Imagen && <div className="product-image-upload-preview"><ProductImage src={draft.Imagen} alt="Vista previa del producto" className="product-table-thumb" /><button type="button" className="text-link" onClick={() => setDraft((current) => ({ ...current, Imagen: '' }))}>Quitar imagen</button></div>}</> : column === 'Estado' || column === 'Estado de pago' ? <select value={draft[column] || (column === 'Estado de pago' ? 'Pendiente' : section === 'inventory' ? 'En stock' : 'Activo')} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })}>{Array.from(new Set([...statusChoices(section), draft[column]].filter(Boolean))).map((value) => <option key={value}>{value}</option>)}</select> : <input type={column === 'Correo' ? 'email' : typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? 'number' : 'text'} min={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? '0' : undefined} step={column === 'Existencias' ? '1' : numericColumns.has(column) ? '0.01' : undefined} value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={`Ingresa ${column.toLowerCase()}`} />}</label>)}</div>{error && <div className="crud-error" role="alert">{error}</div>}<div className="crud-form-note">{isProductSection ? section === 'inventory' ? 'La disponibilidad se determina por las existencias y el estado. La imagen se guarda junto con el producto.' : 'Usa el estado Activo para publicar el producto o Inactivo para ocultarlo de la tienda pública.' : section === 'users' && mode === 'create' ? 'El enlace se muestra una sola vez. La persona definirá su propia contraseña al aceptar la invitación.' : 'Guarda para aplicar los cambios.'}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeDialog}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy}><Check size={16} /> Guardar</button></div></form>}
+      {(mode === 'create' || mode === 'edit') && <form className="crud-form" onSubmit={saveRecord} noValidate><div className="crud-fields">{formColumns.map((column) => {
+        const integerField = integerColumns.has(column);
+        const numericField = numericColumns.has(column) || typeof activeEntry?.data[column] === 'number';
+        const personField = column === 'Nombre' && (section === 'users' || section === 'customers');
+        const inputType = column === 'Correo' ? 'email' : 'text';
+        const inputMode = integerField ? 'numeric' : numericField ? 'decimal' : column === 'Teléfono' ? 'tel' : undefined;
+        const pattern = integerField ? '[0-9]+' : numericField ? '[0-9]+([.][0-9]{1,2})?' : column === 'SKU' ? '[A-Za-z0-9][A-Za-z0-9._/-]{0,79}' : undefined;
+        const maxLength = fieldMaxLengths[column];
+        return <label className={column === 'Descripción' || column === 'Descripcion' || column === 'Imagen' ? 'field crud-field-wide' : 'field'} key={column}><span>{column === 'Estado' && section === 'inventory' ? 'Estado actual' : column === 'Estado' && section === 'products' ? 'Publicación en tienda' : column === 'SKU' && section === 'inventory' ? 'Código del producto (SKU)' : column}</span>{column === 'Rol' && section === 'users' ? <select value={draft.Rol ?? ''} onChange={(event) => setDraft({ ...draft, Rol: event.target.value })}><option value="">Selecciona un rol</option>{(Object.keys(roleLabels) as Role[]).filter((role) => role !== 'customer' && (mode !== 'create' || role !== 'superadmin')).map((role) => <option key={role} value={roleLabels[role]}>{roleLabels[role]}</option>)}</select> : column === 'Marca' && isProductSection ? <><select value={draft.Marca ?? ''} disabled={brandOptionsLoading} onChange={(event) => setDraft({ ...draft, Marca: event.target.value })}><option value="">{brandOptionsLoading ? 'Cargando marcas…' : 'Sin marca'}</option>{brandOptions.filter((brand) => brand.status === 'Activa').map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select>{brandOptionsError && <small role="alert">{brandOptionsError} <button type="button" className="text-link" onClick={() => void loadBrandOptions()}>Reintentar</button></small>}</> : column === 'Ubicación' && section === 'inventory' ? <><input type="text" aria-label={column} list="inventory-location-options" value={draft[column] ?? ''} maxLength={fieldMaxLengths.Ubicación} onChange={(event) => updateDraftField(column, event.target.value)} placeholder={locationOptionsLoading ? 'Cargando ubicaciones…' : locationOptions.length ? 'Selecciona o escribe una ubicación' : 'Escribe una ubicación nueva'} /><datalist id="inventory-location-options">{locationOptions.map((location) => <option key={location} value={location} />)}</datalist>{locationOptionsError ? <small role="alert">{locationOptionsError} <button type="button" className="text-link" onClick={() => void loadLocationOptions()}>Reintentar</button></small> : <small>Las ubicaciones disponibles aparecen aquí. Puedes escribir una nueva; se agregará al catálogo al guardar el producto.</small>}</> : column === 'Imagen' && isProductSection ? <><input type="file" accept="image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setError(''); try { const image = await prepareProductImage(file); setDraft((current) => ({ ...current, Imagen: image })); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo preparar la imagen.'); } }} />{draft.Imagen && <div className="product-image-upload-preview"><ProductImage src={draft.Imagen} alt="Vista previa del producto" className="product-table-thumb" /><button type="button" className="text-link" onClick={() => setDraft((current) => ({ ...current, Imagen: '' }))}>Quitar imagen</button></div>}</> : column === 'Estado' || column === 'Estado de pago' ? <select value={draft[column] || (column === 'Estado de pago' ? 'Pendiente' : section === 'inventory' ? 'En stock' : 'Activo')} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })}>{Array.from(new Set([...statusChoices(section), draft[column]].filter(Boolean))).map((value) => <option key={value}>{value}</option>)}</select> : <input type={inputType} inputMode={inputMode} pattern={pattern} maxLength={maxLength} value={draft[column] ?? ''} onChange={(event) => updateDraftField(column, event.target.value)} placeholder={`Ingresa ${column.toLowerCase()}`} aria-label={column} />}</label>;
+      })}</div>{error && <div className="crud-error" role="alert">{error}</div>}<div className="crud-form-note">{isProductSection ? section === 'inventory' ? 'La disponibilidad se determina por las existencias y el estado. La imagen se guarda junto con el producto.' : 'Usa el estado Activo para publicar el producto o Inactivo para ocultarlo de la tienda pública.' : section === 'users' && mode === 'create' ? 'El enlace se muestra una sola vez. La persona definirá su propia contraseña al aceptar la invitación.' : 'Guarda para aplicar los cambios.'}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeDialog}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy}><Check size={16} /> Guardar</button></div></form>}
       {mode === 'confirm' && <div className="crud-confirm"><p>{isPendingInvitation ? <>¿Revocar la invitación de <strong>{String(activeEntry?.data.Nombre || 'este usuario')}</strong>? El enlace dejará de funcionar y se quitará el registro pendiente.</> : section === 'users' ? <>¿Eliminar a <strong>{String(activeEntry?.data.Nombre || 'este usuario')}</strong> del equipo? Se cerrarán sus sesiones. Sus ventas y movimientos históricos se conservarán.</> : section === 'inventory' ? <>¿Eliminar <strong>{String(activeEntry?.data.Producto || 'este producto')}</strong>? Si tiene movimientos u otras relaciones, se desactivará para conservar la trazabilidad.</> : <>¿Confirmas {actionLabel} este registro? La acción se validará y guardará en NEXO.</>}</p>{error && <div className="crud-error" role="alert">{error}</div>}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Volver</button><button className="button button-primary" disabled={busy} onClick={confirmAction}>{busy ? 'Procesando...' : isPendingInvitation ? 'Revocar invitación' : section === 'users' ? 'Eliminar usuario' : section === 'inventory' ? 'Eliminar producto' : 'Confirmar ' + actionLabel}</button></div></div>}
       </div></div>}
   </div>;
 }
 
-function CustomerDetail({ details, onClose }: { details: { customer: Record<string, unknown>; addresses: string[]; orders: { id: string; orderNumber?: string; date?: string; status?: string; paymentMethod?: string; paymentStatus?: string; total?: number; items?: { productName?: string; quantity?: number; unitPrice?: number; subtotal?: number }[] }[] }; onClose: () => void }) {
+function CustomerDetail({ details, onClose }: { details: { customer: Record<string, unknown>; wishlistItems: number; addresses: string[]; orders: { id: string; orderNumber?: string; date?: string; status?: string; paymentMethod?: string; paymentStatus?: string; total?: number; items?: { productName?: string; quantity?: number; unitPrice?: number; subtotal?: number }[] }[] }; onClose: () => void }) {
   const { customer, addresses, orders } = details;
-  return <div className="customer-detail"><dl className="crud-detail-list"><div><span>Nombre</span><strong>{String(customer.name || '—')}</strong></div><div><span>Correo</span><strong>{String(customer.email || '—')}</strong></div><div><span>Teléfono</span><strong>{String(customer.phone || '—')}</strong></div><div><span>Estado</span><strong>{String(customer.status || 'Activo')}</strong></div><div><span>Pedidos</span><strong>{orders.length}</strong></div></dl><section><h3>Direcciones</h3>{addresses.length ? <ul>{addresses.map((address) => <li key={address}>{address}</li>)}</ul> : <p>No hay direcciones registradas.</p>}</section><section><h3>Historial de compras</h3>{orders.length ? orders.map((order) => <article className="customer-order-detail" key={order.id}><header><strong>{String(order.orderNumber || order.id)}</strong><span>{String(order.status || '—')} · {formatQ(Number(order.total || 0))}</span></header><small>{order.date ? new Date(order.date).toLocaleString('es-GT') : 'Fecha no disponible'} · {String(order.paymentStatus || order.paymentMethod || '—')}</small>{order.items?.map((item, index) => <p key={String(item.productName || index)}>{String(item.productName || 'Producto')} · {Number(item.quantity || 0)} × {formatQ(Number(item.unitPrice || 0))}</p>)}</article>) : <p>Aún no hay compras asociadas a este cliente.</p>}</section><div className="modal-actions"><button className="button button-outline" onClick={onClose}>Cerrar</button></div></div>;
+  return <div className="customer-detail"><dl className="crud-detail-list"><div><span>Nombre</span><strong>{String(customer.name || '—')}</strong></div><div><span>Correo</span><strong>{String(customer.email || '—')}</strong></div><div><span>Teléfono</span><strong>{String(customer.phone || '—')}</strong></div><div><span>Estado</span><strong>{String(customer.status || 'Activo')}</strong></div><div><span>Pedidos</span><strong>{orders.length}</strong></div><div><span>Favoritos</span><strong>{details.wishlistItems}</strong></div></dl><section><h3>Direcciones</h3>{addresses.length ? <ul>{addresses.map((address) => <li key={address}>{address}</li>)}</ul> : <p>No hay direcciones registradas.</p>}</section><section><h3>Historial de compras</h3>{orders.length ? orders.map((order) => <article className="customer-order-detail" key={order.id}><header><strong>{String(order.orderNumber || order.id)}</strong><span>{String(order.status || '—')} · {formatQ(Number(order.total || 0))}</span></header><small>{order.date ? new Date(order.date).toLocaleString('es-GT') : 'Fecha no disponible'} · {String(order.paymentStatus || order.paymentMethod || '—')}</small>{order.items?.map((item, index) => <p key={String(item.productName || index)}>{String(item.productName || 'Producto')} · {Number(item.quantity || 0)} × {formatQ(Number(item.unitPrice || 0))}</p>)}</article>) : <p>Aún no hay compras asociadas a este cliente.</p>}</section><div className="modal-actions"><button className="button button-outline" onClick={onClose}>Cerrar</button></div></div>;
 }
 function CrudCell({ value, column, image, onSelect }: { value: string | number | undefined; column: string; image?: string; onSelect?: () => void }) {
   if (column === 'Estado' || column === 'Estado de pago') return <span className={`status-pill ${String(value).includes('Complet') || value === 'Activo' || value === 'En stock' || value === 'Emitida' || value === 'Aprobada' ? 'success' : String(value).includes('Anul') || String(value).includes('Cancel') || value === 'Inactivo' || value === 'Sin stock' ? 'danger' : 'warning'}`}><i />{value}</span>;
@@ -381,20 +428,21 @@ async function prepareProductImage(file: File): Promise<string> {
     image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen.')); };
     image.src = url;
   });
+  const dimensions = productImageCompressionDimensions(source.width, source.height);
+  if (!dimensions.length) throw new Error(`La imagen original debe medir al menos ${PRODUCT_IMAGE_MIN_SIDE} × ${PRODUCT_IMAGE_MIN_SIDE} px. No se ampliarán imágenes pequeñas.`);
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   if (!context) throw new Error('No se pudo preparar la imagen.');
-  for (const maxDimension of [1280, 1024, 840, 680, 520]) {
-    const scale = Math.min(1, maxDimension / Math.max(source.width, source.height));
-    canvas.width = Math.max(1, Math.round(source.width * scale));
-    canvas.height = Math.max(1, Math.round(source.height * scale));
+  for (const target of dimensions) {
+    canvas.width = target.width;
+    canvas.height = target.height;
     context.drawImage(source, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.72, 0.62, 0.52, 0.42]) {
+    for (const quality of [0.88, 0.84, 0.8, 0.76]) {
       const image = canvas.toDataURL('image/jpeg', quality);
-      if (image.length <= 180_000) return image;
+      if (image.length <= PRODUCT_IMAGE_MAX_DATA_URL_LENGTH) return image;
     }
   }
-  throw new Error('No se pudo comprimir la imagen al tamaño permitido. Prueba una imagen más pequeña.');
+  throw new Error('La imagen supera 140 KB después de comprimirla sin reducirla por debajo de la resolución mínima. Usa una imagen optimizada o un recorte más ajustado.');
 }
 
 function AdminCrudEmptyState({ search }: { search: string }) { return <div className="empty-state"><Search size={28} /><h3>{search ? 'No encontramos resultados' : 'No hay registros disponibles'}</h3><p>{search ? 'Prueba con otra búsqueda.' : 'Crea un registro para comenzar.'}</p></div>; }

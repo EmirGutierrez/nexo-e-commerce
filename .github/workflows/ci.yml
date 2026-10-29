@@ -393,9 +393,13 @@ jobs:
           test -n "$WIREGUARD_SERVER_PUBLIC_KEY" || { echo "Falta la variable WIREGUARD_SERVER_PUBLIC_KEY en production"; exit 1; }
           sudo apt-get update
           sudo apt-get install --yes wireguard-tools
+          # GITHUB_ENV aplica en pasos posteriores; exporta también para ssh-keyscan en este paso.
+          NEXO_SSH_HOST="10.77.0.1"
+          NEXO_SSH_PORT="22"
+          export NEXO_SSH_HOST NEXO_SSH_PORT
           {
-            echo "NEXO_SSH_HOST=10.77.0.1"
-            echo "NEXO_SSH_PORT=22"
+            echo "NEXO_SSH_HOST=$NEXO_SSH_HOST"
+            echo "NEXO_SSH_PORT=$NEXO_SSH_PORT"
           } >> "$GITHUB_ENV"
           install -m 700 -d "$HOME/.ssh" "$HOME/.config/nexo-wireguard"
           printf '%s\n' "$WIREGUARD_DEPLOY_PRIVATE_KEY" | tr -d '\r' > "$HOME/.config/nexo-wireguard/privatekey"

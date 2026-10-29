@@ -128,6 +128,39 @@ describe('configuración y formularios de inventario', () => {
     })));
   });
 
+  it('limita campos numéricos y conserva nombres mixtos y SKU válidos', async () => {
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    await screen.findByText('Monitor');
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo producto' }));
+
+    fireEvent.change(screen.getByLabelText('Producto'), { target: { value: 'Router 5G' } });
+    fireEvent.change(screen.getByLabelText('Código del producto (SKU)'), { target: { value: 'ABC# 12' } });
+    fireEvent.change(screen.getByLabelText('Costo unitario'), { target: { value: '1.001' } });
+    fireEvent.change(screen.getByLabelText('Precio de venta'), { target: { value: '1e3' } });
+    fireEvent.change(screen.getByLabelText('Existencias'), { target: { value: '2.5' } });
+    fireEvent.change(screen.getByLabelText('Descripción'), { target: { value: 'Texto\u0001 del producto' } });
+
+    expect((screen.getByLabelText('Producto') as HTMLInputElement).value).toBe('Router 5G');
+    expect((screen.getByLabelText('Código del producto (SKU)') as HTMLInputElement).value).toBe('ABC12');
+    expect((screen.getByLabelText('Costo unitario') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Precio de venta') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Existencias') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Descripción') as HTMLInputElement).value).toBe('Texto del producto');
+  });
+
+  it('bloquea un monto con precisión inválida antes de actualizar un registro existente', async () => {
+    const malformedEntry = { ...inventoryEntry, data: { ...inventoryEntry.data, 'Precio de venta': '1.001' } };
+    vi.mocked(adminTableService.list).mockResolvedValue([malformedEntry]);
+    const update = vi.spyOn(adminTableService, 'update');
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    await screen.findByText('Monitor');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar Inventario: Monitor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('monto con hasta dos decimales');
+    expect(update).not.toHaveBeenCalled();
+  });
+
   it('rechaza stock cero cuando el estado elegido es En stock', async () => {
     const create = vi.mocked(adminTableService.create);
     render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
@@ -372,6 +405,7 @@ describe('acciones y detalles de registros administrativos', () => {
     vi.mocked(adminTableService.list).mockResolvedValue([customer]);
     vi.spyOn(customerService, 'details').mockResolvedValue({
       customer: { name: 'Cliente Uno', email: 'cliente@example.com', status: 'Activo' },
+      wishlistItems: 3,
       addresses: ['Zona 1, Ciudad'],
       orders: [{ id: 'order-1', orderNumber: 'NEXO-1', status: 'Entregado', total: 75, items: [{ productName: 'Teclado', quantity: 1, unitPrice: 75 }, {}] }],
     });
@@ -383,8 +417,37 @@ describe('acciones y detalles de registros administrativos', () => {
     expect(await screen.findByText('Historial de compras')).toBeTruthy();
     expect(screen.getByText('Zona 1, Ciudad')).toBeTruthy();
     expect(screen.getByText('NEXO-1')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
     expect(screen.getByText(/Teclado · 1 ×/)).toBeTruthy();
     expect(screen.getByText(/Producto · 0 ×/)).toBeTruthy();
+  });
+
+  it('renderiza nombres heredados con etiquetas como texto plano en lista y detalle', async () => {
+    const unsafeName = '<img src=x onerror=alert(1)>';
+    vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: unsafeName, Correo: 'cliente@example.test', Estado: 'Activo' } }]);
+    vi.spyOn(customerService, 'details').mockResolvedValue({ customer: { name: unsafeName, email: 'cliente@example.test' }, wishlistItems: 0, addresses: [], orders: [] });
+    const config = { ...usersConfig, title: 'Clientes', columns: ['Nombre', 'Correo', 'Estado'] };
+    const { container } = render(<AdminCrudModule section="customers" config={config} />);
+
+    expect(await screen.findByText(unsafeName)).toBeTruthy();
+    expect(container.querySelector('img[src="x"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: `Ver Clientes: ${unsafeName}` }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img[src="x"]')).toBeNull();
+    expect(dialog.textContent).toContain(unsafeName);
+  });
+
+  it('rechaza etiquetas HTML al editar el nombre de un cliente', async () => {
+    vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: 'Cliente Uno', Correo: 'cliente@example.test', Estado: 'Activo' } }]);
+    const update = vi.spyOn(adminTableService, 'update');
+    const config = { ...usersConfig, title: 'Clientes', action: 'Nuevo cliente', columns: ['Nombre', 'Correo', 'Estado'] };
+    render(<AdminCrudModule section="customers" config={config} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar Clientes: Cliente Uno' }));
+    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: '<h1>Cliente</h1>' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('solo puede contener letras');
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('presenta error cuando no se puede cargar el detalle del cliente', async () => {
@@ -400,7 +463,7 @@ describe('acciones y detalles de registros administrativos', () => {
 
   it('muestra los estados vacíos del historial y no ofrece crear clientes desde el panel', async () => {
     vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: 'Cliente Uno' } }]);
-    vi.spyOn(customerService, 'details').mockResolvedValue({ customer: {}, addresses: [], orders: [] });
+    vi.spyOn(customerService, 'details').mockResolvedValue({ customer: {}, wishlistItems: 0, addresses: [], orders: [] });
     const config = { ...usersConfig, title: 'Clientes', action: undefined, columns: ['Nombre'] };
 
     render(<AdminCrudModule section="customers" config={config} />);

@@ -11,11 +11,13 @@ import {
 } from 'lucide-react';
 import { categories, formatQ, orders, products, suppliers, users } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
+import { isValidPersonName } from '../../../shared/utils/personName';
+import { isValidEmailInput, isValidMixedLabel, isValidPhoneInput, sanitizeEmailInput, sanitizeFreeTextInput, sanitizeMixedLabelInput, sanitizePersonNameInput, sanitizePhoneInput } from '../../../shared/utils/adminFieldValidation';
 import { fetchCatalogFromApi, productService } from '../../products/services/productService';
 import { authService, businessSettingsService, checkoutService, dashboardService, productInventoryService, type BusinessProfileSettings, type CheckoutQuote } from '../../../services';
 import { ApiError } from '../../../shared/services/http-client';
 import type { OrderSubmission } from '../../../services';
-import type { PaymentMethod, Product, Role, User } from '../../../types';
+import type { PaymentMethod, Product, Role } from '../../../types';
 import AccountingPage from '../../accounting/components/AccountingPage';
 import PurchasesPage from '../../purchases/components/PurchasesPage';
 import SalesPage from '../../sales/components/SalesPage';
@@ -24,9 +26,12 @@ import SuppliersPage from '../../suppliers/components/SuppliersPage';
 import AdminCrudModule, { type AdminModuleConfig } from '../../products/components/AdminCrudModule';
 import RolesPermissionsPage from '../../roles/components/RolesPermissionsPage';
 import { roleService } from '../../../services/roleService';
+import { canVisitAdminPath } from '../../../services/adminAccess';
 import { roleLabels } from '../../../types';
 import { OffersAdminPage, TransferReceiptsPage } from '../../commerce/components/CommerceAdminPages';
 import { SeasonalSpotlight } from '../../commerce/components/CommercePages';
+import { serializeDashboardCsv } from '../utils/dashboardCsv';
+import { getDashboardGreeting } from '../utils/dashboardGreeting';
 import PublicAccountControls from './PublicAccountControls';
 import CustomerNotificationBell from '../../commerce/components/CustomerNotificationBell';
 import FloatingCartButton from './FloatingCartButton';
@@ -170,6 +175,7 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
   const adminMode = initialKind === 'admin';
   return <div className="admin-login-page"><div className="admin-login-panel"><Brand /><div className="security-pill"><ShieldCheck size={15} /> Acceso protegido</div><div className="admin-login-copy"><span className="eyebrow">NEXO · {adminMode ? 'Administración' : 'Tienda'}</span><h1>{adminMode ? <>Haz que tu negocio<br /><em>avance.</em></> : <>Todo lo que buscas,<br /><em>en un solo lugar.</em></>}</h1><p>Ingresa con tu cuenta para continuar.</p></div><div className="admin-login-footer"><span>© 2025 NEXO COMMERCE</span><span>Acceso seguro</span></div></div><div className="admin-login-form"><Link href="/" className="back-link"><ArrowLeft size={16} /> Volver al inicio</Link><div className="admin-form-inner"><div className="admin-icon"><LockIcon /></div><h2>Iniciar sesión</h2><p>Usa tus credenciales para acceder a tu espacio.</p><form onSubmit={submit}>
     <Field label="Correo electrónico" type="email" value={email} onChange={(value) => { setEmail(value); setMfaRequired(false); setMfaCode(''); setError(''); }} placeholder={adminMode ? 'personal@nexo.gt' : 'tu@correo.com'} /><Field label="Contraseña" type="password" value={password} onChange={setPassword} placeholder="Ingresa tu contraseña" />
+    <Link className="auth-forgot-password" href="/reset-password">¿Olvidaste tu contraseña?</Link>
     {mfaRequired && <label className="field mfa-login-code"><span>Código de autenticación o recuperación</span><input required type="text" autoComplete="one-time-code" inputMode="text" autoCapitalize="characters" maxLength={32} value={mfaCode} onChange={(event) => setMfaCode(event.target.value)} placeholder="000000 o código de recuperación" /></label>}
     {error && <div className="error-message" role="alert"><X size={15} />{error}</div>}<button className={`button ${adminMode ? 'button-dark' : 'button-primary'} full`} type="submit" disabled={submitting}>{submitting ? 'Ingresando…' : <>Ingresar <ArrowRight size={16} /></>}</button></form>
     <p className="auth-bottom">Tu cuenta y sus permisos determinan a dónde ingresas.</p>
@@ -195,6 +201,7 @@ export function RegisterPage() {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
+    if (!isValidPersonName(name)) { setError('El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.'); return; }
     if (password !== confirmation) { setError('Las contraseñas no coinciden.'); return; }
     setSubmitting(true);
     try {
@@ -238,8 +245,8 @@ export function ProfilePage() {
   const { user, updateProfile } = useApp();
   const [name, setName] = useState(user?.name || ''); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(''); const [error, setError] = useState('');
   useEffect(() => { setName(user?.name || ''); }, [user?.name]);
-  const save = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setError(''); setMessage(''); try { await updateProfile(name); setMessage('Tu nombre se guardó correctamente.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar tu perfil.'); } finally { setBusy(false); } };
-  return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Mi cuenta · Perfil de usuario</span><h1>Mi perfil</h1><p>Actualiza tus datos y protege tu acceso.</p></div></div><section className="panel profile-panel"><form className="crud-form" onSubmit={save}><div className="crud-fields"><label className="field"><span>Nombre</span><input required minLength={2} maxLength={160} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Correo electrónico</span><input value={user?.email || ''} readOnly disabled /></label><label className="field"><span>Rol</span><input value={user ? roleLabels[user.role] : ''} readOnly disabled /></label></div>{message && <div className="crud-feedback" role="status">{message}</div>}{error && <div className="crud-error" role="alert">{error}</div>}<p className="crud-form-note">El correo y los permisos solo se cambian desde los procesos administrativos correspondientes.</p><div className="modal-actions"><button className="button button-primary" type="submit" disabled={busy || name.trim() === user?.name}>{busy ? 'Guardando…' : 'Guardar perfil'}</button></div></form></section><ChangePasswordCard /><MfaSettingsCard /></div>;
+  const save = async (event: React.FormEvent) => { event.preventDefault(); setError(''); setMessage(''); if (!isValidPersonName(name)) { setError('El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.'); return; } setBusy(true); try { await updateProfile(name); setMessage('Tu nombre se guardó correctamente.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar tu perfil.'); } finally { setBusy(false); } };
+  return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Mi cuenta · Perfil de usuario</span><h1>Mi perfil</h1><p>Actualiza tus datos y protege tu acceso.</p></div></div><section className="panel profile-panel"><form className="crud-form" onSubmit={save}><div className="crud-fields"><label className="field"><span>Nombre</span><input required minLength={2} maxLength={160} value={name} onChange={(event) => setName(sanitizePersonNameInput(event.target.value))} /></label><label className="field"><span>Correo electrónico</span><input value={user?.email || ''} readOnly disabled /></label><label className="field"><span>Rol</span><input value={user ? roleLabels[user.role] : ''} readOnly disabled /></label></div>{message && <div className="crud-feedback" role="status">{message}</div>}{error && <div className="crud-error" role="alert">{error}</div>}<p className="crud-form-note">El correo y los permisos solo se cambian desde los procesos administrativos correspondientes.</p><div className="modal-actions"><button className="button button-primary" type="submit" disabled={busy || name.trim() === user?.name}>{busy ? 'Guardando…' : 'Guardar perfil'}</button></div></form></section><ChangePasswordCard /><MfaSettingsCard /></div>;
 }
 
 function LockIcon() { return <ShieldCheck size={25} />; }
@@ -257,40 +264,6 @@ function Field({ label, type, value, onChange, placeholder, minLength, maxLength
 const adminRoleHome: Record<Role, string> = {
   superadmin: '/admin/dashboard', admin: '/admin/dashboard', sales: '/admin/sales', warehouse: '/admin/inventory', employee: '/admin/dashboard', customer: '/store',
 };
-const adminRoleRoutes: Record<Role, string[]> = {
-  superadmin: ['/admin'], admin: ['/admin'],
-  sales: ['/admin/dashboard', '/admin/sales', '/admin/customers', '/admin/transfers', '/admin/payments', '/admin/invoices'],
-  warehouse: ['/admin/dashboard', '/admin/inventory', '/admin/purchases', '/admin/suppliers'],
-  employee: ['/admin/profile'],
-  customer: [],
-};
-
-function hasUserPermission(role: Role, user: User | null | undefined, module: 'dashboard'|'products'|'inventory'|'orders'|'sales'|'customers'|'suppliers'|'settings'|'users', action: 'view'|'create'|'edit'|'delete'|'approve' = 'view') {
-  if (role === 'customer') return false;
-  if (role === 'superadmin') return true;
-  if (user?.permissions !== undefined) return user.permissions.includes(`${module}:${action}`);
-  return roleService.can(role, module, action);
-}
-
-function canVisitAdminPath(role: Role, pathname: string, permissions?: string[]) {
-  if (pathname.includes('\\') || /%2f|%5c/i.test(pathname) || pathname.split('/').some((segment) => segment === '.' || segment === '..')) return false;
-  if (pathname.split('/').filter(Boolean)[1] === 'offers') return permissions !== undefined ? permissions.includes('promotions:view') : roleService.can(role, 'promotions', 'view');
-  if (pathname === '/admin/profile') return role !== 'customer';
-  if (pathname === '/admin/support') return role !== 'customer';
-  if (pathname === '/admin/settings/roles-permissions') {
-    if (role === 'customer') return false;
-    if (role === 'superadmin' && permissions === undefined) return true;
-    return permissions !== undefined
-      ? permissions.includes('settings:view') && permissions.includes('users:view')
-      : roleService.can(role, 'settings', 'view') && roleService.can(role, 'users', 'view');
-  }
-  const moduleMap: Record<string, 'dashboard'|'products'|'inventory'|'orders'|'sales'|'customers'|'suppliers'|'accounting'|'settings'|'users'> = { dashboard: 'dashboard', products: 'products', categories: 'products', inventory: 'inventory', purchases: 'inventory', orders: 'orders', sales: 'sales', customers: 'customers', suppliers: 'suppliers', settings: 'settings', users: 'users', 'roles-permissions': 'users', transfers: 'orders', payments: 'orders', invoices: 'sales', accounting: 'accounting', profile: 'settings', brands: 'products' };
-  const requestedModule = moduleMap[pathname.split('/').filter(Boolean)[1] || 'dashboard'];
-  if (role === 'customer') return false;
-  if (role === 'superadmin' && permissions === undefined) return true;
-  return Boolean(requestedModule && (permissions !== undefined ? permissions.includes(`${requestedModule}:view`) : roleService.can(role, requestedModule, 'view')));
-}
-
 function resolveLoginDestination(kind: 'admin' | 'customer', role: Role | null, requested: unknown, permissions?: string[]) {
   if (kind === 'customer') return '/store';
   const safeRole = role || 'employee';
@@ -302,7 +275,7 @@ function resolveLoginDestination(kind: 'admin' | 'customer', role: Role | null, 
   }
   const preferred = adminRoleHome[safeRole];
   if (canVisitAdminPath(safeRole, preferred, permissions)) return preferred;
-  const firstAllowed = ['/admin/dashboard', '/admin/products', '/admin/inventory', '/admin/sales', '/admin/customers', '/admin/suppliers', '/admin/purchases', '/admin/settings', '/admin/users']
+  const firstAllowed = ['/admin/dashboard', '/admin/products', '/admin/brands', '/admin/inventory', '/admin/purchases', '/admin/sales', '/admin/customers', '/admin/suppliers', '/admin/accounting', '/admin/offers', '/admin/transfers', '/admin/settings', '/admin/users']
     .find((path) => canVisitAdminPath(safeRole, path, permissions));
   return firstAllowed || '/admin/profile';
 }
@@ -432,7 +405,7 @@ export function Confirmation() {
 
 function AdminShell({ children }: { children: React.ReactNode }) { const { user, logout, role, adminAlert, dismissAdminAlert } = useApp(); const pathname = usePathname(); const router = useRouter(); const [mobile, setMobile] = useState(false); const [profileMenuOpen, setProfileMenuOpen] = useState(false); const [notificationOpen, setNotificationOpen] = useState(false);
   useEffect(() => { setProfileMenuOpen(false); setNotificationOpen(false); }, [pathname]);
-  useEffect(() => { const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setProfileMenuOpen(false); setNotificationOpen(false); } }; window.addEventListener('keydown', closeOnEscape); return () => window.removeEventListener('keydown', closeOnEscape); }, []); const navItems = [{ label: 'Resumen', icon: LayoutDashboard, path: '/admin/dashboard' }, { label: 'Catálogo', icon: Package, path: '/admin/products' }, { label: 'Marcas', icon: Tag, path: '/admin/brands' }, { label: 'Proveedores', icon: Truck, path: '/admin/suppliers' }, { label: 'Ventas', icon: CircleDollarSign, path: '/admin/sales' }, { label: 'Ingresos y egresos', icon: Wallet, path: '/admin/accounting' }, { label: 'Inventario', icon: Boxes, path: '/admin/inventory' }, { label: 'Clientes', icon: Users, path: '/admin/customers' }]; const manage = [{ label: 'Compras de mercancía', icon: Package, path: '/admin/purchases' }, { label: 'Transferencias', icon: ArrowDownToLine, path: '/admin/transfers' }, { label: 'Usuarios', icon: UserCircle, path: '/admin/users' }]; const isActive = (path: string) => pathname === path || (path === '/admin/settings' && pathname.startsWith('/admin/settings/')) || (path === '/admin/products' && pathname.includes('/admin/categories')); const links = (items: typeof navItems) => items.filter(({ path }) => { const key = path.split('/')[2]; const map: Record<string, 'dashboard'|'products'|'inventory'|'orders'|'sales'|'customers'|'suppliers'|'accounting'|'settings'|'users'> = { dashboard:'dashboard', products:'products', brands:'products', suppliers:'suppliers', sales:'sales', accounting:'accounting', inventory:'inventory', customers:'customers', purchases:'inventory', transfers:'orders', users:'users',  }; const permissionModule = key === 'accounting' ? 'accounting' : map[key] || 'dashboard'; return Boolean(role && roleService.can(role, permissionModule, 'view')); }).map(({ label, icon: NavIcon, path }) => <Link key={path} href={path} className={isActive(path) ? 'side-link active' : 'side-link'} onClick={() => setMobile(false)}><NavIcon size={17} /><span>{label}</span></Link>); return <div className="admin-app"><aside className={mobile ? 'admin-sidebar mobile-open' : 'admin-sidebar'}><div className="side-top"><Brand /><button className="close-mobile" onClick={() => setMobile(false)}><X size={20} /></button></div><div className="workspace-selector"><span className="workspace-logo">N</span><div><strong>NEXO Commerce</strong><small>Operación principal</small></div><ChevronDown size={15} /></div><nav><span className="side-label">Principal</span>{links(navItems)}<span className="side-label">Gestionar</span>{links(manage)}{role === 'superadmin' && links([{ label: 'Ofertas y anuncios', icon: Tag, path: '/admin/offers' }])}<span className="side-label">Sistema</span>{role && roleService.can(role, 'settings', 'view') && <Link href="/admin/settings" className={isActive('/admin/settings') ? 'side-link active' : 'side-link'}><Settings size={17} /><span>Configuración</span></Link>}</nav><div className="side-bottom"><div className="help-card"><Sparkles size={18} /><strong>¿Necesitas ayuda?</strong><span>Visita nuestro centro de soporte</span><Link href="/admin/support">Ir al centro <ArrowUpRight size={14} /></Link></div><div className="user-mini" aria-label="Sesión actual"><span className="avatar">{user?.initials || 'NX'}</span><span><strong>{user?.name || 'María Fernanda'}</strong><small>{role ? roleLabels[role] : 'Administración'}</small></span></div></div></aside><div className="admin-content"><header className="admin-header"><button className="mobile-menu" onClick={() => setMobile(true)}><Menu size={20} /></button><div className="admin-breadcrumb"><span>Panel</span><ChevronRight size={14} /><strong>{getModuleLabel(pathname)}</strong></div><div className="admin-header-actions"><div className="header-popover-wrap"><button type="button" className="icon-button notification" aria-label="Notificaciones" aria-expanded={notificationOpen} onClick={() => { setNotificationOpen((open) => !open); setProfileMenuOpen(false); }}><Bell size={17} />{adminAlert && <i />}</button>{notificationOpen && <div className="header-popover notification-popover" role="status"><strong>Notificaciones</strong>{adminAlert ? <><b>{adminAlert.title}</b><p>{adminAlert.message}</p><div><Link href={adminAlert.actionTo || '/admin/inventory'} onClick={() => setNotificationOpen(false)}>Revisar</Link><button type="button" onClick={dismissAdminAlert}>Descartar</button></div></> : <p>No tienes notificaciones nuevas.</p>}</div>}</div><div className="header-popover-wrap"><button type="button" className="user-header" aria-expanded={profileMenuOpen} onClick={() => { setProfileMenuOpen((open) => !open); setNotificationOpen(false); }}><span className="avatar">{user?.initials || 'NX'}</span><span><strong>{user?.name || 'María Fernanda'}</strong><small>{role ? roleLabels[role] : 'Administración'}</small></span><ChevronDown size={15} /></button>{profileMenuOpen && <div className="header-popover profile-popover" role="menu"><Link role="menuitem" href="/admin/profile" onClick={() => setProfileMenuOpen(false)}>Mi perfil</Link><Link role="menuitem" href="/admin/settings" onClick={() => setProfileMenuOpen(false)}>Configuración</Link></div>}</div><button className="logout-button" onClick={() => { void logout().then(() => router.push('/')).catch(() => window.alert('No se pudo cerrar la sesión. Verifica la conexión y vuelve a intentarlo.')); }}><LogOut size={17} /></button></div></header><div className="admin-main">{children}</div></div></div>; }
+  useEffect(() => { const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setProfileMenuOpen(false); setNotificationOpen(false); } }; window.addEventListener('keydown', closeOnEscape); return () => window.removeEventListener('keydown', closeOnEscape); }, []); const navItems = [{ label: 'Resumen', icon: LayoutDashboard, path: '/admin/dashboard' }, { label: 'Catálogo', icon: Package, path: '/admin/products' }, { label: 'Marcas', icon: Tag, path: '/admin/brands' }, { label: 'Proveedores', icon: Truck, path: '/admin/suppliers' }, { label: 'Ventas', icon: CircleDollarSign, path: '/admin/sales' }, { label: 'Ingresos y egresos', icon: Wallet, path: '/admin/accounting' }, { label: 'Inventario', icon: Boxes, path: '/admin/inventory' }, { label: 'Clientes', icon: Users, path: '/admin/customers' }]; const manage = [{ label: 'Compras de mercancía', icon: Package, path: '/admin/purchases' }, { label: 'Transferencias', icon: ArrowDownToLine, path: '/admin/transfers' }, { label: 'Usuarios', icon: UserCircle, path: '/admin/users' }, { label: 'Ofertas y anuncios', icon: Tag, path: '/admin/offers' }]; const isActive = (path: string) => pathname === path || (path === '/admin/settings' && pathname.startsWith('/admin/settings/')) || (path === '/admin/products' && pathname.includes('/admin/categories')); const links = (items: typeof navItems) => items.filter(({ path }) => Boolean(role && canVisitAdminPath(role, path, user?.permissions))).map(({ label, icon: NavIcon, path }) => <Link key={path} href={path} className={isActive(path) ? 'side-link active' : 'side-link'} onClick={() => setMobile(false)}><NavIcon size={17} /><span>{label}</span></Link>); return <div className="admin-app"><aside className={mobile ? 'admin-sidebar mobile-open' : 'admin-sidebar'}><div className="side-top"><Brand /><button className="close-mobile" onClick={() => setMobile(false)}><X size={20} /></button></div><div className="workspace-selector"><span className="workspace-logo">N</span><div><strong>NEXO Commerce</strong><small>Operación principal</small></div></div><nav><span className="side-label">Principal</span>{links(navItems)}<span className="side-label">Gestionar</span>{links(manage)}<span className="side-label">Sistema</span>{role && roleService.can(role, 'settings', 'view') && <Link href="/admin/settings" className={isActive('/admin/settings') ? 'side-link active' : 'side-link'}><Settings size={17} /><span>Configuración</span></Link>}</nav><div className="side-bottom"><div className="help-card"><Sparkles size={18} /><strong>¿Necesitas ayuda?</strong><span>Visita nuestro centro de soporte</span><Link href="/admin/support">Ir al centro <ArrowUpRight size={14} /></Link></div><div className="user-mini" aria-label="Sesión actual"><span className="avatar">{user?.initials || 'NX'}</span><span><strong>{user?.name || 'María Fernanda'}</strong><small>{role ? roleLabels[role] : 'Administración'}</small></span></div></div></aside><div className="admin-content"><header className="admin-header"><button className="mobile-menu" onClick={() => setMobile(true)}><Menu size={20} /></button><div className="admin-breadcrumb"><span>Panel</span><ChevronRight size={14} /><strong>{getModuleLabel(pathname)}</strong></div><div className="admin-header-actions"><div className="header-popover-wrap"><button type="button" className="icon-button notification" aria-label="Notificaciones" aria-expanded={notificationOpen} onClick={() => { setNotificationOpen((open) => !open); setProfileMenuOpen(false); }}><Bell size={17} />{adminAlert && <i />}</button>{notificationOpen && <div className="header-popover notification-popover" role="status"><strong>Notificaciones</strong>{adminAlert ? <><b>{adminAlert.title}</b><p>{adminAlert.message}</p><div><Link href={adminAlert.actionTo || '/admin/inventory'} onClick={() => setNotificationOpen(false)}>Revisar</Link><button type="button" onClick={dismissAdminAlert}>Descartar</button></div></> : <p>No tienes notificaciones nuevas.</p>}</div>}</div><div className="header-popover-wrap"><button type="button" className="user-header" aria-expanded={profileMenuOpen} onClick={() => { setProfileMenuOpen((open) => !open); setNotificationOpen(false); }}><span className="avatar">{user?.initials || 'NX'}</span><span><strong>{user?.name || 'María Fernanda'}</strong><small>{role ? roleLabels[role] : 'Administración'}</small></span><ChevronDown size={15} /></button>{profileMenuOpen && <div className="header-popover profile-popover" role="menu"><Link role="menuitem" href="/admin/profile" onClick={() => setProfileMenuOpen(false)}>Mi perfil</Link><Link role="menuitem" href="/admin/settings" onClick={() => setProfileMenuOpen(false)}>Configuración</Link></div>}</div><button className="logout-button" onClick={() => { void logout().then(() => router.push('/')).catch(() => window.alert('No se pudo cerrar la sesión. Verifica la conexión y vuelve a intentarlo.')); }}><LogOut size={17} /></button></div></header><div className="admin-main">{children}</div></div></div>; }
 function MoreDots() { return <span className="more-dots">•••</span>; }
 function getModuleLabel(path: string) { if (path === '/admin/settings/roles-permissions') return 'Roles y permisos'; const labels: Record<string, string> = { dashboard: 'Resumen', products: 'Productos', brands: 'Marcas', categories: 'Categorías', sales: 'Ventas', inventory: 'Inventario', customers: 'Clientes', transfers: 'Transferencias', users: 'Usuarios', purchases: 'Compras de mercancía', accounting: 'Ingresos y egresos', settings: 'Configuración', profile: 'Mi perfil', support: 'Soporte', invoices: 'Facturación', payments: 'Pagos', suppliers: 'Proveedores', offers: 'Ofertas y anuncios', 'roles-permissions': 'Roles y permisos' }; return labels[path.split('/')[2]] || 'Resumen'; }
 
@@ -455,15 +428,16 @@ function SettingsModuleNavigation() {
 }
 
 export function AdminWorkspace({ children }: { children: React.ReactNode }) {
-  const { user, userType, role, authLoading } = useApp();
+  const { user, userType, role, authLoading, authIssue, retrySession } = useApp();
   const pathname = usePathname();
   const router = useRouter();
   const authorized = Boolean(user && userType === 'admin' && role && canVisitAdminPath(role, pathname, user.permissions));
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || authIssue) return;
     if (!user || !userType) router.replace(`/access?redirect=${encodeURIComponent(pathname)}`);
     else if (userType !== 'admin' || !role || !canVisitAdminPath(role, pathname, user.permissions)) router.replace(resolveLoginDestination(userType, role, null, user.permissions));
-  }, [authLoading, user, userType, role, pathname, router]);
+  }, [authLoading, authIssue, user, userType, role, pathname, router]);
+  if (!authLoading && authIssue && !user) return <main className="admin-auth-unavailable" role="alert"><h1>No se pudo comprobar la sesión</h1><p>{authIssue}</p><button className="button button-primary" type="button" onClick={retrySession}>Reintentar</button></main>;
   if (authLoading || !authorized) return <AuthPending />;
   return <AdminShell>{children}</AdminShell>;
 }
@@ -484,8 +458,8 @@ function BusinessSettingsPanel() {
   const [settings, setSettings] = useState<BusinessProfileSettings | null>(null);
   const [busy, setBusy] = useState(false); const [error, setError] = useState(''); const [message, setMessage] = useState('');
   useEffect(() => { let active = true; businessSettingsService.load().then((value) => { if (active) setSettings(value); }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudo cargar la configuración.'); }); return () => { active = false; }; }, []);
-  const save = async (event: React.FormEvent) => { event.preventDefault(); if (!settings) return; setBusy(true); setError(''); setMessage(''); try { setSettings(await businessSettingsService.save(settings)); setMessage('Información y preferencias actualizadas.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar la configuración.'); } finally { setBusy(false); } };
-  return <section className="panel business-settings-panel"><div className="panel-heading"><div><h2>Datos del negocio</h2><span>Información y avisos del negocio.</span></div></div>{error && <div className="crud-error" role="alert">{error}</div>}{settings ? <form className="crud-form" onSubmit={save}><div className="crud-fields"><label className="field"><span>Nombre comercial</span><input required maxLength={160} value={settings.businessName} onChange={(event) => setSettings({ ...settings, businessName: event.target.value })} /></label><label className="field"><span>Correo de contacto</span><input required type="email" value={settings.contactEmail} onChange={(event) => setSettings({ ...settings, contactEmail: event.target.value })} /></label><label className="field"><span>Teléfono</span><input maxLength={40} value={settings.phone} onChange={(event) => setSettings({ ...settings, phone: event.target.value })} /></label><label className="field crud-field-wide"><span>Dirección</span><input maxLength={500} value={settings.address} onChange={(event) => setSettings({ ...settings, address: event.target.value })} /></label></div><div className="settings-checkboxes"><label><input type="checkbox" checked={settings.notifications.orders} onChange={(event) => setSettings({ ...settings, notifications: { ...settings.notifications, orders: event.target.checked } })} /> Avisos de pedidos</label><label><input type="checkbox" checked={settings.notifications.stock} onChange={(event) => setSettings({ ...settings, notifications: { ...settings.notifications, stock: event.target.checked } })} /> Avisos de bajo inventario</label></div>{message && <div className="crud-feedback" role="status">{message}</div>}<div className="modal-actions"><button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar configuración'}</button></div></form> : !error ? <div className="empty-state">Cargando configuración…</div> : null}</section>;
+  const save = async (event: React.FormEvent) => { event.preventDefault(); if (!settings) return; if (!isValidMixedLabel(settings.businessName) || settings.businessName.length > 160) { setError('El nombre comercial debe contener letras o números y tener como máximo 160 caracteres.'); return; } if (!isValidEmailInput(settings.contactEmail)) { setError('Ingresa un correo de contacto válido.'); return; } if (settings.phone && !isValidPhoneInput(settings.phone)) { setError('El teléfono debe contener entre 7 y 15 dígitos.'); return; } setBusy(true); setError(''); setMessage(''); try { setSettings(await businessSettingsService.save(settings)); setMessage('Información y preferencias actualizadas.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar la configuración.'); } finally { setBusy(false); } };
+  return <section className="panel business-settings-panel"><div className="panel-heading"><div><h2>Datos del negocio</h2><span>Información y avisos del negocio.</span></div></div>{error && <div className="crud-error" role="alert">{error}</div>}{settings ? <form className="crud-form" onSubmit={save} noValidate><div className="crud-fields"><label className="field"><span>Nombre comercial</span><input required maxLength={160} value={settings.businessName} onChange={(event) => setSettings({ ...settings, businessName: sanitizeMixedLabelInput(event.target.value).slice(0, 160) })} /></label><label className="field"><span>Correo de contacto</span><input required type="email" inputMode="email" maxLength={254} value={settings.contactEmail} onChange={(event) => setSettings({ ...settings, contactEmail: sanitizeEmailInput(event.target.value) })} /></label><label className="field"><span>Teléfono</span><input type="tel" inputMode="tel" maxLength={40} value={settings.phone} onChange={(event) => setSettings({ ...settings, phone: sanitizePhoneInput(event.target.value) })} /></label><label className="field crud-field-wide"><span>Dirección</span><input maxLength={500} value={settings.address} onChange={(event) => setSettings({ ...settings, address: sanitizeFreeTextInput(event.target.value) })} /></label></div><div className="settings-checkboxes"><label><input type="checkbox" checked={settings.notifications.orders} onChange={(event) => setSettings({ ...settings, notifications: { ...settings.notifications, orders: event.target.checked } })} /> Avisos de pedidos</label><label><input type="checkbox" checked={settings.notifications.stock} onChange={(event) => setSettings({ ...settings, notifications: { ...settings.notifications, stock: event.target.checked } })} /> Avisos de bajo inventario</label></div>{message && <div className="crud-feedback" role="status">{message}</div>}<div className="modal-actions"><button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Guardando…' : 'Guardar configuración'}</button></div></form> : !error ? <div className="empty-state">Cargando configuración…</div> : null}</section>;
 }
 
 function PaymentMethodsSettings() {
@@ -517,7 +491,14 @@ function Dashboard() {
   const [period, setPeriod] = useState<'30d' | '7d' | 'year'>('30d');
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof dashboardService.summary>> | null>(null);
   const [error, setError] = useState('');
+  const [greeting, setGreeting] = useState('Bienvenido');
   const { reportLowStock, user } = useApp();
+  useEffect(() => {
+    const updateGreeting = () => setGreeting(getDashboardGreeting(new Date()));
+    updateGreeting();
+    const interval = window.setInterval(updateGreeting, 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
   useEffect(() => {
     let active = true;
     setSummary(null);
@@ -529,15 +510,14 @@ function Dashboard() {
   }, [period, reportLowStock]);
   const exportCsv = () => {
     if (!summary) return;
-    const rows = [['Fecha', 'Ventas', 'Operaciones'], ...summary.series.map((item) => [item.date, String(item.sales), String(item.orders)])];
-    const url = URL.createObjectURL(new Blob([`\uFEFF${rows.map((row) => row.join(',')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' }));
+    const url = URL.createObjectURL(new Blob([serializeDashboardCsv(summary.series)], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a'); link.href = url; link.download = `resumen-nexo-${period}.csv`; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const p = summary?.products || { products: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 };
   const healthy = Math.max(0, p.products - p.lowStock - p.outOfStock);
-  const dateLabel = new Intl.DateTimeFormat('es-GT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+  const dateLabel = new Intl.DateTimeFormat('es-GT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Guatemala' }).format(new Date());
   return <div className="dashboard">
-    <div className="admin-page-heading"><div><span className="eyebrow">{dateLabel}</span><h1>Buenos días, {user?.name.split(' ')[0] || 'equipo'} <span>✦</span></h1><p>Indicadores calculados con los movimientos guardados correctamente.</p></div><div className="heading-actions"><button className="button button-outline" onClick={exportCsv} disabled={!summary}><Download size={16} /> Exportar</button></div></div>
+    <div className="admin-page-heading"><div><span className="eyebrow">{dateLabel}</span><h1>{greeting}, {user?.name.split(' ')[0] || 'equipo'} <span>✦</span></h1><p>Indicadores calculados con los movimientos guardados correctamente.</p></div><div className="heading-actions"><button className="button button-outline" onClick={exportCsv} disabled={!summary}><Download size={16} /> Exportar</button></div></div>
     {error && <div className="crud-error" role="alert">{error}</div>}
     <div className="metric-grid"><Metric title="Ventas del periodo" value={summary ? formatQ(summary.sales) : '—'} change="NEXO" positive icon={CircleDollarSign} tone="blue" /><Metric title="Pedidos y ventas" value={summary ? String(summary.orders) : '—'} change="Transacciones" positive icon={ShoppingBag} tone="purple" /><Metric title="Clientes nuevos" value={summary ? String(summary.newCustomers) : '—'} change="En el periodo" positive icon={Users} tone="green" /><Metric title="Ticket promedio" value={summary ? formatQ(summary.averageTicket) : '—'} change="En el periodo" positive icon={BarChart3} tone="orange" /></div>
     <div className="dashboard-grid"><section className="panel sales-panel"><div className="panel-heading"><div><h2>Rendimiento de ventas</h2><span>Ventas registradas diariamente en el periodo.</span></div><select value={period} onChange={(event) => setPeriod(event.target.value as typeof period)}><option value="30d">Últimos 30 días</option><option value="7d">Últimos 7 días</option><option value="year">Último año</option></select></div><div className="chart-legend"><span><i className="legend-blue" /> Ventas (Q)</span><span>{summary ? `${summary.series.length} días del periodo` : 'Actualizando periodo…'}</span></div>{summary ? <SalesChart series={summary.series} /> : <div className="empty-state">{error ? 'No se pudo cargar la actividad.' : 'Cargando actividad…'}</div>}</section>
@@ -603,31 +583,3 @@ moduleConfig.payments = { ...moduleConfig.transfers, title: 'Pagos', description
 moduleConfig.suppliers = { ...moduleConfig.products, title: 'Proveedores', description: 'Administra empresas abastecedoras y sus productos asociados.', action: 'Nuevo proveedor', columns: ['Empresa', 'Contacto', 'Teléfono', 'Correo', 'Productos abastecidos', 'Último pedido', 'Estado'], rows: suppliers.map((supplier) => ({ Empresa: supplier.name, Contacto: supplier.contactPerson || '—', Teléfono: supplier.phone || '—', Correo: supplier.email || '—', 'Productos abastecidos': supplier.productIds.length, 'Último pedido': supplier.lastOrder || 'Sin pedidos', Estado: supplier.status })) };
 moduleConfig['roles-permissions'] = { ...moduleConfig.users, title: 'Roles y permisos', description: 'Define el acceso de cada perfil a las áreas de NEXO.', action: 'Nuevo rol', columns: ['Nombre', 'Usuarios', 'Permisos', 'Última actualización', 'Estado'], rows: [{ Nombre: 'Súper Administrador', Usuarios: 1, Permisos: 'Acceso completo', 'Última actualización': 'Hoy, 09:42', Estado: 'Activo' }, { Nombre: 'Administrador', Usuarios: 1, Permisos: 'Operación completa', 'Última actualización': '12 sep 2025', Estado: 'Activo' }, { Nombre: 'Vendedor', Usuarios: 2, Permisos: 'Ventas y clientes', 'Última actualización': '08 sep 2025', Estado: 'Activo' }, { Nombre: 'Personal de bodega', Usuarios: 2, Permisos: 'Inventario', 'Última actualización': '08 sep 2025', Estado: 'Activo' }] };
 moduleConfig.profile = { ...moduleConfig.settings, title: 'Mi perfil', description: 'Actualiza tus datos personales y preferencias de acceso.', action: 'Guardar perfil', columns: ['Configuración', 'Descripción', 'Estado'], rows: [{ Configuración: 'Información personal', Descripción: 'Nombre y correo del usuario', Estado: 'Activo' }, { Configuración: 'Seguridad', Descripción: 'Contraseña y sesiones activas', Estado: 'Activo' }, { Configuración: 'Preferencias', Descripción: 'Idioma y notificaciones', Estado: 'Activo' }] };
-
-export function AdminAlertHost() {
-  const { adminAlert, dismissAdminAlert } = useApp();
-  const router = useRouter();
-  const closeRef = useRef<HTMLButtonElement>(null);
-  const previousFocus = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    if (!adminAlert) return;
-    previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); dismissAdminAlert(); }
-      if (event.key === 'Tab') {
-        const dialog = document.querySelector<HTMLElement>('.admin-alert-dialog');
-        const focusable = dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]');
-        if (!focusable?.length) return;
-        const first = focusable[0]; const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => { window.removeEventListener('keydown', onKeyDown); previousFocus.current?.focus(); };
-  }, [adminAlert, dismissAdminAlert]);
-  if (!adminAlert) return null;
-  const close = () => dismissAdminAlert();
-  return <div className="admin-alert-backdrop"><section className={`admin-alert-dialog ${adminAlert.type}`} role="alertdialog" aria-modal="true" aria-labelledby="admin-alert-title" aria-describedby="admin-alert-description"><div className={`admin-alert-icon ${adminAlert.type}`} aria-hidden="true">{adminAlert.type === 'warning' ? '!' : adminAlert.type === 'success' ? '✓' : 'i'}</div><div className="admin-alert-content"><span className="eyebrow">{adminAlert.type === 'warning' ? 'Advertencia' : adminAlert.type === 'success' ? 'Operación completada' : 'Actualización'}</span><h2 id="admin-alert-title">{adminAlert.title}</h2><p className="admin-alert-entity">{adminAlert.entity}</p><p id="admin-alert-description">{adminAlert.message}</p><p className="admin-alert-next"><strong>Siguiente acción:</strong> {adminAlert.nextAction}</p><div className="admin-alert-actions"><button type="button" className="button button-outline" ref={closeRef} onClick={close}>Cerrar</button>{adminAlert.actionTo && <button type="button" className="button button-primary" onClick={() => { close(); router.push(adminAlert.actionTo!); }}>Ir al módulo</button>}</div></div></section></div>;
-}

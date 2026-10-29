@@ -6,6 +6,7 @@ import AccountingPage from '../modules/accounting/components/AccountingPage';
 import SuppliersPage from '../modules/suppliers/components/SuppliersPage';
 import { accountingService, merchandisePurchaseService, productInventoryService, supplierService } from '../services';
 import { roleService } from '../services/roleService';
+import { businessToday } from '../shared/utils/businessDate';
 
 const app = vi.hoisted(() => ({ role: 'superadmin' }));
 vi.mock('../contexts/AppContext', () => ({ useApp: () => app }));
@@ -60,14 +61,34 @@ describe('ingresos y egresos', () => {
     fireEvent.click(await screen.findByRole('button', { name: 'Registrar ingreso o egreso' }));
     fireEvent.change(screen.getByLabelText('Tipo de movimiento'), { target: { value: 'Egreso' } });
     fireEvent.change(screen.getByLabelText('Concepto'), { target: { value: 'Compra de cajas' } });
-    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'Suministros' } });
+    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'Servicios' } });
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '0' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('monto mayor que cero');
+    expect((await screen.findByRole('alert')).textContent).toContain('monto positivo');
 
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '75' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
     expect((await screen.findByRole('alert')).textContent).toContain('No se pudo guardar el movimiento');
+  });
+
+  it('exige confirmación para fechas retroactivas y conserva la fecha actual sin aviso', async () => {
+    render(<AccountingPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Registrar ingreso o egreso' }));
+    const date = screen.getByLabelText('Fecha') as HTMLInputElement;
+    expect(date.value).toBe(businessToday());
+    fireEvent.change(screen.getByLabelText('Concepto'), { target: { value: 'Caja de archivo' } });
+    fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'Servicios' } });
+    fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '75' } });
+    fireEvent.change(date, { target: { value: '2026-10-19' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('Confirma que este movimiento');
+    expect(accountingService.create).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByLabelText('Confirmo que es un registro histórico'));
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
+    await waitFor(() => expect(accountingService.create).toHaveBeenCalledWith(
+      expect.objectContaining({ date: '2026-10-19', amount: 75 }), { confirmHistoricalDate: true },
+    ));
   });
 });
 
@@ -88,6 +109,28 @@ describe('proveedores', () => {
     expect((await screen.findByRole('status')).textContent).toContain('Proveedor archivado');
   });
 
+  it('valida los formatos de correo, teléfono y nombre de contacto', async () => {
+    vi.mocked(supplierService.list).mockResolvedValue([]);
+    vi.mocked(merchandisePurchaseService.list).mockResolvedValue([]);
+    render(<SuppliersPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo proveedor' }));
+    fireEvent.change(screen.getByLabelText('Empresa / nombre *'), { target: { value: 'Distribuidora 3M' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '+123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar proveedor' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('teléfono');
+    expect(supplierService.create).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '' } });
+    fireEvent.change(screen.getByLabelText('Correo'), { target: { value: '7777@7777' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar proveedor' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('correo válido');
+    expect(supplierService.create).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Correo'), { target: { value: 'compras@empresa.gt' } });
+    fireEvent.change(screen.getByLabelText('Persona de contacto'), { target: { value: 'Ana 3' } });
+    expect((screen.getByLabelText('Persona de contacto') as HTMLInputElement).value).toBe('Ana ');
+  });
+
   it('permite asociar productos existentes al crear un proveedor', async () => {
     vi.mocked(supplierService.list).mockResolvedValue([]);
     vi.mocked(merchandisePurchaseService.list).mockResolvedValue([]);
@@ -98,5 +141,17 @@ describe('proveedores', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Guardar proveedor' }));
 
     await waitFor(() => expect(supplierService.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Proveedor Nuevo', productIds: ['product-1'] })));
+  });
+
+  it('cierra el formulario de proveedor al pulsar el fondo y conserva el clic interno', async () => {
+    vi.mocked(supplierService.list).mockResolvedValue([]);
+    vi.mocked(merchandisePurchaseService.list).mockResolvedValue([]);
+    render(<SuppliersPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo proveedor' }));
+    fireEvent.pointerDown(screen.getByRole('dialog'));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+
+    fireEvent.pointerDown(document.querySelector('.modal-backdrop') as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });

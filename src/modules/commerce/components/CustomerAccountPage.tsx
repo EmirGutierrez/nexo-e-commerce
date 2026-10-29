@@ -9,6 +9,7 @@ import { customerPortalService, type CustomerOrder } from '../../../services';
 import type { Product } from '../../../types';
 import ChangePasswordCard from '../../auth/components/ChangePasswordCard';
 import MfaSettingsCard from '../../auth/components/MfaSettingsCard';
+import { isValidPersonName } from '../../../shared/utils/personName';
 
 type Section = 'profile' | 'orders' | 'wishlist';
 const navigation: { id: Section; label: string; icon: typeof UserRound }[] = [
@@ -45,6 +46,7 @@ export default function CustomerAccountPage() {
 
   const saveName = async (event: FormEvent) => {
     event.preventDefault(); setError(''); setMessage('');
+    if (!isValidPersonName(name)) { setError('El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.'); return; }
     try { await updateProfile(name); setMessage('Tu perfil se actualizó correctamente.'); }
     catch (issue) { setError(issue instanceof Error ? issue.message : 'No se pudo guardar tu perfil.'); }
   };
