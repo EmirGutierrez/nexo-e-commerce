@@ -16,7 +16,7 @@ import { fetchCatalogFromApi, productService } from '../../products/services/pro
 import { authService, businessSettingsService, checkoutService, dashboardService, productInventoryService, type BusinessProfileSettings, type CheckoutQuote } from '../../../services';
 import { ApiError } from '../../../shared/services/http-client';
 import type { OrderSubmission } from '../../../services';
-import type { PaymentMethod, Product, Role, User } from '../../../types';
+import type { PaymentMethod, Product, Role } from '../../../types';
 import AccountingPage from '../../accounting/components/AccountingPage';
 import PurchasesPage from '../../purchases/components/PurchasesPage';
 import SalesPage from '../../sales/components/SalesPage';
@@ -25,10 +25,12 @@ import SuppliersPage from '../../suppliers/components/SuppliersPage';
 import AdminCrudModule, { type AdminModuleConfig } from '../../products/components/AdminCrudModule';
 import RolesPermissionsPage from '../../roles/components/RolesPermissionsPage';
 import { roleService } from '../../../services/roleService';
+import { canVisitAdminPath } from '../../../services/adminAccess';
 import { roleLabels } from '../../../types';
 import { OffersAdminPage, TransferReceiptsPage } from '../../commerce/components/CommerceAdminPages';
 import { SeasonalSpotlight } from '../../commerce/components/CommercePages';
 import { serializeDashboardCsv } from '../utils/dashboardCsv';
+import { getDashboardGreeting } from '../utils/dashboardGreeting';
 import PublicAccountControls from './PublicAccountControls';
 import CustomerNotificationBell from '../../commerce/components/CustomerNotificationBell';
 import FloatingCartButton from './FloatingCartButton';
@@ -261,40 +263,6 @@ function Field({ label, type, value, onChange, placeholder, minLength, maxLength
 const adminRoleHome: Record<Role, string> = {
   superadmin: '/admin/dashboard', admin: '/admin/dashboard', sales: '/admin/sales', warehouse: '/admin/inventory', employee: '/admin/dashboard', customer: '/store',
 };
-const adminRoleRoutes: Record<Role, string[]> = {
-  superadmin: ['/admin'], admin: ['/admin'],
-  sales: ['/admin/dashboard', '/admin/sales', '/admin/customers', '/admin/transfers', '/admin/payments', '/admin/invoices'],
-  warehouse: ['/admin/dashboard', '/admin/inventory', '/admin/purchases', '/admin/suppliers'],
-  employee: ['/admin/profile'],
-  customer: [],
-};
-
-function hasUserPermission(role: Role, user: User | null | undefined, module: 'dashboard'|'products'|'inventory'|'orders'|'sales'|'customers'|'suppliers'|'settings'|'users', action: 'view'|'create'|'edit'|'delete'|'approve' = 'view') {
-  if (role === 'customer') return false;
-  if (role === 'superadmin') return true;
-  if (user?.permissions !== undefined) return user.permissions.includes(`${module}:${action}`);
-  return roleService.can(role, module, action);
-}
-
-function canVisitAdminPath(role: Role, pathname: string, permissions?: string[]) {
-  if (pathname.includes('\\') || /%2f|%5c/i.test(pathname) || pathname.split('/').some((segment) => segment === '.' || segment === '..')) return false;
-  if (pathname.split('/').filter(Boolean)[1] === 'offers') return permissions !== undefined ? permissions.includes('promotions:view') : roleService.can(role, 'promotions', 'view');
-  if (pathname === '/admin/profile') return role !== 'customer';
-  if (pathname === '/admin/support') return role !== 'customer';
-  if (pathname === '/admin/settings/roles-permissions') {
-    if (role === 'customer') return false;
-    if (role === 'superadmin' && permissions === undefined) return true;
-    return permissions !== undefined
-      ? permissions.includes('settings:view') && permissions.includes('users:view')
-      : roleService.can(role, 'settings', 'view') && roleService.can(role, 'users', 'view');
-  }
-  const moduleMap: Record<string, 'dashboard'|'products'|'inventory'|'orders'|'sales'|'customers'|'suppliers'|'accounting'|'settings'|'users'> = { dashboard: 'dashboard', products: 'products', categories: 'products', inventory: 'inventory', purchases: 'inventory', orders: 'orders', sales: 'sales', customers: 'customers', suppliers: 'suppliers', settings: 'settings', users: 'users', 'roles-permissions': 'users', transfers: 'orders', payments: 'orders', invoices: 'sales', accounting: 'accounting', profile: 'settings', brands: 'products' };
-  const requestedModule = moduleMap[pathname.split('/').filter(Boolean)[1] || 'dashboard'];
-  if (role === 'customer') return false;
-  if (role === 'superadmin' && permissions === undefined) return true;
-  return Boolean(requestedModule && (permissions !== undefined ? permissions.includes(`${requestedModule}:view`) : roleService.can(role, requestedModule, 'view')));
-}
-
 function resolveLoginDestination(kind: 'admin' | 'customer', role: Role | null, requested: unknown, permissions?: string[]) {
   if (kind === 'customer') return '/store';
   const safeRole = role || 'employee';
@@ -306,7 +274,7 @@ function resolveLoginDestination(kind: 'admin' | 'customer', role: Role | null, 
   }
   const preferred = adminRoleHome[safeRole];
   if (canVisitAdminPath(safeRole, preferred, permissions)) return preferred;
-  const firstAllowed = ['/admin/dashboard', '/admin/products', '/admin/inventory', '/admin/sales', '/admin/customers', '/admin/suppliers', '/admin/purchases', '/admin/settings', '/admin/users']
+  const firstAllowed = ['/admin/dashboard', '/admin/products', '/admin/brands', '/admin/inventory', '/admin/purchases', '/admin/sales', '/admin/customers', '/admin/suppliers', '/admin/accounting', '/admin/offers', '/admin/transfers', '/admin/settings', '/admin/users']
     .find((path) => canVisitAdminPath(safeRole, path, permissions));
   return firstAllowed || '/admin/profile';
 }
@@ -436,7 +404,7 @@ export function Confirmation() {
 
 function AdminShell({ children }: { children: React.ReactNode }) { const { user, logout, role, adminAlert, dismissAdminAlert } = useApp(); const pathname = usePathname(); const router = useRouter(); const [mobile, setMobile] = useState(false); const [profileMenuOpen, setProfileMenuOpen] = useState(false); const [notificationOpen, setNotificationOpen] = useState(false);
   useEffect(() => { setProfileMenuOpen(false); setNotificationOpen(false); }, [pathname]);
-  useEffect(() => { const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setProfileMenuOpen(false); setNotificationOpen(false); } }; window.addEventListener('keydown', closeOnEscape); return () => window.removeEventListener('keydown', closeOnEscape); }, []); const navItems = [{ label: 'Resumen', icon: LayoutDashboard, path: '/admin/dashboard' }, { label: 'Catálogo', icon: Package, path: '/admin/products' }, { label: 'Marcas', icon: Tag, path: '/admin/brands' }, { label: 'Proveedores', icon: Truck, path: '/admin/suppliers' }, { label: 'Ventas', icon: CircleDollarSign, path: '/admin/sales' }, { label: 'Ingresos y egresos', icon: Wallet, path: '/admin/accounting' }, { label: 'Inventario', icon: Boxes, path: '/admin/inventory' }, { label: 'Clientes', icon: Users, path: '/admin/customers' }]; const manage = [{ label: 'Compras de mercancía', icon: Package, path: '/admin/purchases' }, { label: 'Transferencias', icon: ArrowDownToLine, path: '/admin/transfers' }, { label: 'Usuarios', icon: UserCircle, path: '/admin/users' }]; const isActive = (path: string) => pathname === path || (path === '/admin/settings' && pathname.startsWith('/admin/settings/')) || (path === '/admin/products' && pathname.includes('/admin/categories')); const links = (items: typeof navItems) => items.filter(({ path }) => { const key = path.split('/')[2]; const map: Record<string, 'dashboard'|'products'|'inventory'|'orders'|'sales'|'customers'|'suppliers'|'accounting'|'settings'|'users'> = { dashboard:'dashboard', products:'products', brands:'products', suppliers:'suppliers', sales:'sales', accounting:'accounting', inventory:'inventory', customers:'customers', purchases:'inventory', transfers:'orders', users:'users',  }; const permissionModule = key === 'accounting' ? 'accounting' : map[key] || 'dashboard'; return Boolean(role && roleService.can(role, permissionModule, 'view')); }).map(({ label, icon: NavIcon, path }) => <Link key={path} href={path} className={isActive(path) ? 'side-link active' : 'side-link'} onClick={() => setMobile(false)}><NavIcon size={17} /><span>{label}</span></Link>); return <div className="admin-app"><aside className={mobile ? 'admin-sidebar mobile-open' : 'admin-sidebar'}><div className="side-top"><Brand /><button className="close-mobile" onClick={() => setMobile(false)}><X size={20} /></button></div><div className="workspace-selector"><span className="workspace-logo">N</span><div><strong>NEXO Commerce</strong><small>Operación principal</small></div><ChevronDown size={15} /></div><nav><span className="side-label">Principal</span>{links(navItems)}<span className="side-label">Gestionar</span>{links(manage)}{role === 'superadmin' && links([{ label: 'Ofertas y anuncios', icon: Tag, path: '/admin/offers' }])}<span className="side-label">Sistema</span>{role && roleService.can(role, 'settings', 'view') && <Link href="/admin/settings" className={isActive('/admin/settings') ? 'side-link active' : 'side-link'}><Settings size={17} /><span>Configuración</span></Link>}</nav><div className="side-bottom"><div className="help-card"><Sparkles size={18} /><strong>¿Necesitas ayuda?</strong><span>Visita nuestro centro de soporte</span><Link href="/admin/support">Ir al centro <ArrowUpRight size={14} /></Link></div><div className="user-mini" aria-label="Sesión actual"><span className="avatar">{user?.initials || 'NX'}</span><span><strong>{user?.name || 'María Fernanda'}</strong><small>{role ? roleLabels[role] : 'Administración'}</small></span></div></div></aside><div className="admin-content"><header className="admin-header"><button className="mobile-menu" onClick={() => setMobile(true)}><Menu size={20} /></button><div className="admin-breadcrumb"><span>Panel</span><ChevronRight size={14} /><strong>{getModuleLabel(pathname)}</strong></div><div className="admin-header-actions"><div className="header-popover-wrap"><button type="button" className="icon-button notification" aria-label="Notificaciones" aria-expanded={notificationOpen} onClick={() => { setNotificationOpen((open) => !open); setProfileMenuOpen(false); }}><Bell size={17} />{adminAlert && <i />}</button>{notificationOpen && <div className="header-popover notification-popover" role="status"><strong>Notificaciones</strong>{adminAlert ? <><b>{adminAlert.title}</b><p>{adminAlert.message}</p><div><Link href={adminAlert.actionTo || '/admin/inventory'} onClick={() => setNotificationOpen(false)}>Revisar</Link><button type="button" onClick={dismissAdminAlert}>Descartar</button></div></> : <p>No tienes notificaciones nuevas.</p>}</div>}</div><div className="header-popover-wrap"><button type="button" className="user-header" aria-expanded={profileMenuOpen} onClick={() => { setProfileMenuOpen((open) => !open); setNotificationOpen(false); }}><span className="avatar">{user?.initials || 'NX'}</span><span><strong>{user?.name || 'María Fernanda'}</strong><small>{role ? roleLabels[role] : 'Administración'}</small></span><ChevronDown size={15} /></button>{profileMenuOpen && <div className="header-popover profile-popover" role="menu"><Link role="menuitem" href="/admin/profile" onClick={() => setProfileMenuOpen(false)}>Mi perfil</Link><Link role="menuitem" href="/admin/settings" onClick={() => setProfileMenuOpen(false)}>Configuración</Link></div>}</div><button className="logout-button" onClick={() => { void logout().then(() => router.push('/')).catch(() => window.alert('No se pudo cerrar la sesión. Verifica la conexión y vuelve a intentarlo.')); }}><LogOut size={17} /></button></div></header><div className="admin-main">{children}</div></div></div>; }
+  useEffect(() => { const closeOnEscape = (event: KeyboardEvent) => { if (event.key === 'Escape') { setProfileMenuOpen(false); setNotificationOpen(false); } }; window.addEventListener('keydown', closeOnEscape); return () => window.removeEventListener('keydown', closeOnEscape); }, []); const navItems = [{ label: 'Resumen', icon: LayoutDashboard, path: '/admin/dashboard' }, { label: 'Catálogo', icon: Package, path: '/admin/products' }, { label: 'Marcas', icon: Tag, path: '/admin/brands' }, { label: 'Proveedores', icon: Truck, path: '/admin/suppliers' }, { label: 'Ventas', icon: CircleDollarSign, path: '/admin/sales' }, { label: 'Ingresos y egresos', icon: Wallet, path: '/admin/accounting' }, { label: 'Inventario', icon: Boxes, path: '/admin/inventory' }, { label: 'Clientes', icon: Users, path: '/admin/customers' }]; const manage = [{ label: 'Compras de mercancía', icon: Package, path: '/admin/purchases' }, { label: 'Transferencias', icon: ArrowDownToLine, path: '/admin/transfers' }, { label: 'Usuarios', icon: UserCircle, path: '/admin/users' }, { label: 'Ofertas y anuncios', icon: Tag, path: '/admin/offers' }]; const isActive = (path: string) => pathname === path || (path === '/admin/settings' && pathname.startsWith('/admin/settings/')) || (path === '/admin/products' && pathname.includes('/admin/categories')); const links = (items: typeof navItems) => items.filter(({ path }) => Boolean(role && canVisitAdminPath(role, path, user?.permissions))).map(({ label, icon: NavIcon, path }) => <Link key={path} href={path} className={isActive(path) ? 'side-link active' : 'side-link'} onClick={() => setMobile(false)}><NavIcon size={17} /><span>{label}</span></Link>); return <div className="admin-app"><aside className={mobile ? 'admin-sidebar mobile-open' : 'admin-sidebar'}><div className="side-top"><Brand /><button className="close-mobile" onClick={() => setMobile(false)}><X size={20} /></button></div><div className="workspace-selector"><span className="workspace-logo">N</span><div><strong>NEXO Commerce</strong><small>Operación principal</small></div></div><nav><span className="side-label">Principal</span>{links(navItems)}<span className="side-label">Gestionar</span>{links(manage)}<span className="side-label">Sistema</span>{role && roleService.can(role, 'settings', 'view') && <Link href="/admin/settings" className={isActive('/admin/settings') ? 'side-link active' : 'side-link'}><Settings size={17} /><span>Configuración</span></Link>}</nav><div className="side-bottom"><div className="help-card"><Sparkles size={18} /><strong>¿Necesitas ayuda?</strong><span>Visita nuestro centro de soporte</span><Link href="/admin/support">Ir al centro <ArrowUpRight size={14} /></Link></div><div className="user-mini" aria-label="Sesión actual"><span className="avatar">{user?.initials || 'NX'}</span><span><strong>{user?.name || 'María Fernanda'}</strong><small>{role ? roleLabels[role] : 'Administración'}</small></span></div></div></aside><div className="admin-content"><header className="admin-header"><button className="mobile-menu" onClick={() => setMobile(true)}><Menu size={20} /></button><div className="admin-breadcrumb"><span>Panel</span><ChevronRight size={14} /><strong>{getModuleLabel(pathname)}</strong></div><div className="admin-header-actions"><div className="header-popover-wrap"><button type="button" className="icon-button notification" aria-label="Notificaciones" aria-expanded={notificationOpen} onClick={() => { setNotificationOpen((open) => !open); setProfileMenuOpen(false); }}><Bell size={17} />{adminAlert && <i />}</button>{notificationOpen && <div className="header-popover notification-popover" role="status"><strong>Notificaciones</strong>{adminAlert ? <><b>{adminAlert.title}</b><p>{adminAlert.message}</p><div><Link href={adminAlert.actionTo || '/admin/inventory'} onClick={() => setNotificationOpen(false)}>Revisar</Link><button type="button" onClick={dismissAdminAlert}>Descartar</button></div></> : <p>No tienes notificaciones nuevas.</p>}</div>}</div><div className="header-popover-wrap"><button type="button" className="user-header" aria-expanded={profileMenuOpen} onClick={() => { setProfileMenuOpen((open) => !open); setNotificationOpen(false); }}><span className="avatar">{user?.initials || 'NX'}</span><span><strong>{user?.name || 'María Fernanda'}</strong><small>{role ? roleLabels[role] : 'Administración'}</small></span><ChevronDown size={15} /></button>{profileMenuOpen && <div className="header-popover profile-popover" role="menu"><Link role="menuitem" href="/admin/profile" onClick={() => setProfileMenuOpen(false)}>Mi perfil</Link><Link role="menuitem" href="/admin/settings" onClick={() => setProfileMenuOpen(false)}>Configuración</Link></div>}</div><button className="logout-button" onClick={() => { void logout().then(() => router.push('/')).catch(() => window.alert('No se pudo cerrar la sesión. Verifica la conexión y vuelve a intentarlo.')); }}><LogOut size={17} /></button></div></header><div className="admin-main">{children}</div></div></div>; }
 function MoreDots() { return <span className="more-dots">•••</span>; }
 function getModuleLabel(path: string) { if (path === '/admin/settings/roles-permissions') return 'Roles y permisos'; const labels: Record<string, string> = { dashboard: 'Resumen', products: 'Productos', brands: 'Marcas', categories: 'Categorías', sales: 'Ventas', inventory: 'Inventario', customers: 'Clientes', transfers: 'Transferencias', users: 'Usuarios', purchases: 'Compras de mercancía', accounting: 'Ingresos y egresos', settings: 'Configuración', profile: 'Mi perfil', support: 'Soporte', invoices: 'Facturación', payments: 'Pagos', suppliers: 'Proveedores', offers: 'Ofertas y anuncios', 'roles-permissions': 'Roles y permisos' }; return labels[path.split('/')[2]] || 'Resumen'; }
 
@@ -522,7 +490,14 @@ function Dashboard() {
   const [period, setPeriod] = useState<'30d' | '7d' | 'year'>('30d');
   const [summary, setSummary] = useState<Awaited<ReturnType<typeof dashboardService.summary>> | null>(null);
   const [error, setError] = useState('');
+  const [greeting, setGreeting] = useState('Bienvenido');
   const { reportLowStock, user } = useApp();
+  useEffect(() => {
+    const updateGreeting = () => setGreeting(getDashboardGreeting(new Date()));
+    updateGreeting();
+    const interval = window.setInterval(updateGreeting, 60_000);
+    return () => window.clearInterval(interval);
+  }, []);
   useEffect(() => {
     let active = true;
     setSummary(null);
@@ -539,9 +514,9 @@ function Dashboard() {
   };
   const p = summary?.products || { products: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 };
   const healthy = Math.max(0, p.products - p.lowStock - p.outOfStock);
-  const dateLabel = new Intl.DateTimeFormat('es-GT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric' }).format(new Date());
+  const dateLabel = new Intl.DateTimeFormat('es-GT', { weekday: 'long', day: 'numeric', month: 'long', year: 'numeric', timeZone: 'America/Guatemala' }).format(new Date());
   return <div className="dashboard">
-    <div className="admin-page-heading"><div><span className="eyebrow">{dateLabel}</span><h1>Buenos días, {user?.name.split(' ')[0] || 'equipo'} <span>✦</span></h1><p>Indicadores calculados con los movimientos guardados correctamente.</p></div><div className="heading-actions"><button className="button button-outline" onClick={exportCsv} disabled={!summary}><Download size={16} /> Exportar</button></div></div>
+    <div className="admin-page-heading"><div><span className="eyebrow">{dateLabel}</span><h1>{greeting}, {user?.name.split(' ')[0] || 'equipo'} <span>✦</span></h1><p>Indicadores calculados con los movimientos guardados correctamente.</p></div><div className="heading-actions"><button className="button button-outline" onClick={exportCsv} disabled={!summary}><Download size={16} /> Exportar</button></div></div>
     {error && <div className="crud-error" role="alert">{error}</div>}
     <div className="metric-grid"><Metric title="Ventas del periodo" value={summary ? formatQ(summary.sales) : '—'} change="NEXO" positive icon={CircleDollarSign} tone="blue" /><Metric title="Pedidos y ventas" value={summary ? String(summary.orders) : '—'} change="Transacciones" positive icon={ShoppingBag} tone="purple" /><Metric title="Clientes nuevos" value={summary ? String(summary.newCustomers) : '—'} change="En el periodo" positive icon={Users} tone="green" /><Metric title="Ticket promedio" value={summary ? formatQ(summary.averageTicket) : '—'} change="En el periodo" positive icon={BarChart3} tone="orange" /></div>
     <div className="dashboard-grid"><section className="panel sales-panel"><div className="panel-heading"><div><h2>Rendimiento de ventas</h2><span>Ventas registradas diariamente en el periodo.</span></div><select value={period} onChange={(event) => setPeriod(event.target.value as typeof period)}><option value="30d">Últimos 30 días</option><option value="7d">Últimos 7 días</option><option value="year">Último año</option></select></div><div className="chart-legend"><span><i className="legend-blue" /> Ventas (Q)</span><span>{summary ? `${summary.series.length} días del periodo` : 'Actualizando periodo…'}</span></div>{summary ? <SalesChart series={summary.series} /> : <div className="empty-state">{error ? 'No se pudo cargar la actividad.' : 'Cargando actividad…'}</div>}</section>
