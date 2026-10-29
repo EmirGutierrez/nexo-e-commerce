@@ -75,7 +75,10 @@ deploy_app() {
     set -- "$@" --profile wireguard
   fi
   if ! docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" up -d --build --remove-orphans --wait --wait-timeout 300; then
+    # Keep the customer-facing site available when an optional monitoring service fails.
+    docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" up -d --no-deps caddy || true
     docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" ps --all || true
+    docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" logs --tail=100 postgres-exporter-init || true
     docker compose "$@" --env-file "$REPO_DIR/deploy/.env.production" -f "$REPO_DIR/compose.prod.yaml" logs --tail=100 wireguard || true
     exit 1
   fi

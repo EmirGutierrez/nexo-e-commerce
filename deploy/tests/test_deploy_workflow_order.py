@@ -29,6 +29,17 @@ class DeployWorkflowOrderTest(unittest.TestCase):
         self.assertLess(mobile_secret_sync, health_check)
         self.assertLess(mobile_secret_sync, wireguard_key_check)
 
+    def test_monitoring_failure_cannot_block_caddy_or_hide_init_logs(self) -> None:
+        compose = (REPOSITORY_ROOT / "compose.prod.yaml").read_text(encoding="utf-8")
+        caddy = compose.split("\n  caddy:\n", maxsplit=1)[1].split("\n  prometheus:\n", maxsplit=1)[0]
+        self.assertIn("frontend:", caddy)
+        self.assertNotIn("grafana:", caddy)
+
+        command = (REPOSITORY_ROOT / "deploy/nexo-ssh-command.sh").read_text(encoding="utf-8")
+        recovery = command.split("if ! docker compose", maxsplit=1)[1].split("\n  fi", maxsplit=1)[0]
+        self.assertIn("up -d --no-deps caddy", recovery)
+        self.assertIn("logs --tail=100 postgres-exporter-init", recovery)
+
 
 if __name__ == "__main__":
     unittest.main()
