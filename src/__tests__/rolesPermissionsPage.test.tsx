@@ -86,7 +86,9 @@ describe('módulos asignados por rol', () => {
     expect(within(adminCard).queryByText('Ingresos y egresos')).toBeNull();
 
     fireEvent.click(screen.getByRole('checkbox', { name: 'Seleccionar todos los permisos de Ingresos y egresos' }));
-    fireEvent.click(screen.getByRole('button', { name: 'Guardar permisos' }));
+    const saveButton = screen.getByRole('button', { name: 'Guardar permisos' }) as HTMLButtonElement;
+    await waitFor(() => expect(saveButton.disabled).toBe(false));
+    fireEvent.click(saveButton);
 
     await waitFor(() => expect(roleService.save).toHaveBeenCalledWith('admin', expect.any(Object)));
     expect(await within(adminCard).findByText('Ingresos y egresos')).toBeTruthy();
