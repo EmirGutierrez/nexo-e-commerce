@@ -16,7 +16,7 @@ flowchart LR
     Next -->|REST, cookies de sesión y CSRF| Spring["Spring Boot<br/>monolito modular"]
     Mobile["Cliente móvil compatible"] -->|REST + JWT Bearer| Spring
     Spring -->|JPA / JDBC| PG[("PostgreSQL")]
-    Flyway["Flyway<br/>migraciones V1–V25"] --> PG
+    Flyway["Flyway<br/>migraciones V1–V26"] --> PG
     Browser -->|carrito y vistos recientes| Local["localStorage del navegador"]
 ```
 
@@ -41,10 +41,18 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 ### Datos y migraciones
 
 - PostgreSQL es la fuente compartida para usuarios, roles, catálogo, inventario, pedidos, ventas y demás registros del negocio.
-- Las migraciones viven en `backend/src/main/resources/db/migration`. El repositorio contiene las versiones V1 a V25; el backend ejecuta las pendientes al arrancar. V19 incorpora el permiso `inventory:delete` para administradores y superadministradores. V20 crea el catálogo persistente de ubicaciones y recupera los valores existentes. V24 guarda hashes y vencimientos de enlaces de recuperación de contraseña; V25 invalida las sesiones móviles antiguas para que vuelvan a iniciar sesión con JWT.
+- Las migraciones viven en `backend/src/main/resources/db/migration`. El repositorio contiene las versiones V1 a V26; el backend ejecuta las pendientes al arrancar. V19 incorpora el permiso `inventory:delete` para administradores y superadministradores. V20 crea el catálogo persistente de ubicaciones y recupera los valores existentes. V24 guarda hashes y vencimientos de enlaces de recuperación de contraseña; V25 invalida las sesiones móviles antiguas para que vuelvan a iniciar sesión con JWT; V26 activa `pg_stat_statements` para registrar llamadas y tiempos de ejecución de PostgreSQL.
 - Las imágenes de producto pueden almacenarse en PostgreSQL; el servicio limita las imágenes cargadas como datos embebidos a 140 KB.
 - El equipo puede usar una base PostgreSQL compartida en Neon con el perfil Spring `team`. La configuración privada va en `backend/.env.team`, excluido por Git. Este documento no incluye la URL del servidor ni credenciales.
 - `backend/README.md` explica la inicialización local y compartida, los perfiles y las variables requeridas. Coordina los arranques contra la base compartida: iniciar Spring puede aplicar migraciones pendientes.
+
+### Observabilidad de producción
+
+- Grafana presenta el dashboard `NEXO · VPS, PostgreSQL y sitio web` en `/monitoring/`; Caddy lo sirve por HTTPS con autenticación local de Grafana.
+- Prometheus recoge métricas cada 15 segundos y conserva hasta 15 días o 2 GB. No publica su puerto en el host y consulta Actuator en el puerto privado 8081 con un token Bearer.
+- Node Exporter consulta CPU, memoria y sistema de archivos del host mediante montajes de solo lectura. PostgreSQL Exporter usa el rol dedicado `nexo_exporter` con `pg_monitor`; `pg_stat_statements` mide llamadas y duración de hasta 100 sentencias de mayor tiempo acumulado, sin guardar texto de consulta en Prometheus.
+- Blackbox Exporter comprueba que la página pública responda por HTTPS con estado 200 y mide la duración del sondeo. Es el único servicio del stack de métricas con salida de red.
+- La configuración y el dashboard están en `monitoring/`; las credenciales de Grafana, el scraping de Spring y el exportador de PostgreSQL se administran desde secretos del entorno `production` de GitHub. La guía está en [deploy/README.md](../deploy/README.md).
 
 ## Funcionalidad actual
 
