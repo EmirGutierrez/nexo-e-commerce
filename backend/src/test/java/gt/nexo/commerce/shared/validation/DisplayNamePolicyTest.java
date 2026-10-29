@@ -20,4 +20,9 @@ class DisplayNamePolicyTest {
             assertFalse(DisplayNamePolicy.isValid(name), name);
         }
     }
+
+    @Test
+    void rejectsOversizedInputBeforeScanningItsNameCharacters() {
+        assertFalse(DisplayNamePolicy.isValid("Ana-" + "María".repeat(1_000)));
+    }
 }
