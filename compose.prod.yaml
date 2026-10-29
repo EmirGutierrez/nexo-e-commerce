@@ -141,8 +141,6 @@ services:
     depends_on:
       frontend:
         condition: service_healthy
-      grafana:
-        condition: service_started
     networks:
       - edge
       - site
