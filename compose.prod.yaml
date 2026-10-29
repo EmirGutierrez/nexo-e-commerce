@@ -244,12 +244,13 @@ services:
     tmpfs:
       - /tmp:rw,noexec,nosuid,nodev,size=8m
     entrypoint: ["/bin/sh", "-ec"]
-    command: >-
-      until pg_isready -h "$${PGHOST}" -p "$${PGPORT}" -U "$${PGUSER}" -d "$${PGDATABASE}"; do sleep 2; done;
-      psql --no-psqlrc --set=ON_ERROR_STOP=1 --file=/monitoring/create_exporter_role.sql >/dev/null;
-      touch /tmp/nexo-exporter-role-ready;
-      unset PGPASSWORD POSTGRES_EXPORTER_PASSWORD;
-      while :; do sleep 3600; done
+    command:
+      - >-
+        until pg_isready -h "$${PGHOST}" -p "$${PGPORT}" -U "$${PGUSER}" -d "$${PGDATABASE}"; do sleep 2; done;
+        psql --no-psqlrc --set=ON_ERROR_STOP=1 --file=/monitoring/create_exporter_role.sql >/dev/null;
+        touch /tmp/nexo-exporter-role-ready;
+        unset PGPASSWORD POSTGRES_EXPORTER_PASSWORD;
+        while :; do sleep 3600; done
     environment:
       PGHOST: postgres
       PGPORT: "5432"
