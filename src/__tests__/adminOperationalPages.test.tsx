@@ -115,6 +115,12 @@ describe('proveedores', () => {
     render(<SuppliersPage />);
     fireEvent.click(await screen.findByRole('button', { name: 'Nuevo proveedor' }));
     fireEvent.change(screen.getByLabelText('Empresa / nombre *'), { target: { value: 'Distribuidora 3M' } });
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '+123' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar proveedor' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('teléfono');
+    expect(supplierService.create).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Teléfono'), { target: { value: '' } });
     fireEvent.change(screen.getByLabelText('Correo'), { target: { value: '7777@7777' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar proveedor' }));
     expect((await screen.findByRole('alert')).textContent).toContain('correo válido');
@@ -135,5 +141,17 @@ describe('proveedores', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Guardar proveedor' }));
 
     await waitFor(() => expect(supplierService.create).toHaveBeenCalledWith(expect.objectContaining({ name: 'Proveedor Nuevo', productIds: ['product-1'] })));
+  });
+
+  it('cierra el formulario de proveedor al pulsar el fondo y conserva el clic interno', async () => {
+    vi.mocked(supplierService.list).mockResolvedValue([]);
+    vi.mocked(merchandisePurchaseService.list).mockResolvedValue([]);
+    render(<SuppliersPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo proveedor' }));
+    fireEvent.pointerDown(screen.getByRole('dialog'));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+
+    fireEvent.pointerDown(document.querySelector('.modal-backdrop') as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });

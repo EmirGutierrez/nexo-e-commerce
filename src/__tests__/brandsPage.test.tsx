@@ -76,4 +76,26 @@ describe('marcas', () => {
 
     await waitFor(() => expect(brandService.delete).toHaveBeenCalledWith('brand-1', 'brand-2'));
   });
+
+  it('rechaza nombres sin letras ni números, valida URL y cierra al pulsar el fondo', async () => {
+    render(<BrandsPage />);
+    await screen.findByText('NEXO Labs');
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva marca' }));
+    fireEvent.change(screen.getByPlaceholderText('Nombre de la marca'), { target: { value: '!!!' } });
+    fireEvent.change(screen.getByPlaceholderText('Productos o especialidad de la marca'), { target: { value: 'Accesorios' } });
+    fireEvent.change(screen.getByPlaceholderText('Correo o teléfono'), { target: { value: 'ventas@nexo.gt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar marca' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('nombre de la marca');
+    fireEvent.pointerDown(screen.getByRole('dialog'));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText('Nombre de la marca'), { target: { value: 'NEXO Audio' } });
+    fireEvent.change(screen.getByPlaceholderText('https://ejemplo.com'), { target: { value: 'javascript:alert(1)' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar marca' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('http:// o https://');
+    expect(brandService.create).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(document.querySelector('.modal-backdrop') as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
+  });
 });

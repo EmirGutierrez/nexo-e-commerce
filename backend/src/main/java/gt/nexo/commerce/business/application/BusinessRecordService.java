@@ -1752,10 +1752,39 @@ public class BusinessRecordService {
     }
     private static boolean isNameSeparator(int codePoint) { return codePoint == ' ' || codePoint == '\'' || codePoint == '\u2019' || codePoint == '-'; }
     private static boolean validEmail(String value) {
-        if (value == null || value.length() > 254 || !value.matches("(?i)^[a-z0-9]+(?:[._%+-][a-z0-9]+)*@[a-z0-9](?:[a-z0-9-]*[a-z0-9])?(?:\\.[a-z0-9](?:[a-z0-9-]*[a-z0-9])?)*\\.[a-z]{2,}$")) return false;
-        String domain = value.substring(value.indexOf('@') + 1);
-        return domain.matches("(?s).*\\p{L}.*") && java.util.Arrays.stream(domain.split("\\.")).noneMatch(label -> label.length() > 63);
+        if (value == null || value.length() > 254) return false;
+        int at = value.indexOf('@');
+        if (at <= 0 || at != value.lastIndexOf('@') || at == value.length() - 1) return false;
+
+        String local = value.substring(0, at);
+        for (int index = 0; index < local.length(); index++) {
+            char character = local.charAt(index);
+            if (isAsciiAlphaNumeric(character)) continue;
+            if ("._%+-".indexOf(character) < 0 || index == 0 || index == local.length() - 1
+                    || !isAsciiAlphaNumeric(local.charAt(index - 1)) || !isAsciiAlphaNumeric(local.charAt(index + 1))) return false;
+        }
+
+        String[] labels = value.substring(at + 1).split("\\.", -1);
+        if (labels.length < 2) return false;
+        for (int index = 0; index < labels.length - 1; index++) {
+            String label = labels[index];
+            if (label.isEmpty() || label.length() > 63 || !isAsciiAlphaNumeric(label.charAt(0))
+                    || !isAsciiAlphaNumeric(label.charAt(label.length() - 1))) return false;
+            for (int offset = 0; offset < label.length(); offset++) {
+                char character = label.charAt(offset);
+                if (!isAsciiAlphaNumeric(character) && character != '-') return false;
+            }
+        }
+        String topLevelDomain = labels[labels.length - 1];
+        if (topLevelDomain.length() < 2) return false;
+        for (int offset = 0; offset < topLevelDomain.length(); offset++) {
+            char character = topLevelDomain.charAt(offset);
+            if (!isAsciiLetter(character)) return false;
+        }
+        return true;
     }
+    private static boolean isAsciiAlphaNumeric(char value) { return isAsciiLetter(value) || value >= '0' && value <= '9'; }
+    private static boolean isAsciiLetter(char value) { return value >= 'a' && value <= 'z' || value >= 'A' && value <= 'Z'; }
     private static boolean validPhone(String value) {
         if (value == null || value.length() > 40 || !value.matches("^\\+?\\d[\\d\\s()-]*$")) return false;
         long digits = value.chars().filter(Character::isDigit).count();

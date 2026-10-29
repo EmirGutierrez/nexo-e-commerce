@@ -178,4 +178,83 @@ class BusinessRecordValidationTest {
         verify(jdbc, never()).update(contains("INSERT INTO business_records"), any(Object[].class));
         verify(jdbc, never()).update(contains("INSERT INTO business_settings"), any(Object[].class));
     }
+
+    @Test
+    void validatesContactDescriptionUrlAndNumericBoundariesBeforeSaving() {
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        for (String module : List.of("products", "brands", "categories", "suppliers", "customers", "accounting")) {
+            when(permissions.has(authentication, module, "create")).thenReturn(true);
+        }
+
+        BusinessRuleException invalidCategory = assertThrows(BusinessRuleException.class,
+                () -> service.create("categories", Map.of("name", "Marca🙂")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidCategory.getMessage().contains("categoría"));
+        BusinessRuleException invalidBrandUrl = assertThrows(BusinessRuleException.class,
+                () -> service.create("brands", Map.of("name", "NEXO Audio", "description", "Audio", "contact", "ventas@nexo.gt", "website", "ftp://nexo.example.gt")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidBrandUrl.getMessage().contains("HTTP o HTTPS"));
+        BusinessRuleException invalidBrandDescription = assertThrows(BusinessRuleException.class,
+                () -> service.create("brands", Map.of("name", "NEXO Audio", "description", "Texto\u0001inválido", "contact", "ventas@nexo.gt")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidBrandDescription.getMessage().contains("descripción"));
+        BusinessRuleException invalidSupplierPhone = assertThrows(BusinessRuleException.class,
+                () -> service.create("suppliers", Map.of("name", "Distribuidora NEXO", "phone", "ABC 5555", "status", "Activo")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidSupplierPhone.getMessage().contains("teléfono"));
+        BusinessRuleException invalidSupplierContactName = assertThrows(BusinessRuleException.class,
+                () -> service.create("suppliers", Map.of("name", "Distribuidora NEXO", "contactPerson", "Ana 3", "status", "Activo")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidSupplierContactName.getMessage().contains("persona de contacto"));
+        BusinessRuleException invalidSupplierEmail = assertThrows(BusinessRuleException.class,
+                () -> service.create("suppliers", Map.of("name", "Distribuidora NEXO", "email", "ventas..gt@nexo.gt", "status", "Activo")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidSupplierEmail.getMessage().contains("correo"));
+
+        BusinessRuleException invalidCustomerEmail = assertThrows(BusinessRuleException.class,
+                () -> service.create("customers", Map.of("name", "María O'Neill", "email", "maria@dominio.12", "status", "Activo")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidCustomerEmail.getMessage().contains("correo"));
+        BusinessRuleException invalidCustomerPhone = assertThrows(BusinessRuleException.class,
+                () -> service.create("customers", Map.of("name", "María O'Neill", "email", "maria@nexo.gt", "phone", "555-ABCD", "status", "Activo")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidCustomerPhone.getMessage().contains("teléfono"));
+        BusinessRuleException invalidCustomerStatus = assertThrows(BusinessRuleException.class,
+                () -> service.create("customers", Map.of("name", "María O'Neill", "email", "maria@nexo.gt", "phone", "+502 5555-1234", "status", "Desconocido")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidCustomerStatus.getMessage().contains("estado"));
+
+        BusinessRuleException invalidProductDescription = assertThrows(BusinessRuleException.class,
+                () -> service.create("products", Map.of("name", "Router NEXO", "sku", "ROUTER-1", "price", 100,
+                        "description", "Descripción\u0001inválida", "status", "Activo")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidProductDescription.getMessage().contains("descripción"));
+        BusinessRuleException invalidIntegerRange = assertThrows(BusinessRuleException.class,
+                () -> service.create("products", Map.of("name", "Router NEXO", "sku", "ROUTER-1", "price", 100,
+                        "stock", "2147483648", "status", "Activo")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidIntegerRange.getMessage().contains("límite"));
+        BusinessRuleException invalidMoneyPrecision = assertThrows(BusinessRuleException.class,
+                () -> service.create("accounting", Map.of("date", LocalDate.now(ZoneId.of("America/Guatemala")).toString(),
+                        "concept", "Servicio", "category", "Servicios", "type", "Egreso", "amount", new java.math.BigDecimal("1000000000000"), "status", "Registrado")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidMoneyPrecision.getMessage().contains("precisión"));
+
+        verify(jdbc, never()).update(contains("INSERT INTO business_records"), any(Object[].class));
+    }
+
+    @Test
+    void acceptsValidOptionalFormatsAndReportsLateStatusErrors() {
+        SecurityContextHolder.getContext().setAuthentication(authentication);
+        for (String module : List.of("products", "brands", "categories", "suppliers")) {
+            when(permissions.has(authentication, module, "create")).thenReturn(true);
+        }
+
+        BusinessRuleException invalidBrandStatus = assertThrows(BusinessRuleException.class,
+                () -> service.create("brands", Map.of("name", "NEXO Audio", "description", "Audio 50%", "contact", "+502 5555-1234",
+                        "website", "https://nexo.example.gt", "status", "Desconocido")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidBrandStatus.getMessage().contains("estado de la marca"));
+        BusinessRuleException invalidCategoryStatus = assertThrows(BusinessRuleException.class,
+                () -> service.create("categories", Map.of("name", "Audio", "status", "Desconocido")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidCategoryStatus.getMessage().contains("estado de la categoría"));
+        BusinessRuleException invalidSupplierStatus = assertThrows(BusinessRuleException.class,
+                () -> service.create("suppliers", Map.of("name", "Distribuidora NEXO", "contactPerson", "Ana O'Neill",
+                        "phone", "+502 5555-1234", "email", "compras+nexo@nexo.gt", "status", "Desconocido")));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidSupplierStatus.getMessage().contains("estado del proveedor"));
+        BusinessRuleException invalidProductBrand = assertThrows(BusinessRuleException.class,
+                () -> service.create("products", Map.of("name", "Router NEXO", "sku", "ROUTER-1", "category", "Tecnología",
+                        "location", "Bodega 1", "description", "Router inalámbrico", "price", 100, "cost", 50,
+                        "stock", 1, "status", "Activo", "brandId", UUID.randomUUID().toString())));
+        org.junit.jupiter.api.Assertions.assertTrue(invalidProductBrand.getMessage().contains("marca seleccionada"));
+
+        verify(jdbc, never()).update(contains("INSERT INTO business_records"), any(Object[].class));
+    }
 }

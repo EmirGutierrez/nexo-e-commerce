@@ -138,12 +138,27 @@ describe('configuración y formularios de inventario', () => {
     fireEvent.change(screen.getByLabelText('Costo unitario'), { target: { value: '1.001' } });
     fireEvent.change(screen.getByLabelText('Precio de venta'), { target: { value: '1e3' } });
     fireEvent.change(screen.getByLabelText('Existencias'), { target: { value: '2.5' } });
+    fireEvent.change(screen.getByLabelText('Descripción'), { target: { value: 'Texto\u0001 del producto' } });
 
     expect((screen.getByLabelText('Producto') as HTMLInputElement).value).toBe('Router 5G');
     expect((screen.getByLabelText('Código del producto (SKU)') as HTMLInputElement).value).toBe('ABC12');
     expect((screen.getByLabelText('Costo unitario') as HTMLInputElement).value).toBe('');
     expect((screen.getByLabelText('Precio de venta') as HTMLInputElement).value).toBe('');
     expect((screen.getByLabelText('Existencias') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Descripción') as HTMLInputElement).value).toBe('Texto del producto');
+  });
+
+  it('bloquea un monto con precisión inválida antes de actualizar un registro existente', async () => {
+    const malformedEntry = { ...inventoryEntry, data: { ...inventoryEntry.data, 'Precio de venta': '1.001' } };
+    vi.mocked(adminTableService.list).mockResolvedValue([malformedEntry]);
+    const update = vi.spyOn(adminTableService, 'update');
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    await screen.findByText('Monitor');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar Inventario: Monitor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('monto con hasta dos decimales');
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('rechaza stock cero cuando el estado elegido es En stock', async () => {

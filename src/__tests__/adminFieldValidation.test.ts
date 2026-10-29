@@ -11,6 +11,9 @@ import {
   isValidSkuInput,
   sanitizeContactInput,
   sanitizeDecimalInput,
+  sanitizeDiscountCodeInput,
+  sanitizeEmailInput,
+  sanitizeFreeTextInput,
   sanitizeIntegerInput,
   sanitizeMixedLabelInput,
   sanitizeNitInput,
@@ -46,6 +49,7 @@ describe('validaciones de campos administrativos', () => {
     expect(isValidMoneyInput('1.001')).toBe(false);
     expect(isValidMoneyInput('1e3')).toBe(false);
     expect(sanitizeDecimalInput('25,5')).toBe('25.5');
+    expect(sanitizeDecimalInput('.5')).toBe('0.5');
   });
 
   it('restringe SKU y NIT a sus formatos mixtos definidos', () => {
@@ -53,6 +57,9 @@ describe('validaciones de campos administrativos', () => {
     expect(isValidSkuInput('JDO-SOL-12')).toBe(true);
     expect(isValidSkuInput('SKU con espacios')).toBe(false);
     expect(sanitizeNitInput('cf-123 456')).toBe('CF-123456');
+    expect(sanitizeDiscountCodeInput(' promo-20% ')).toBe('PROMO-20');
+    expect(sanitizeDiscountCodeInput('a'.repeat(30))).toBe('A'.repeat(24));
+    expect(sanitizeFreeTextInput('Texto\u0001 válido\n')).toBe('Texto válido\n');
   });
 
   it('distingue correos reales y teléfonos y rechaza correos con dominios numéricos', () => {
@@ -61,7 +68,9 @@ describe('validaciones de campos administrativos', () => {
     expect(isValidEmailInput('a..b@empresa.gt')).toBe(false);
     expect(isValidPhoneInput('+502 5555-1234')).toBe(true);
     expect(isValidPhoneInput('123456')).toBe(false);
+    expect(isValidPhoneInput('502+5555-1234')).toBe(false);
     expect(isValidContactInput('contacto@empresa.gt')).toBe(true);
     expect(sanitizeContactInput('+502 5555-1234')).toBe('+50255551234');
+    expect(sanitizeEmailInput('a@@b!.égt')).toBe('a@b.gt');
   });
 });
