@@ -76,8 +76,8 @@ jobs:
 
   sonar:
     name: Analizar calidad con SonarQube Cloud
-    # SonarCloud debe tener develop configurada como rama principal del proyecto.
-    if: ${{ github.ref == 'refs/heads/develop' || (github.event_name == 'pull_request' && github.event.pull_request.base.ref == 'develop') }}
+    # SonarCloud debe analizar las PR y la rama principal; se omiten pushes de ramas feature.
+    if: ${{ github.event_name == 'pull_request' || github.ref == 'refs/heads/develop' }}
     runs-on: ubuntu-24.04
     needs:
       - frontend
