@@ -16,6 +16,7 @@ if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
     "$BOOTSTRAP_COMMAND") action=bootstrap ;;
     sync-mfa) action=sync-mfa ;;
     sync-mobile-jwt) action=sync-mobile-jwt ;;
+    sync-monitoring) action=sync-monitoring ;;
     sync-tunnel) action=sync-tunnel ;;
     sync-wireguard) action=sync-wireguard ;;
     deploy-app) action=deploy-app ;;
@@ -48,6 +49,10 @@ sync_mfa() {
 
 sync_mobile_jwt() {
   exec python3 "$REPO_DIR/deploy/sync_mobile_jwt_secret.py" /opt/nexo-commerce/deploy/.env.production
+}
+
+sync_monitoring() {
+  exec python3 "$REPO_DIR/deploy/sync_monitoring_secrets.py" /opt/nexo-commerce/deploy/.env.production
 }
 
 sync_tunnel() {
@@ -89,6 +94,7 @@ case "$action" in
   bootstrap) bootstrap ;;
   sync-mfa) sync_mfa ;;
   sync-mobile-jwt) sync_mobile_jwt ;;
+  sync-monitoring) sync_monitoring ;;
   sync-tunnel) sync_tunnel ;;
   sync-wireguard) sync_wireguard ;;
   deploy-app) deploy_app ;;

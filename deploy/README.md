@@ -6,7 +6,7 @@ El Compose de producción ejecuta PostgreSQL, Spring Boot, Next.js y Caddy; `clo
 
 1. Instala Docker Engine y el plugin de Docker Compose v2 en Ubuntu. Confirma que `docker compose version` responda.
 2. Crea un usuario `deploy` con acceso SSH por llave y permiso para ejecutar Docker. No uses `root` en el secreto de GitHub.
-3. Crea `/opt/nexo-commerce/deploy/.env.production` a partir de `deploy/production.env.example`. Configura el dominio, una contraseña aleatoria larga para la base de datos, una clave MFA persistente y una clave JWT móvil (`openssl rand -base64 32` para cada clave). Guarda ambas claves en un gestor de secretos y en un respaldo seguro. Cambiar `MFA_ENCRYPTION_KEY` deja inaccesibles las cuentas MFA; cambiar `MOBILE_JWT_SECRET` invalida los JWT móviles vigentes y requiere que el personal vuelva a iniciar sesión. Para el primer arranque, configura las cuatro variables de bootstrap del administrador. Protege el archivo con `chmod 600`.
+3. Crea `/opt/nexo-commerce/deploy/.env.production` a partir de `deploy/production.env.example`. Configura el dominio, una contraseña aleatoria larga para la base de datos, una clave MFA persistente y una clave JWT móvil (`openssl rand -base64 32` para cada clave). Las credenciales de Grafana, el token de recolección y la contraseña del usuario lector de PostgreSQL también deben ser tres claves Base64 independientes de 32 bytes. Guarda las claves en un gestor de secretos y en un respaldo seguro. Cambiar `MFA_ENCRYPTION_KEY` deja inaccesibles las cuentas MFA; cambiar `MOBILE_JWT_SECRET` invalida los JWT móviles vigentes y requiere que el personal vuelva a iniciar sesión. Para el primer arranque, configura las cuatro variables de bootstrap del administrador. Protege el archivo con `chmod 600`.
 4. Da propiedad de `/opt/nexo-commerce` al usuario `deploy`. El workflow clona el repositorio ahí la primera vez y, después, actualiza la rama `develop`.
 5. Configura la zona en Cloudflare y mantén `@`, `www` y `api` en modo proxy. En el firewall de Contabo, permite TCP 80/443 y UDP 443 solo desde los rangos oficiales de Cloudflare que soporte la instancia. Para la migración gradual a WireGuard, conserva TCP 22 hasta que el workflow complete un despliegue por VPN y hayas comprobado la consola de recuperación de Contabo.
 
@@ -25,12 +25,23 @@ En el repositorio, abre **Settings → Environments → production → Environme
 | `VPS_SSH_KEY` | Llave privada cuyo par público está en `~deploy/.ssh/authorized_keys` |
 | `MFA_ENCRYPTION_KEY` | Clave Base64 estable de 32 bytes usada por Spring para cifrar semillas MFA |
 | `MOBILE_JWT_SECRET` | Clave Base64 estable de 32 bytes que firma JWT móviles; se sincroniza a la VPS antes de desplegar |
+| `GRAFANA_ADMIN_PASSWORD` | Contraseña Base64 aleatoria para iniciar sesión en Grafana como `admin` |
+| `PROMETHEUS_SCRAPE_TOKEN` | Token Base64 que autoriza exclusivamente la lectura de métricas del backend |
+| `POSTGRES_EXPORTER_PASSWORD` | Contraseña Base64 exclusiva del usuario PostgreSQL `nexo_exporter`, con permisos `pg_monitor` |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Token del túnel remoto `nexo-production`; se sincroniza a la VPS mediante el wrapper restringido |
 | `WIREGUARD_DEPLOY_PRIVATE_KEY` | Llave privada del peer fijo de GitHub Actions; su llave pública queda autorizada solo para `10.77.0.2/32` |
 
 Además, en **Settings → Environments → production → Environment variables**, crea `WIREGUARD_SERVER_PUBLIC_KEY` con la llave pública que muestra el resumen del bootstrap. No es una llave secreta. La llave privada del servidor se genera en la VPS y no se envía a GitHub.
 
-El workflow sincroniza `MFA_ENCRYPTION_KEY` y `MOBILE_JWT_SECRET` mediante comandos separados del wrapper SSH antes de actualizar los contenedores. No escribas las claves en logs ni las agregues a `.env.production.example`; guarda los valores reales solo en los secretos del entorno `production` y en una copia segura.
+El workflow sincroniza las claves MFA y JWT, las tres credenciales de monitoreo y el token opcional del túnel mediante comandos restringidos del wrapper SSH antes de actualizar los contenedores. No escribas secretos en logs ni los agregues a `.env.production.example`; guarda los valores reales solo en los secretos del entorno `production` y en una copia segura. Para crear cada clave de monitoreo localmente, ejecuta `openssl rand -base64 32` tres veces y agrega cada valor a su secreto correspondiente; no reutilices una clave.
+
+## Grafana y métricas de producción
+
+Tras integrar la rama y desplegar desde `develop`, abre `https://<dominio>/monitoring/` e inicia sesión con el usuario `admin` y el secreto `GRAFANA_ADMIN_PASSWORD`. Grafana aprovisiona el dashboard **NEXO · VPS, PostgreSQL y sitio web** automáticamente.
+
+El dashboard presenta uso de CPU, RAM y almacenamiento del host; salud de la API, PostgreSQL y la página pública; llamadas SQL por segundo y latencia media de ejecución dentro del motor PostgreSQL, más la latencia total del sondeo HTTPS. El exportador limita las estadísticas de sentencias a las 100 con mayor tiempo acumulado y no incluye texto SQL; por tanto, las curvas de consultas y latencia representan esas sentencias registradas, no cada solicitud HTTP de la aplicación. Prometheus conserva 15 días de métricas. PostgreSQL activa `pg_stat_statements` mediante una migración Flyway y reinicia su proceso en la primera actualización para cargar esa extensión; la base y los dashboards conservan sus volúmenes existentes.
+
+Grafana requiere inicio de sesión, no permite registro público ni acceso anónimo, y marca su cookie como segura. Su cuenta se guarda en el volumen persistente; cambiar el secreto `GRAFANA_ADMIN_PASSWORD` por sí solo no cambia una contraseña ya inicializada. Prometheus, Grafana y los exportadores no publican puertos en el host; Prometheus solo vive en una red Docker interna. El endpoint Actuator de métricas está en el puerto privado 8081 y exige `PROMETHEUS_SCRAPE_TOKEN`. PostgreSQL recibe un rol dedicado de lectura `nexo_exporter`; el colector no exporta el texto SQL de las consultas. Solo Blackbox Exporter recibe salida de red para comprobar por HTTPS el dominio público. La VPS se mide desde un exportador de solo lectura que recibe montajes del host sin privilegios adicionales.
 
 No compartas la llave privada en el repositorio ni en mensajes. El workflow elimina retornos de carro al cargarla para admitir copias desde Windows y valida su formato antes de conectar. La huella ED25519 de la VPS se fija en el workflow y se compara con la respuesta de `ssh-keyscan`; si Contabo cambia la llave del host, actualiza la huella solo después de verificarla desde la consola de la VPS.
 
@@ -38,7 +49,7 @@ Cada push a `develop` ejecuta CI, pero no publica automáticamente en producció
 
 El workflow usa `/opt/nexo-commerce` como directorio de despliegue. La primera ejecución requiere que el usuario SSH pueda crear ese directorio y ejecutar Docker; puedes prepararlo con `sudo install -d -o deploy -g deploy /opt/nexo-commerce`.
 
-En el primer despliegue actualizado, el workflow reemplaza la entrada de `VPS_SSH_KEY` en `~deploy/.ssh/authorized_keys` por una entrada `restrict` que fuerza `deploy/nexo-ssh-command.sh`. La llave solo acepta `health`, `sync-mfa`, `sync-tunnel`, `sync-wireguard`, `wireguard-public-key`, `deploy-app` y el bootstrap fijo; no habilita shell, PTY ni forwarding. El workflow normal valida la huella ED25519 y llega por WireGuard únicamente a `10.77.0.1/32`; no tiene una ruta a otras redes. No uses `VPS_SSH_KEY` para administración interactiva. `deploy` todavía pertenece al grupo `docker`, equivalente a root.
+En el primer despliegue actualizado, el workflow reemplaza la entrada de `VPS_SSH_KEY` en `~deploy/.ssh/authorized_keys` por una entrada `restrict` que fuerza `deploy/nexo-ssh-command.sh`. La llave solo acepta `health`, `sync-mfa`, `sync-mobile-jwt`, `sync-monitoring`, `sync-tunnel`, `sync-wireguard`, `wireguard-public-key`, `deploy-app` y el bootstrap fijo; no habilita shell, PTY ni forwarding. El workflow normal valida la huella ED25519 y llega por WireGuard únicamente a `10.77.0.1/32`; no tiene una ruta a otras redes. No uses `VPS_SSH_KEY` para administración interactiva. `deploy` todavía pertenece al grupo `docker`, equivalente a root.
 
 ## Migrar SSH de producción a WireGuard
 

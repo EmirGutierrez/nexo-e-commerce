@@ -16,6 +16,7 @@ services:
       - no-new-privileges:true
     cap_drop:
       - ALL
+    command: ["postgres", "-c", "shared_preload_libraries=pg_stat_statements"]
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Define POSTGRES_DB in deploy/.env.production}
       POSTGRES_USER: ${DATABASE_USERNAME:?Define DATABASE_USERNAME in deploy/.env.production}
@@ -57,6 +58,7 @@ services:
       OPENAPI_ENABLED: "false"
       MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
       MOBILE_JWT_SECRET: ${MOBILE_JWT_SECRET:?Define MOBILE_JWT_SECRET in deploy/.env.production}
+      PROMETHEUS_SCRAPE_TOKEN: ${PROMETHEUS_SCRAPE_TOKEN:?Define PROMETHEUS_SCRAPE_TOKEN in deploy/.env.production}
       MAIL_HOST: ${MAIL_HOST:-}
       MAIL_PORT: ${MAIL_PORT:-587}
       MAIL_USERNAME: ${MAIL_USERNAME:-}
@@ -75,6 +77,7 @@ services:
       - app
       - database
       - api
+      - monitoring
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:8080/api/catalog/payment-methods || exit 1"]
       interval: 10s
@@ -138,10 +141,181 @@ services:
     depends_on:
       frontend:
         condition: service_healthy
+      grafana:
+        condition: service_started
     networks:
       - edge
       - site
       - api
+      - monitoring
+
+  prometheus:
+    image: prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+    restart: unless-stopped
+    logging: *default-logging
+    user: nobody
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    environment:
+      PROMETHEUS_SCRAPE_TOKEN: ${PROMETHEUS_SCRAPE_TOKEN:?Define PROMETHEUS_SCRAPE_TOKEN in deploy/.env.production}
+      SITE_DOMAIN: ${SITE_DOMAIN:?Define SITE_DOMAIN in deploy/.env.production}
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --config.expand-env
+      - --storage.tsdb.path=/prometheus
+      - --storage.tsdb.retention.time=15d
+      - --storage.tsdb.retention.size=2GB
+    volumes:
+      - ./monitoring/prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - nexo-commerce-prod-prometheus-data:/prometheus
+    depends_on:
+      - node-exporter
+      - postgres-exporter
+      - blackbox-exporter
+    networks:
+      - monitoring
+
+  grafana:
+    image: grafana/grafana:13.3.0@sha256:488984b716c0862639f91a698adbe2862677a5a07bad42da5f03f3030883b205
+    restart: unless-stopped
+    logging: *default-logging
+    user: "472"
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=32m
+    environment:
+      GF_SECURITY_ADMIN_USER: admin
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:?Define GRAFANA_ADMIN_PASSWORD in deploy/.env.production}
+      GF_SECURITY_COOKIE_SECURE: "true"
+      GF_SECURITY_COOKIE_SAMESITE: lax
+      GF_SECURITY_DISABLE_BRUTE_FORCE_LOGIN_PROTECTION: "false"
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_AUTH_ANONYMOUS_ENABLED: "false"
+      GF_SERVER_DOMAIN: ${SITE_DOMAIN:?Define SITE_DOMAIN in deploy/.env.production}
+      GF_SERVER_ROOT_URL: https://${SITE_DOMAIN:?Define SITE_DOMAIN in deploy/.env.production}/monitoring/
+      GF_SERVER_SERVE_FROM_SUB_PATH: "true"
+      GF_SERVER_ENFORCE_DOMAIN: "true"
+    volumes:
+      - ./monitoring/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./monitoring/grafana/dashboards:/var/lib/grafana/dashboards:ro
+      - nexo-commerce-prod-grafana-data:/var/lib/grafana
+    depends_on:
+      prometheus:
+        condition: service_started
+    networks:
+      - monitoring
+
+  node-exporter:
+    image: quay.io/prometheus/node-exporter:v1.12.1@sha256:1b4e4438faca4dd7e001dd445d161a4a2091b0fededa84093b3a8dfeae1f1be0
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    command:
+      - --path.procfs=/host/proc
+      - --path.sysfs=/host/sys
+      - --path.rootfs=/host/root
+    volumes:
+      - /proc:/host/proc:ro
+      - /sys:/host/sys:ro
+      - /:/host/root:ro,rslave
+    networks:
+      - monitoring
+
+  postgres-exporter-init:
+    image: postgres:17-alpine@sha256:b0f9560a2de083e2cc7382e75f808c7381a32852a7ec49117deedb300e552b24
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m
+    entrypoint: ["/bin/sh", "-ec"]
+    command: >-
+      until pg_isready -h "$${PGHOST}" -p "$${PGPORT}" -U "$${PGUSER}" -d "$${PGDATABASE}"; do sleep 2; done;
+      psql --no-psqlrc --set=ON_ERROR_STOP=1 --file=/monitoring/create_exporter_role.sql >/dev/null;
+      touch /tmp/nexo-exporter-role-ready;
+      unset PGPASSWORD POSTGRES_EXPORTER_PASSWORD;
+      while :; do sleep 3600; done
+    environment:
+      PGHOST: postgres
+      PGPORT: "5432"
+      PGDATABASE: ${POSTGRES_DB:?Define POSTGRES_DB in deploy/.env.production}
+      PGUSER: ${DATABASE_USERNAME:?Define DATABASE_USERNAME in deploy/.env.production}
+      PGPASSWORD: ${DATABASE_PASSWORD:?Define DATABASE_PASSWORD in deploy/.env.production}
+      POSTGRES_EXPORTER_PASSWORD: ${POSTGRES_EXPORTER_PASSWORD:?Define POSTGRES_EXPORTER_PASSWORD in deploy/.env.production}
+    volumes:
+      - ./monitoring/postgres/create_exporter_role.sql:/monitoring/create_exporter_role.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - database
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /tmp/nexo-exporter-role-ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  postgres-exporter:
+    image: ghcr.io/prometheus-community/postgres-exporter:v0.20.1@sha256:4f3d82803c1f99ea5e767890de3557d2479ebbc711f63f2e04c663daa840057a
+    platform: linux/amd64
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    environment:
+      DATA_SOURCE_USER: nexo_exporter
+      DATA_SOURCE_PASS: ${POSTGRES_EXPORTER_PASSWORD:?Define POSTGRES_EXPORTER_PASSWORD in deploy/.env.production}
+    command:
+      - --datasource.uri=postgres:5432/${POSTGRES_DB:?Define POSTGRES_DB in deploy/.env.production}?sslmode=disable
+      - --collector.stat_statements
+      - --collector.stat_statements.limit=100
+    depends_on:
+      postgres-exporter-init:
+        condition: service_healthy
+    networks:
+      - database
+      - monitoring
+
+  blackbox-exporter:
+    image: ghcr.io/prometheus/blackbox-exporter:v0.29.1@sha256:ea1c7aa3ef3f307cd03e85f34abb604478ccb90b567fc690da0cd9776da76b13
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=8m
+    command:
+      - --config.file=/etc/blackbox/blackbox.yml
+    volumes:
+      - ./monitoring/blackbox/blackbox.yml:/etc/blackbox/blackbox.yml:ro
+    networks:
+      - site
+      - monitoring
+      - monitoring-egress
 
   cloudflared:
     image: cloudflare/cloudflared:2026.10.2@sha256:0e56c13c7058fcef9c4f0e7d83372f82330548dbf8f8b366f3d8b506526d93b2
@@ -195,6 +369,8 @@ volumes:
   nexo-commerce-prod-data:
   nexo-commerce-caddy-data:
   nexo-commerce-caddy-config:
+  nexo-commerce-prod-prometheus-data:
+  nexo-commerce-prod-grafana-data:
 
 networks:
   edge:
@@ -206,4 +382,7 @@ networks:
     internal: true
   database:
     internal: true
+  monitoring:
+    internal: true
+  monitoring-egress:
   cloudflare-egress:
