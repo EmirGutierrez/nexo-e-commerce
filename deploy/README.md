@@ -6,7 +6,7 @@ El Compose de producción ejecuta PostgreSQL, Spring Boot, Next.js y Caddy; `clo
 
 1. Instala Docker Engine y el plugin de Docker Compose v2 en Ubuntu. Confirma que `docker compose version` responda.
 2. Crea un usuario `deploy` con acceso SSH por llave y permiso para ejecutar Docker. No uses `root` en el secreto de GitHub.
-3. Crea `/opt/nexo-commerce/deploy/.env.production` a partir de `deploy/production.env.example`. Configura el dominio, una contraseña aleatoria larga para la base de datos y una clave MFA persistente (`openssl rand -base64 32`). Guarda la clave en un gestor de secretos y en un respaldo seguro; sin ella no se puede enrolar MFA y cambiarla después deja inaccesibles las cuentas que ya lo usen. Para el primer arranque, configura las cuatro variables de bootstrap del administrador. Protege el archivo con `chmod 600`.
+3. Crea `/opt/nexo-commerce/deploy/.env.production` a partir de `deploy/production.env.example`. Configura el dominio, una contraseña aleatoria larga para la base de datos, una clave MFA persistente y una clave JWT móvil (`openssl rand -base64 32` para cada clave). Guarda ambas claves en un gestor de secretos y en un respaldo seguro. Cambiar `MFA_ENCRYPTION_KEY` deja inaccesibles las cuentas MFA; cambiar `MOBILE_JWT_SECRET` invalida los JWT móviles vigentes y requiere que el personal vuelva a iniciar sesión. Para el primer arranque, configura las cuatro variables de bootstrap del administrador. Protege el archivo con `chmod 600`.
 4. Da propiedad de `/opt/nexo-commerce` al usuario `deploy`. El workflow clona el repositorio ahí la primera vez y, después, actualiza la rama `develop`.
 5. Configura la zona en Cloudflare y mantén `@`, `www` y `api` en modo proxy. En el firewall de Contabo, permite TCP 80/443 y UDP 443 solo desde los rangos oficiales de Cloudflare que soporte la instancia. Para la migración gradual a WireGuard, conserva TCP 22 hasta que el workflow complete un despliegue por VPN y hayas comprobado la consola de recuperación de Contabo.
 
@@ -24,10 +24,13 @@ En el repositorio, abre **Settings → Environments → production → Environme
 | `VPS_USER` | Usuario SSH de despliegue |
 | `VPS_SSH_KEY` | Llave privada cuyo par público está en `~deploy/.ssh/authorized_keys` |
 | `MFA_ENCRYPTION_KEY` | Clave Base64 estable de 32 bytes usada por Spring para cifrar semillas MFA |
+| `MOBILE_JWT_SECRET` | Clave Base64 estable de 32 bytes que firma JWT móviles; se sincroniza a la VPS antes de desplegar |
 | `CLOUDFLARE_TUNNEL_TOKEN` | Token del túnel remoto `nexo-production`; se sincroniza a la VPS mediante el wrapper restringido |
 | `WIREGUARD_DEPLOY_PRIVATE_KEY` | Llave privada del peer fijo de GitHub Actions; su llave pública queda autorizada solo para `10.77.0.2/32` |
 
 Además, en **Settings → Environments → production → Environment variables**, crea `WIREGUARD_SERVER_PUBLIC_KEY` con la llave pública que muestra el resumen del bootstrap. No es una llave secreta. La llave privada del servidor se genera en la VPS y no se envía a GitHub.
+
+El workflow sincroniza `MFA_ENCRYPTION_KEY` y `MOBILE_JWT_SECRET` mediante comandos separados del wrapper SSH antes de actualizar los contenedores. No escribas las claves en logs ni las agregues a `.env.production.example`; guarda los valores reales solo en los secretos del entorno `production` y en una copia segura.
 
 No compartas la llave privada en el repositorio ni en mensajes. El workflow elimina retornos de carro al cargarla para admitir copias desde Windows y valida su formato antes de conectar. La huella ED25519 de la VPS se fija en el workflow y se compara con la respuesta de `ssh-keyscan`; si Contabo cambia la llave del host, actualiza la huella solo después de verificarla desde la consola de la VPS.
 

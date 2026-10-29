@@ -385,12 +385,14 @@ jobs:
           VPS_SSH_KEY: ${{ secrets.VPS_SSH_KEY }}
           WIREGUARD_DEPLOY_PRIVATE_KEY: ${{ secrets.WIREGUARD_DEPLOY_PRIVATE_KEY }}
           WIREGUARD_SERVER_PUBLIC_KEY: ${{ vars.WIREGUARD_SERVER_PUBLIC_KEY }}
+          MOBILE_JWT_SECRET: ${{ secrets.MOBILE_JWT_SECRET }}
         run: |
           test -n "$VPS_HOST" || { echo "Falta el secreto VPS_HOST para el endpoint UDP de WireGuard"; exit 1; }
           test -n "$VPS_USER" || { echo "Falta el secreto VPS_USER"; exit 1; }
           test -n "$VPS_SSH_KEY" || { echo "Falta el secreto VPS_SSH_KEY"; exit 1; }
           test -n "$WIREGUARD_DEPLOY_PRIVATE_KEY" || { echo "Falta WIREGUARD_DEPLOY_PRIVATE_KEY en production"; exit 1; }
           test -n "$WIREGUARD_SERVER_PUBLIC_KEY" || { echo "Falta la variable WIREGUARD_SERVER_PUBLIC_KEY en production"; exit 1; }
+          test -n "$MOBILE_JWT_SECRET" || { echo "Falta el secreto MOBILE_JWT_SECRET en production"; exit 1; }
           sudo apt-get update
           sudo apt-get install --yes wireguard-tools
           # GITHUB_ENV aplica en pasos posteriores; exporta también para ssh-keyscan en este paso.
@@ -510,6 +512,20 @@ jobs:
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
               "$VPS_USER@$NEXO_SSH_HOST" sync-mfa
+
+      - name: Sincronizar clave JWT móvil con la VPS
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          MOBILE_JWT_SECRET: ${{ secrets.MOBILE_JWT_SECRET }}
+        run: |
+          printf '%s\n' "$MOBILE_JWT_SECRET" |
+            ssh -i "$HOME/.ssh/nexo_deploy" \
+              -p "$NEXO_SSH_PORT" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$VPS_USER@$NEXO_SSH_HOST" sync-mobile-jwt
 
       - name: Actualizar aplicación en la VPS
         env:

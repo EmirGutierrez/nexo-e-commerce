@@ -15,6 +15,7 @@ if [ -n "${SSH_ORIGINAL_COMMAND:-}" ]; then
   case "$SSH_ORIGINAL_COMMAND" in
     "$BOOTSTRAP_COMMAND") action=bootstrap ;;
     sync-mfa) action=sync-mfa ;;
+    sync-mobile-jwt) action=sync-mobile-jwt ;;
     sync-tunnel) action=sync-tunnel ;;
     sync-wireguard) action=sync-wireguard ;;
     deploy-app) action=deploy-app ;;
@@ -43,6 +44,10 @@ bootstrap() {
 
 sync_mfa() {
   exec python3 -c 'import base64,os,pathlib,stat,sys,tempfile; p=pathlib.Path("/opt/nexo-commerce/deploy/.env.production"); key=sys.stdin.readline().strip(); raw=base64.b64decode(key,validate=True); assert len(raw)==32; lines=[line for line in p.read_text().splitlines() if not line.startswith("MFA_ENCRYPTION_KEY=")]; lines.append("MFA_ENCRYPTION_KEY="+key); data=("\n".join(lines)+"\n").encode(); mode=stat.S_IMODE(p.stat().st_mode); fd,tmp=tempfile.mkstemp(dir=str(p.parent),prefix=".env.production."); os.fchmod(fd,mode); os.write(fd,data); os.fsync(fd); os.close(fd); os.replace(tmp,p); print("Clave MFA sincronizada")'
+}
+
+sync_mobile_jwt() {
+  exec python3 "$REPO_DIR/deploy/sync_mobile_jwt_secret.py" /opt/nexo-commerce/deploy/.env.production
 }
 
 sync_tunnel() {
@@ -83,6 +88,7 @@ wireguard_public_key() {
 case "$action" in
   bootstrap) bootstrap ;;
   sync-mfa) sync_mfa ;;
+  sync-mobile-jwt) sync_mobile_jwt ;;
   sync-tunnel) sync_tunnel ;;
   sync-wireguard) sync_wireguard ;;
   deploy-app) deploy_app ;;

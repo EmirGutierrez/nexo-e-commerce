@@ -27,14 +27,14 @@ Para revisar los registros usa `docker compose logs -f postgres backend frontend
 
 ## Desarrollo local
 
-1. Copia `backend/.env.example` a `backend/.env` y define `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_USERNAME` y `DATABASE_PASSWORD`. Usa los mismos valores de usuario y contraseña para PostgreSQL y Spring; `.env` queda ignorado por Git.
+1. Copia `backend/.env.example` a `backend/.env` y define `POSTGRES_USER`, `POSTGRES_PASSWORD`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` y `MOBILE_JWT_SECRET`. Genera esta última clave con `openssl rand -base64 32`; usa los mismos valores de usuario y contraseña para PostgreSQL y Spring. El archivo `.env` queda ignorado por Git.
 2. Desde `backend/`, inicia PostgreSQL con `docker compose up -d`. El puerto de PostgreSQL queda accesible solo desde el propio equipo.
 3. Inicia la API con `mvn spring-boot:run`. El perfil `local` se selecciona por defecto y Flyway aplica las migraciones al arrancar.
 4. Swagger UI estará disponible en `http://localhost:8080/swagger-ui.html`.
 
 Next.js actúa como BFF: el navegador solicita `/api/...` al mismo origen y la ruta servidora reenvía la cookie de sesión y el token CSRF a Spring. Copia el `.env.example` de la raíz a `.env.local` y configura `SPRING_BACKEND_URL` con el origen interno de Spring; esta variable solo está disponible en el servidor de Next.js. El uso de HTTP se limita a localhost para desarrollo; utiliza HTTPS entre Next.js y Spring en producción y mantén Spring en una red privada.
 
-El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` y `CORS_ALLOWED_ORIGINS`. Usa HTTPS para navegador → Next.js y Next.js → Spring, y conserva `SESSION_COOKIE_SECURE=true`. La cookie que Next.js entrega al navegador es `HttpOnly`, `Secure` para orígenes de producción y `SameSite=Lax`; en localhost sobre HTTP se omite `Secure` para poder probar el flujo. Spring valida cada solicitud protegida. OpenAPI queda deshabilitado en producción por defecto; puede habilitarse con `OPENAPI_ENABLED=true`.
+El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD`, `CORS_ALLOWED_ORIGINS` y `MOBILE_JWT_SECRET`. Usa HTTPS para navegador → Next.js y Next.js → Spring, y conserva `SESSION_COOKIE_SECURE=true`. La cookie que Next.js entrega al navegador es `HttpOnly`, `Secure` para orígenes de producción y `SameSite=Lax`; en localhost sobre HTTP se omite `Secure` para poder probar el flujo. Spring valida cada solicitud protegida. OpenAPI queda deshabilitado en producción por defecto; puede habilitarse con `OPENAPI_ENABLED=true`.
 
 Para entregar recuperación de contraseña configura el correo SMTP con `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` y `MAIL_FROM`. `NEXO_PASSWORD_RESET_URL` debe apuntar a la página web pública `/reset-password` (por ejemplo, `https://tienda.example.com/reset-password` en producción); su valor local predeterminado es `http://localhost:3000/reset-password`.
 
@@ -42,7 +42,7 @@ Para entregar recuperación de contraseña configura el correo SMTP con `MAIL_HO
 
 `docker compose up -d` crea una base local persistente en la computadora actual; no comparte datos con otras computadoras. El equipo puede utilizar una instancia PostgreSQL compartida; el proveedor, host, nombre de proyecto y credenciales se distribuyen únicamente por el canal privado del equipo. La API se conecta por TLS con verificación del certificado.
 
-1. Danny comparte por un canal privado el archivo `backend/.env.team` de la instancia Neon. Cada integrante lo coloca en `backend/.env.team` dentro de su copia del repositorio. Si hay que reconstruirlo, copia `backend/env.team.example` como `backend/.env.team` y completa las credenciales recibidas. `.env.team` está ignorado por Git; no lo subas ni lo envíes dentro del repositorio.
+1. Danny comparte por un canal privado el archivo `backend/.env.team` de la instancia Neon. Cada integrante lo coloca en `backend/.env.team` dentro de su copia del repositorio. Si hay que reconstruirlo, copia `backend/env.team.example` como `backend/.env.team`, completa las credenciales recibidas y configura una clave `MOBILE_JWT_SECRET` común para todas las instancias del equipo. `.env.team` está ignorado por Git; no lo subas ni lo envíes dentro del repositorio.
 2. Si ya están levantados los servicios locales, detenlos desde la raíz con `docker compose down`. Esto conserva el volumen y los datos locales. Para levantar la aplicación usando la base compartida, ejecuta desde la raíz:
 
    ```powershell
@@ -61,7 +61,7 @@ No se crean cuentas ni contraseñas en Flyway. Para crear el primer administrado
 
 ## API de identidad
 
-Las escrituras con sesión web requieren un token CSRF; las rutas públicas de recuperación de contraseña están exentas y limitadas por IP para que también puedan usarse desde la app móvil. Las operaciones privadas requieren una sesión. Obtén el token antes de iniciar sesión o registrarte y envía la cookie de sesión y la cabecera `X-CSRF-TOKEN` en cada escritura protegida. El navegador usa `credentials: include` con rutas relativas; la autorización se aplica en Spring.
+Las escrituras con sesión web requieren un token CSRF; las rutas públicas de recuperación de contraseña están exentas y limitadas por IP para que también puedan usarse desde la app móvil. Obtén el token antes de iniciar sesión o registrarte y envía la cookie de sesión y `X-CSRF-TOKEN` en cada escritura web protegida. El navegador usa `credentials: include` con rutas relativas; Spring aplica la autorización. La app móvil autentica con JWT Bearer; sus escrituras solo evitan CSRF después de validar el token.
 
 | Método y ruta | Acceso | Resultado |
 |---|---|---|
@@ -96,9 +96,11 @@ Las promociones se administran en `GET/PUT /api/business/promotions`; los compro
 
 ## Sesiones móviles
 
-Las apps móviles usan un token opaco independiente de la cookie web. `POST /api/mobile/auth/login` valida las mismas cuentas, devuelve el token una sola vez y guarda solo su hash SHA-256 en PostgreSQL. El token dura siete días por defecto (`MOBILE_ACCESS_TOKEN_LIFETIME` permite cambiarlo), se revoca al cerrar sesión y se rechaza si la cuenta deja de estar activa o queda bloqueada. Las peticiones móviles protegidas envían `Authorization: Bearer <token>`; Spring carga los permisos vigentes del usuario en cada petición. Estas rutas no dependen del BFF de Next.js.
+Las apps móviles usan un JWT firmado con HS256, independiente de la cookie web. `POST /api/mobile/auth/login` valida las mismas cuentas y devuelve el JWT una sola vez. Incluye emisor, audiencia móvil, UUID del usuario (`sub`), identificador único (`jti`), fecha de emisión y vencimiento. Spring verifica algoritmo, firma, fechas y claims; además guarda solo el hash SHA-256 del JWT en PostgreSQL para conservar la revocación inmediata al cerrar sesión. En cada petición protegida el backend consulta ese registro, verifica que la cuenta siga activa y carga sus permisos vigentes. El JWT dura siete días por defecto (`MOBILE_ACCESS_TOKEN_LIFETIME` permite cambiarlo). Las peticiones móviles envían `Authorization: Bearer <JWT>` y la app lo guarda con Expo SecureStore. Estas rutas no dependen del BFF de Next.js.
 
-Las cuentas pueden activar TOTP desde **Mi perfil → Verificación en dos pasos**. La misma verificación se pide en los logins web y móvil. Antes de enrolar usuarios, configura `MFA_ENCRYPTION_KEY` como Base64 de 32 bytes aleatorios (por ejemplo, `openssl rand -base64 32`) en el gestor de secretos o archivo de entorno ignorado por Git. Conserva esa clave en una copia segura y no la rotes sin migrar los secretos; sin ella, las cuentas con MFA habilitado no podrán autenticar. El enrolamiento entrega diez códigos de recuperación, que se muestran una sola vez.
+Configura `MOBILE_JWT_SECRET` como Base64 de exactamente 32 bytes aleatorios usando `openssl rand -base64 32`. Mantén la misma clave en todas las instancias que comparten la base de datos; no la guardes en Git ni la reutilices como `MFA_ENCRYPTION_KEY`. Si la rotas, los JWT móviles emitidos con la clave anterior dejan de funcionar y el personal deberá iniciar sesión nuevamente.
+
+MFA TOTP es obligatoria para las cuentas internas y opcional para clientes. El personal completa el enrolamiento desde **Mi perfil → Verificación en dos pasos**; el login web y móvil exige el segundo factor una vez activado, y las cuentas de personal sin enrolar quedan limitadas hasta completarlo. Antes de iniciar Spring, configura `MFA_ENCRYPTION_KEY` como Base64 de 32 bytes aleatorios (por ejemplo, `openssl rand -base64 32`) en el gestor de secretos o archivo de entorno ignorado por Git. Conserva esa clave en una copia segura y no la rotes sin migrar los secretos. El enrolamiento entrega diez códigos de recuperación, que se muestran una sola vez.
 
 | Método y ruta | Acceso | Resultado |
 |---|---|---|
@@ -106,7 +108,7 @@ Las cuentas pueden activar TOTP desde **Mi perfil → Verificación en dos pasos
 | `GET /api/mobile/auth/me` | Bearer token | Usuario autenticado y permisos vigentes |
 | `POST /api/mobile/auth/logout` | Bearer token | `204 No Content` y revoca el token |
 
-La protección CSRF se conserva para las sesiones web con cookie. Solo las rutas `/api/mobile/**` aceptan autenticación móvil `Bearer` sin CSRF; el resto de la API mantiene el token CSRF incluso si recibe ese encabezado. Usa HTTPS fuera del entorno local.
+La protección CSRF se conserva para las sesiones web con cookie. Las operaciones bajo `/api/mobile/**`, `/api/business/**`, `/api/users/**` y `/api/roles/**` se eximen de CSRF únicamente si el backend ya validó el JWT Bearer de esa solicitud. Presentar un encabezado Bearer inválido rechaza la petición, incluso cuando se acompaña de una cookie web. El login móvil tiene su propia exención pública; el resto de las rutas conserva CSRF. Usa HTTPS fuera del entorno local.
 
 Para probar Expo Go en un teléfono físico dentro de la red local, inicia Spring con `SERVER_ADDRESS=0.0.0.0`, configura el firewall para permitir el acceso desde esa red y usa una URL alcanzable desde el dispositivo en `EXPO_PUBLIC_API_URL`. No expongas el servidor de desarrollo a Internet.
 
