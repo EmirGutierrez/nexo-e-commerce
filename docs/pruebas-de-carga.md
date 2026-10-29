@@ -1,6 +1,6 @@
 # Monitoreo y pruebas con k6, Prometheus y Grafana
 
-La instrumentación cubre el backend local y el despliegue de producción. Spring Boot exporta métricas HTTP, JVM y del pool PostgreSQL; Prometheus las recoge y Grafana carga dos dashboards: **NEXO · Backend** y **NEXO · Pruebas k6**. k6 consulta únicamente `GET /store` y envía los resultados mediante Prometheus remote write.
+La instrumentación cubre el backend local y el despliegue de producción. Spring Boot exporta métricas HTTP, JVM y del pool PostgreSQL; Prometheus las recoge y Grafana carga dashboards para **NEXO · Backend**, **NEXO · Seguridad** y **NEXO · Pruebas k6**. Prometheus evalúa reglas de disponibilidad, errores HTTP 5xx, picos de inicios de sesión rechazados y activación repetida del límite de acceso. k6 consulta únicamente `GET /store` y envía los resultados mediante Prometheus remote write.
 
 ## Ejecutar localmente
 
@@ -25,6 +25,8 @@ La instrumentación cubre el backend local y el despliegue de producción. Sprin
 Abre Grafana en `http://localhost:13001` con el usuario `admin` y la contraseña local `nexo-local-only`. Para cambiarla, define `GRAFANA_ADMIN_PASSWORD` antes de iniciar Compose. Prometheus está en `http://localhost:19090`. El endpoint local de métricas se sirve en `http://localhost:18080/actuator/prometheus`; el puerto del host queda ligado a loopback.
 
 En **NEXO · Backend** verás el estado del scrape, solicitudes por método y ruta, latencias p95/p99, errores 5xx, heap/CPU/hilos de Java y conexiones/espera del pool PostgreSQL. En **NEXO · Pruebas k6**, usa **Test ID** para elegir una ejecución; por defecto se muestran todas las que están dentro del rango de tiempo. Los percentiles de k6 se conservan como datos históricos y Grafana los formatea en milisegundos.
+
+En **NEXO · Seguridad** aparecen las alertas activas, errores 5xx e intentos de acceso rechazados o limitados. Las reglas no guardan correos, direcciones IP ni identificadores de usuario. Una alerta puede verse en Grafana después de iniciar sesión; el envío proactivo por correo o webhook requiere configurar un canal de notificación y sus credenciales en la VPS.
 
 ### Probar la tienda de producción desde el equipo local
 
@@ -60,6 +62,8 @@ https://<SITE_DOMAIN>/monitoring/
 Inicia sesión con el usuario y la contraseña de Grafana configurados en la VPS. El puerto de Prometheus no se publica. Spring atiende métricas en el puerto interno 8081 y exige `PROMETHEUS_SCRAPE_TOKEN`; Caddy no enruta ese endpoint. Prometheus conserva siete días de métricas y Grafana guarda sus datos en volúmenes persistentes.
 
 El smoke test de producción mide la aplicación en la red interna de Docker, no la latencia de Cloudflare ni la de la conexión del usuario. El workflow ya comprueba aparte que la web y la API públicas responden.
+
+Prometheus conserva las reglas en `monitoring/prometheus/alerts.yml` y el CI valida su sintaxis con `promtool`. Las alertas son señales operativas; no bloquean tráfico ni reemplazan Cloudflare, los controles de acceso de Spring o la revisión de eventos de seguridad.
 
 ## Revisar resultados
 

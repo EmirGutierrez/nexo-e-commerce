@@ -143,6 +143,16 @@ jobs:
       - name: Validar Compose de producción
         run: docker compose --env-file deploy/production.env.example --file compose.prod.yaml config --quiet
 
+      - name: Validar reglas de alertas Prometheus
+        run: >-
+          docker run --rm --entrypoint promtool
+          --volume "$PWD/monitoring/prometheus:/etc/prometheus:ro"
+          prom/prometheus:v3.15.1@sha256:fa3302279710be2f21a8301ec17a8b4f2301fd829bd113839b3b6b02b6f191a2
+          check rules /etc/prometheus/alerts.yml
+
+      - name: Validar dashboard de seguridad
+        run: python3 -m json.tool monitoring/grafana/dashboards/nexo-security.json > /dev/null
+
       - name: Validar Caddyfile de producción
         run: docker run --rm --volume "$PWD/deploy/Caddyfile:/etc/caddy/Caddyfile:ro" --env SITE_DOMAIN=example.com caddy:2-alpine@sha256:d8542f48d34a9cf4e4c11a478865229840e87e4c96ea3f439101f31a5d35f75f caddy validate --config /etc/caddy/Caddyfile
 
@@ -546,11 +556,18 @@ jobs:
           curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors --dump-header "$frontend_headers" https://nexo-e-commerce.com/ -o /dev/null
           curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors --dump-header "$api_headers" https://api.nexo-e-commerce.com/api/catalog/products -o /dev/null
           curl --fail --silent --show-error --retry 10 --retry-delay 5 --retry-all-errors https://nexo-e-commerce.com/monitoring/login -o "$monitoring_body"
+          metrics_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' https://api.nexo-e-commerce.com/actuator/prometheus)"
+          dashboard_status="$(curl --silent --show-error --output /dev/null --write-out '%{http_code}' https://nexo-e-commerce.com/monitoring/api/dashboards/uid/nexo-security)"
           grep --ignore-case --quiet '^Content-Security-Policy:' "$frontend_headers"
           grep --ignore-case --quiet '^X-Content-Type-Options: *nosniff' "$frontend_headers"
           grep --ignore-case --quiet '^Content-Security-Policy:' "$api_headers"
           grep --ignore-case --quiet '^X-Content-Type-Options: *nosniff' "$api_headers"
           grep --ignore-case --quiet 'grafana' "$monitoring_body"
+          test "$metrics_status" = 401 || { echo "El endpoint de métricas debe rechazar solicitudes sin token"; exit 1; }
+          case "$dashboard_status" in
+            401|302|403) ;;
+            *) echo "Grafana permitió o no protegió correctamente el dashboard (HTTP $dashboard_status)"; exit 1 ;;
+          esac
 
       - name: Limpiar llaves temporales del runner
         if: ${{ always() }}

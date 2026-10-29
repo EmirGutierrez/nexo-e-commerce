@@ -1,0 +1,49 @@
+groups:
+  - name: nexo-availability
+    interval: 15s
+    rules:
+      - alert: NexoBackendScrapeUnavailable
+        expr: up{job="nexo-backend"} == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "Prometheus no puede consultar el backend NEXO"
+          description: "El backend no responde al scrape durante 2 minutos en {{ $labels.environment }}."
+
+      - alert: NexoHighHttp5xxRate
+        expr: |
+          (
+            sum by (environment) (rate(http_server_requests_seconds_count{job="nexo-backend", status=~"5..", uri!~"/actuator.*"}[5m]))
+            /
+            clamp_min(sum by (environment) (rate(http_server_requests_seconds_count{job="nexo-backend", uri!~"/actuator.*"}[5m])), 0.1)
+          ) > 0.05
+          and
+          sum by (environment) (rate(http_server_requests_seconds_count{job="nexo-backend", uri!~"/actuator.*"}[5m])) > 0.2
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Aumentaron los errores del backend NEXO"
+          description: "Más del 5 % de las solicitudes devuelve HTTP 5xx durante 5 minutos en {{ $labels.environment }}."
+
+  - name: nexo-security
+    interval: 15s
+    rules:
+      - alert: NexoLoginFailureSpike
+        expr: sum by (environment) (increase(http_server_requests_seconds_count{job="nexo-backend", uri=~"/api/(mobile/)?auth/login", status="401"}[10m])) >= 25
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Pico de inicios de sesión rechazados"
+          description: "Se registraron al menos 25 respuestas HTTP 401 en los endpoints de acceso durante 10 minutos en {{ $labels.environment }}."
+
+      - alert: NexoLoginRateLimitSpike
+        expr: sum by (environment) (increase(http_server_requests_seconds_count{job="nexo-backend", uri=~"/api/(mobile/)?auth/login", status="429"}[5m])) >= 10
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "El límite de intentos de acceso se activó repetidamente"
+          description: "Se registraron al menos 10 respuestas HTTP 429 en los endpoints de acceso durante 5 minutos en {{ $labels.environment }}."
