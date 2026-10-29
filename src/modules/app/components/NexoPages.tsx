@@ -147,8 +147,11 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
   const requested = typeof window === 'undefined' ? null : new URLSearchParams(window.location.search).get('redirect');
   const alreadyAtDestination = Boolean(user && userType);
   useEffect(() => {
-    if (!authLoading && alreadyAtDestination && userType) router.replace(resolveLoginDestination(userType, role, requested, user?.permissions));
-  }, [authLoading, alreadyAtDestination, userType, role, user?.permissions, requested, router]);
+    if (!authLoading && alreadyAtDestination && userType) {
+      router.replace(user?.mfaSetupRequired ? '/admin/profile?mfa=required'
+        : resolveLoginDestination(userType, role, requested, user?.permissions));
+    }
+  }, [authLoading, alreadyAtDestination, userType, role, user?.id, user?.permissions, user?.mfaSetupRequired, requested, router]);
   if (authLoading || alreadyAtDestination) return <AuthPending />;
 
   const submit = async (event: React.FormEvent) => {
@@ -160,7 +163,8 @@ function LoginPage({ initialKind }: { initialKind?: 'admin' | 'customer' }) {
         setError('Correo o contraseña incorrectos.');
         return;
       }
-      router.push(resolveLoginDestination(session.kind, session.user.role, requested, session.user.permissions));
+      router.push(session.user.mfaSetupRequired ? '/admin/profile?mfa=required'
+        : resolveLoginDestination(session.kind, session.user.role, requested, session.user.permissions));
     } catch (caught) {
       if (caught instanceof ApiError && (caught.code === 'MFA_REQUIRED' || caught.code === 'MFA_INVALID')) {
         setMfaRequired(true);
@@ -431,10 +435,12 @@ export function AdminWorkspace({ children }: { children: React.ReactNode }) {
   const { user, userType, role, authLoading, authIssue, retrySession } = useApp();
   const pathname = usePathname();
   const router = useRouter();
-  const authorized = Boolean(user && userType === 'admin' && role && canVisitAdminPath(role, pathname, user.permissions));
+  const mandatoryMfaSetup = Boolean(user?.mfaSetupRequired && pathname !== '/admin/profile');
+  const authorized = Boolean(user && userType === 'admin' && role && !mandatoryMfaSetup && canVisitAdminPath(role, pathname, user.permissions));
   useEffect(() => {
     if (authLoading || authIssue) return;
     if (!user || !userType) router.replace(`/access?redirect=${encodeURIComponent(pathname)}`);
+    else if (user.mfaSetupRequired && pathname !== '/admin/profile') router.replace('/admin/profile?mfa=required');
     else if (userType !== 'admin' || !role || !canVisitAdminPath(role, pathname, user.permissions)) router.replace(resolveLoginDestination(userType, role, null, user.permissions));
   }, [authLoading, authIssue, user, userType, role, pathname, router]);
   if (!authLoading && authIssue && !user) return <main className="admin-auth-unavailable" role="alert"><h1>No se pudo comprobar la sesión</h1><p>{authIssue}</p><button className="button button-primary" type="button" onClick={retrySession}>Reintentar</button></main>;

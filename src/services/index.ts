@@ -62,13 +62,23 @@ function mapApiUser(user: ApiUser): User {
   const initials = user.name.trim().split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join('').toUpperCase();
   return { id: user.id, name: user.name, email: user.email, role: user.role as User['role'], initials,
     status: user.status === 'ACTIVE' ? 'Activo' : user.status === 'PENDING' ? 'Pendiente' : 'Inactivo',
-    permissions: user.permissions || [], lastLoginAt: user.lastLoginAt };
+    permissions: user.permissions || [], lastLoginAt: user.lastLoginAt, mfaSetupRequired: false };
 }
 
 export const authService = {
   login: async (email: string, password: string, mfaCode?: string): Promise<User | null> => {
-    try { const user = await apiClient.post<ApiUser>('/api/auth/login', { email, password, ...(mfaCode ? { mfaCode } : {}) }); clearCsrfToken(); return mapApiUser(user); }
-    catch (error) { if (error instanceof ApiError && error.status === 401 && error.code !== 'MFA_REQUIRED' && error.code !== 'MFA_INVALID') return null; throw error; }
+    try {
+      const user = mapApiUser(await apiClient.post<ApiUser>('/api/auth/login', { email, password, ...(mfaCode ? { mfaCode } : {}) }));
+      clearCsrfToken();
+      const status = await apiClient.get<MfaStatus>('/api/auth/mfa');
+      user.mfaSetupRequired = status.required && !status.enabled;
+      return user;
+    }
+    catch (error) {
+      if (error instanceof ApiError && error.status === 401
+          && !['MFA_REQUIRED', 'MFA_INVALID', 'MFA_ENROLLMENT_REQUIRED', 'MFA_REAUTHENTICATION_REQUIRED'].includes(error.code || '')) return null;
+      throw error;
+    }
   },
   registerCustomer: async (name: string, email: string, password: string): Promise<User> => {
     const user = await apiClient.post<ApiUser>('/api/auth/register', { name, email, password }); clearCsrfToken(); return mapApiUser(user);
@@ -88,12 +98,17 @@ export const authService = {
     clearCsrfToken();
   },
   currentUser: async (): Promise<User | null> => {
-    try { return mapApiUser(await apiClient.get<ApiUser>('/api/auth/me')); }
+    try {
+      const user = mapApiUser(await apiClient.get<ApiUser>('/api/auth/me'));
+      const status = await apiClient.get<MfaStatus>('/api/auth/mfa');
+      user.mfaSetupRequired = status.required && !status.enabled;
+      return user;
+    }
     catch (error) { if (error instanceof ApiError && error.status === 401) return null; throw error; }
   },
 };
 
-export interface MfaStatus { enabled: boolean; enrollmentPending: boolean; recoveryCodesRemaining: number }
+export interface MfaStatus { required: boolean; enabled: boolean; enrollmentPending: boolean; recoveryCodesRemaining: number }
 export interface MfaEnrollment { secret: string; otpauthUri: string }
 export const mfaService = {
   status: () => apiClient.get<MfaStatus>('/api/auth/mfa'),

@@ -2,6 +2,7 @@ import { createContext, useCallback, useContext, useEffect, useMemo, useRef, use
 import { products } from '../data/mockData';
 import { authService, paymentSettingsService, userService } from '../services';
 import { roleService } from '../services/roleService';
+import { MFA_ENROLLMENT_REQUIRED_EVENT, MFA_REAUTHENTICATION_REQUIRED_EVENT } from '../shared/services/http-client';
 import type { CartItem, PaymentMethod, PaymentMethodSettings, Product, Role, User } from '../types';
 
 interface AppContextValue {
@@ -19,6 +20,7 @@ interface AppContextValue {
   authIssue: string | null;
   retrySession: () => void;
   login: (email: string, password: string, mfaCode?: string) => Promise<{ user: User; kind: 'admin' | 'customer' } | null>;
+  refreshCurrentUser: () => Promise<User | null>;
   registerCustomer: (name: string, email: string, password: string) => Promise<User>;
   updateProfile: (name: string) => Promise<User>;
   logout: () => Promise<void>;
@@ -58,6 +60,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [adminAlerts, setAdminAlerts] = useState<AdminAlert[]>([]);
   const seenAdminAlerts = useRef(new Set<string>());
   const currentLowStockKey = useRef<string | null>(null);
+  const mfaReauthInProgress = useRef(false);
   const notifyAdmin = useCallback((alert: Omit<AdminAlert, 'id'>) => {
     if (seenAdminAlerts.current.has(alert.dedupeKey)) return;
     seenAdminAlerts.current.add(alert.dedupeKey);
@@ -128,6 +131,25 @@ export function AppProvider({ children }: { children: ReactNode }) {
     return () => { active = false; clearTimeout(timeout); };
   }, [sessionCheck]);
 
+  useEffect(() => {
+    const requireMfaEnrollment = () => {
+      setUser((current) => current ? { ...current, mfaSetupRequired: true } : current);
+    };
+    const requireMfaReauthentication = () => {
+      if (mfaReauthInProgress.current) return;
+      mfaReauthInProgress.current = true;
+      roleService.setAuthenticatedPermissions(null);
+      setUser(null); setUserType(null); setRole(null);
+      void authService.logout().catch(() => undefined).finally(() => { mfaReauthInProgress.current = false; });
+    };
+    window.addEventListener(MFA_ENROLLMENT_REQUIRED_EVENT, requireMfaEnrollment);
+    window.addEventListener(MFA_REAUTHENTICATION_REQUIRED_EVENT, requireMfaReauthentication);
+    return () => {
+      window.removeEventListener(MFA_ENROLLMENT_REQUIRED_EVENT, requireMfaEnrollment);
+      window.removeEventListener(MFA_REAUTHENTICATION_REQUIRED_EVENT, requireMfaReauthentication);
+    };
+  }, []);
+
   useEffect(() => { paymentSettingsService.load().then(setPaymentMethods).catch(() => undefined); }, []);
 
   const value = useMemo<AppContextValue>(() => ({
@@ -162,6 +184,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     login: async (email, password, mfaCode) => {
       const account = await authService.login(email, password, mfaCode);
       if (!account) return null;
+      mfaReauthInProgress.current = false;
       setAuthIssue(null);
       const kind = account.role === 'customer' ? 'customer' : 'admin';
       roleService.setAuthenticatedPermissions(account.role, account.permissions);
@@ -181,7 +204,21 @@ export function AppProvider({ children }: { children: ReactNode }) {
       setUser(updated);
       return updated;
     },
+    refreshCurrentUser: async () => {
+      const currentUser = await authService.currentUser();
+      setUser(currentUser);
+      if (!currentUser) {
+        setUserType(null); setRole(null);
+        roleService.setAuthenticatedPermissions(null);
+        return null;
+      }
+      const kind = currentUser.role === 'customer' ? 'customer' : 'admin';
+      setUserType(kind); setRole(currentUser.role);
+      roleService.setAuthenticatedPermissions(currentUser.role, currentUser.permissions);
+      return currentUser;
+    },
     logout: async () => {
+      mfaReauthInProgress.current = false;
       if (userType) await authService.logout();
       roleService.setAuthenticatedPermissions(null);
       setUser(null); setUserType(null); setRole(null);

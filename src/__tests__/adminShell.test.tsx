@@ -8,7 +8,7 @@ import { dashboardService, productInventoryService } from '../services';
 
 const route = vi.hoisted(() => ({ pathname: '/admin/support', push: vi.fn(), replace: vi.fn() }));
 const app = vi.hoisted(() => ({
-  user: { id: 'user-1', name: 'Emir Gutierrez', email: 'emir@example.test', role: 'superadmin', initials: 'EG', status: 'Activo', permissions: ['*'] },
+  user: {} as { id: string; name: string; email: string; role: string; initials: string; status: string; permissions: string[]; mfaSetupRequired?: boolean },
   userType: 'admin',
   role: 'superadmin',
   authLoading: false,
@@ -91,6 +91,16 @@ describe('navegación privada y perfil', () => {
     render(<AdminWorkspace><div>Contenido restringido</div></AdminWorkspace>);
 
     await waitFor(() => expect(route.replace).toHaveBeenCalledWith('/admin/offers'));
+  });
+
+  it('limita las cuentas de equipo sin MFA al perfil aunque pidan otro módulo directamente', async () => {
+    route.pathname = '/admin/sales';
+    app.user = { ...app.user, mfaSetupRequired: true };
+
+    render(<AdminWorkspace><div>Contenido restringido</div></AdminWorkspace>);
+
+    await waitFor(() => expect(route.replace).toHaveBeenCalledWith('/admin/profile?mfa=required'));
+    expect(screen.queryByText('Contenido restringido')).toBeNull();
   });
 
   it('no muestra ofertas con permiso create sin view y bloquea la ruta directa', async () => {
