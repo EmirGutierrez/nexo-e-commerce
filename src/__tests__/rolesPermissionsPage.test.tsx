@@ -51,6 +51,28 @@ describe('módulos asignados por rol', () => {
     expect(screen.getByText(/Cambios sin guardar:/)).toBeTruthy();
   });
 
+  it('cambia de rol cargando sus permisos guardados y mantiene protegido al superadministrador', async () => {
+    const allPermissions = permissionsFor(permissionModules.map(({ id }) => id));
+    vi.spyOn(roleService, 'list').mockResolvedValue([
+      ...roles,
+      { id: 'superadmin', name: 'Súper Administrador', users: 1, permissions: allPermissions },
+    ]);
+    render(<RolesPermissionsPage />);
+
+    await screen.findByRole('heading', { name: 'Administrador' });
+    const saveButton = screen.getByRole('button', { name: 'Guardar permisos' }) as HTMLButtonElement;
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Seleccionar todos los permisos de Ingresos y egresos' }));
+    expect(saveButton.disabled).toBe(false);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Rol que vas a configurar' }), { target: { value: 'sales' } });
+    expect(saveButton.disabled).toBe(true);
+    expect((screen.getByRole('checkbox', { name: 'Seleccionar todos los permisos de Ventas' }) as HTMLInputElement).checked).toBe(true);
+
+    fireEvent.change(screen.getByRole('combobox', { name: 'Rol que vas a configurar' }), { target: { value: 'superadmin' } });
+    expect(screen.getByText('Acceso completo protegido')).toBeTruthy();
+    expect(saveButton.disabled).toBe(true);
+  });
+
   it('muestra los módulos que devuelve el backend para cada rol', async () => {
     render(<RolesPermissionsPage />);
 
