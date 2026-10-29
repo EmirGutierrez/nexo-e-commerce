@@ -16,6 +16,8 @@ interface AppContextValue {
   user: User | null;
   userType: 'admin' | 'customer' | null;
   authLoading: boolean;
+  authIssue: string | null;
+  retrySession: () => void;
   login: (email: string, password: string, mfaCode?: string) => Promise<{ user: User; kind: 'admin' | 'customer' } | null>;
   registerCustomer: (name: string, email: string, password: string) => Promise<User>;
   updateProfile: (name: string) => Promise<User>;
@@ -50,9 +52,12 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const [userType, setUserType] = useState<'admin' | 'customer' | null>(null);
   const [role, setRole] = useState<Role | null>(null);
   const [authLoading, setAuthLoading] = useState(true);
+  const [authIssue, setAuthIssue] = useState<string | null>(null);
+  const [sessionCheck, setSessionCheck] = useState(0);
   const [paymentMethods, setPaymentMethods] = useState<PaymentMethodSettings>(paymentSettingsService.getCurrent);
   const [adminAlerts, setAdminAlerts] = useState<AdminAlert[]>([]);
   const seenAdminAlerts = useRef(new Set<string>());
+  const currentLowStockKey = useRef<string | null>(null);
   const notifyAdmin = useCallback((alert: Omit<AdminAlert, 'id'>) => {
     if (seenAdminAlerts.current.has(alert.dedupeKey)) return;
     seenAdminAlerts.current.add(alert.dedupeKey);
@@ -61,9 +66,18 @@ export function AppProvider({ children }: { children: ReactNode }) {
   const dismissAdminAlert = useCallback(() => setAdminAlerts((current) => current.slice(1)), []);
   const reportLowStock = useCallback((rows: Pick<Product, 'id' | 'name' | 'stock'>[]) => {
     const low = rows.filter((product) => product.stock < 10).sort((a, b) => a.id.localeCompare(b.id));
-    if (!low.length) return;
+    const previousKey = currentLowStockKey.current;
+    if (!low.length) {
+      if (previousKey) seenAdminAlerts.current.delete(previousKey);
+      currentLowStockKey.current = null;
+      return;
+    }
+    const dedupeKey = `low-stock:${low.map((product) => `${product.id}:${product.stock}`).join('|')}`;
+    if (dedupeKey === previousKey) return;
+    if (previousKey) seenAdminAlerts.current.delete(previousKey);
+    currentLowStockKey.current = dedupeKey;
     const names = low.slice(0, 4).map((product) => `${product.name} (${product.stock})`).join(', ');
-    notifyAdmin({ dedupeKey: `low-stock:${low.map((product) => `${product.id}:${product.stock}`).join('|')}`, type: 'warning', title: `${low.length} producto${low.length === 1 ? '' : 's'} requieren revisión de stock`, entity: names + (low.length > 4 ? ` y ${low.length - 4} más` : ''), message: 'Hay productos con menos de 10 unidades o agotados en el inventario.', nextAction: 'Revisar existencias y planificar reposición.', actionTo: '/admin/inventory/alerts' });
+    notifyAdmin({ dedupeKey, type: 'warning', title: `${low.length} producto${low.length === 1 ? '' : 's'} requieren revisión de stock`, entity: names + (low.length > 4 ? ` y ${low.length - 4} más` : ''), message: 'Hay productos con menos de 10 unidades o agotados en el inventario.', nextAction: 'Revisar existencias y planificar reposición.', actionTo: '/admin/inventory/alerts' });
   }, [notifyAdmin]);
 
   useEffect(() => {
@@ -83,27 +97,36 @@ export function AppProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     let active = true;
     let timeout: ReturnType<typeof setTimeout>;
-    const sessionCheck = Promise.race([
-      authService.currentUser(),
-      new Promise<null>((resolve) => { timeout = setTimeout(() => resolve(null), 8000); }),
-    ]);
-    sessionCheck
+    setAuthLoading(true);
+    setAuthIssue(null);
+    timeout = setTimeout(() => {
+      if (!active) return;
+      setAuthIssue('La sesión aún no se pudo verificar. Revisa la conexión y vuelve a intentarlo.');
+      setAuthLoading(false);
+    }, 8000);
+    authService.currentUser()
       .then((currentUser) => {
-        if (!active || !currentUser) return;
+        if (!active) return;
+        setAuthIssue(null);
+        if (!currentUser) {
+          setUser(null); setUserType(null); setRole(null);
+          roleService.setAuthenticatedPermissions(null);
+          return;
+        }
         setUser(currentUser);
         roleService.setAuthenticatedPermissions(currentUser.role, currentUser.permissions);
         setUserType(currentUser.role === 'customer' ? 'customer' : 'admin');
         setRole(currentUser.role);
       })
       .catch(() => {
-        // El frontend público sigue disponible si la API está apagada.
+        if (active) setAuthIssue('No se pudo verificar la sesión. La cuenta no se cerró; intenta comprobarla de nuevo.');
       })
       .finally(() => {
         clearTimeout(timeout);
         if (active) setAuthLoading(false);
       });
     return () => { active = false; clearTimeout(timeout); };
-  }, []);
+  }, [sessionCheck]);
 
   useEffect(() => { paymentSettingsService.load().then(setPaymentMethods).catch(() => undefined); }, []);
 
@@ -113,19 +136,33 @@ export function AppProvider({ children }: { children: ReactNode }) {
     cartCount: cart.reduce((sum, item) => sum + item.quantity, 0),
     cartTotal: cart.reduce((sum, item) => sum + item.price * item.quantity, 0),
     addToCart: (product) => setCart((current) => {
+      const availableStock = Number.isSafeInteger(product.stock) && product.stock > 0 ? product.stock : 0;
+      if (availableStock === 0) return current;
       const found = current.find((item) => item.id === product.id);
-      if (found) return current.map((item) => item.id === product.id ? { ...item, quantity: Math.min(item.quantity + 1, product.stock) } : item);
-      return [...current, { ...product, quantity: 1 }];
+      if (found) return current.map((item) => item.id === product.id ? {
+        ...item,
+        stock: availableStock,
+        quantity: Math.min(Number.isSafeInteger(item.quantity) && item.quantity > 0 ? item.quantity + 1 : 1, availableStock),
+      } : item);
+      return [...current, { ...product, stock: availableStock, quantity: 1 }];
     }),
-    updateQuantity: (id, quantity) => setCart((current) => current.map((item) => item.id === id ? { ...item, quantity: Math.max(1, Math.min(quantity, item.stock)) } : item)),
+    updateQuantity: (id, quantity) => setCart((current) => {
+      if (!Number.isSafeInteger(quantity) || quantity < 1) return current;
+      return current.map((item) => item.id === id && item.stock > 0
+        ? { ...item, quantity: Math.min(quantity, item.stock) }
+        : item);
+    }),
     removeFromCart: (id) => setCart((current) => current.filter((item) => item.id !== id)),
     clearCart: () => setCart([]),
     user,
     userType,
     authLoading,
+    authIssue,
+    retrySession: () => { setAuthIssue(null); setAuthLoading(true); setSessionCheck((current) => current + 1); },
     login: async (email, password, mfaCode) => {
       const account = await authService.login(email, password, mfaCode);
       if (!account) return null;
+      setAuthIssue(null);
       const kind = account.role === 'customer' ? 'customer' : 'admin';
       roleService.setAuthenticatedPermissions(account.role, account.permissions);
       setUser(account); setUserType(kind); setRole(account.role);
@@ -133,6 +170,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     },
     registerCustomer: async (name, email, password) => {
       const customer = await authService.registerCustomer(name, email, password);
+      setAuthIssue(null);
       roleService.setAuthenticatedPermissions(customer.role, customer.permissions);
       setUser(customer); setUserType('customer'); setRole(customer.role);
       return customer;
@@ -147,6 +185,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
       if (userType) await authService.logout();
       roleService.setAuthenticatedPermissions(null);
       setUser(null); setUserType(null); setRole(null);
+      setAuthIssue(null);
     },
     role,
     assignRole: (userId, nextRole) => {
@@ -168,7 +207,7 @@ export function AppProvider({ children }: { children: ReactNode }) {
     notifyAdmin,
     dismissAdminAlert,
     reportLowStock,
-  }), [cart, cartLoaded, user, userType, authLoading, role, paymentMethods, adminAlerts, notifyAdmin, dismissAdminAlert, reportLowStock]);
+  }), [cart, cartLoaded, user, userType, authLoading, authIssue, role, paymentMethods, adminAlerts, notifyAdmin, dismissAdminAlert, reportLowStock, sessionCheck]);
 
   return <AppContext.Provider value={value}>{children}</AppContext.Provider>;
 }

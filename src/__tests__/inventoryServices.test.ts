@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { adminTableService, brandService, inventoryService, userService } from '../services';
+import { accountingService, adminTableService, brandService, customerService, inventoryService, merchandisePurchaseService, userService } from '../services';
 import { apiClient } from '../shared/services/http-client';
 
 const productRecord = {
@@ -14,6 +14,31 @@ const productRecord = {
 afterEach(() => vi.restoreAllMocks());
 
 describe('servicios de inventario', () => {
+  it('envía confirmación retroactiva solo cuando el usuario la aprobó', async () => {
+    const post = vi.spyOn(apiClient, 'post').mockResolvedValueOnce({
+      id: 'purchase-1', resource: 'purchases', data: { supplierId: 'supplier-1', supplier: 'Proveedor', date: '2026-10-19', items: [], total: 0, status: 'Pendiente' },
+    } as never);
+    const purchase = { supplierId: 'supplier-1', supplier: 'Proveedor', date: '2026-10-19', items: [], total: 0, status: 'Pendiente' as const };
+
+    await merchandisePurchaseService.create(purchase, { confirmHistoricalDate: true });
+
+    expect(post).toHaveBeenCalledWith('/api/business/purchases', expect.objectContaining({ ...purchase, confirmHistoricalDate: true }));
+    post.mockResolvedValueOnce({ id: 'movement-1', resource: 'accounting', data: { date: '2026-10-19', concept: 'Prueba', category: 'Otros', type: 'Egreso', amount: 1, status: 'Registrado' } } as never);
+    await accountingService.create({ date: '2026-10-19', concept: 'Prueba', category: 'Otros', type: 'Egreso', amount: 1, status: 'Registrado' }, { confirmHistoricalDate: true });
+    expect(post).toHaveBeenLastCalledWith('/api/business/accounting', expect.objectContaining({ confirmHistoricalDate: true }));
+  });
+
+  it('no añade un indicador de fecha histórica a movimientos actuales', async () => {
+    const post = vi.spyOn(apiClient, 'post').mockResolvedValueOnce({
+      id: 'movement-1', resource: 'accounting', data: { date: '2026-10-28', concept: 'Prueba', category: 'Otros', type: 'Egreso', amount: 1, status: 'Registrado' },
+    } as never);
+    const movement = { date: '2026-10-28', concept: 'Prueba', category: 'Otros', type: 'Egreso' as const, amount: 1, status: 'Registrado' as const };
+
+    await accountingService.create(movement);
+
+    expect(post).toHaveBeenCalledWith('/api/business/accounting', movement);
+  });
+
   it('consulta los productos con la ruta y los permisos de inventario', async () => {
     const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce([productRecord] as never);
 
@@ -103,5 +128,37 @@ describe('servicios de inventario', () => {
     await userService.delete('user-1');
 
     expect(remove).toHaveBeenCalledWith('/api/users/user-1');
+  });
+
+  it('mapea el conteo de favoritos como entero y conserva el cero explícito', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce([{
+      id: 'customer-1', resource: 'customers', data: { name: 'Ana', email: 'ana@example.test', wishlistItems: 0 },
+    }] as never);
+
+    const [customer] = await adminTableService.list('customers');
+
+    expect(customer.data.Favoritos).toBe(0);
+    expect(Number.isNaN(customer.data.Favoritos)).toBe(false);
+    expect(get).toHaveBeenCalledWith('/api/business/customers');
+  });
+
+  it.each([undefined, null, 'NaN', -1, 1.5, 'inválido'])('rechaza el conteo incompleto o inválido de favoritos: %s', async (wishlistItems) => {
+    vi.spyOn(apiClient, 'get').mockResolvedValueOnce([{
+      id: 'customer-1', resource: 'customers', data: { name: 'Ana', email: 'ana@example.test', wishlistItems },
+    }] as never);
+
+    await expect(adminTableService.list('customers')).rejects.toThrow(/conteo de favoritos inválido o incompleto/i);
+  });
+
+  it('valida el conteo de favoritos del detalle del cliente, incluidos cero y errores', async () => {
+    const get = vi.spyOn(apiClient, 'get').mockResolvedValueOnce({ customer: {}, wishlistItems: 0, addresses: [], orders: [] } as never);
+
+    await expect(customerService.details('customer-1')).resolves.toMatchObject({ wishlistItems: 0 });
+    expect(get).toHaveBeenCalledWith('/api/business/customers/customer-1/details');
+
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ customer: {}, addresses: [], orders: [] } as never);
+    await expect(customerService.details('customer-1')).rejects.toThrow(/conteo de favoritos inválido o incompleto/i);
+    vi.mocked(apiClient.get).mockResolvedValueOnce({ customer: {}, wishlistItems: Number.NaN, addresses: [], orders: [] } as never);
+    await expect(customerService.details('customer-1')).rejects.toThrow(/conteo de favoritos inválido o incompleto/i);
   });
 });

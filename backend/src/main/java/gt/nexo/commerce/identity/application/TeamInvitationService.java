@@ -1,6 +1,7 @@
 package gt.nexo.commerce.identity.application;
 
 import gt.nexo.commerce.business.application.BusinessRuleException;
+import gt.nexo.commerce.shared.validation.DisplayNamePolicy;
 import gt.nexo.commerce.identity.api.dto.TeamInvitationRequest;
 import gt.nexo.commerce.identity.api.dto.TeamInvitationResponse;
 import gt.nexo.commerce.identity.infrastructure.persistence.AppUserEntity;
@@ -48,7 +49,7 @@ public class TeamInvitationService {
         String email = request.email().trim().toLowerCase(Locale.ROOT);
         String name = request.name().trim();
         String roleCode = request.role().trim().toLowerCase(Locale.ROOT);
-        if (name.isBlank() || !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Revisa el nombre y el correo de la invitación.");
+        if (!DisplayNamePolicy.isValid(name) || !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Revisa el nombre y el correo de la invitación.");
         if (roleCode.equals("customer") || roleCode.equals("superadmin")) throw invalid("El rol de la invitación no está permitido.");
         var role = roles.findById(roleCode).orElseThrow(() -> invalid("El rol solicitado no existe."));
         var existing = users.findByEmailIgnoreCase(email);

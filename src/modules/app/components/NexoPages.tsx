@@ -11,6 +11,7 @@ import {
 } from 'lucide-react';
 import { categories, formatQ, orders, products, suppliers, users } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
+import { isValidPersonName } from '../../../shared/utils/personName';
 import { fetchCatalogFromApi, productService } from '../../products/services/productService';
 import { authService, businessSettingsService, checkoutService, dashboardService, productInventoryService, type BusinessProfileSettings, type CheckoutQuote } from '../../../services';
 import { ApiError } from '../../../shared/services/http-client';
@@ -27,6 +28,7 @@ import { roleService } from '../../../services/roleService';
 import { roleLabels } from '../../../types';
 import { OffersAdminPage, TransferReceiptsPage } from '../../commerce/components/CommerceAdminPages';
 import { SeasonalSpotlight } from '../../commerce/components/CommercePages';
+import { serializeDashboardCsv } from '../utils/dashboardCsv';
 import PublicAccountControls from './PublicAccountControls';
 import CustomerNotificationBell from '../../commerce/components/CustomerNotificationBell';
 import FloatingCartButton from './FloatingCartButton';
@@ -196,6 +198,7 @@ export function RegisterPage() {
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     setError('');
+    if (!isValidPersonName(name)) { setError('El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.'); return; }
     if (password !== confirmation) { setError('Las contraseñas no coinciden.'); return; }
     setSubmitting(true);
     try {
@@ -239,7 +242,7 @@ export function ProfilePage() {
   const { user, updateProfile } = useApp();
   const [name, setName] = useState(user?.name || ''); const [busy, setBusy] = useState(false); const [message, setMessage] = useState(''); const [error, setError] = useState('');
   useEffect(() => { setName(user?.name || ''); }, [user?.name]);
-  const save = async (event: React.FormEvent) => { event.preventDefault(); setBusy(true); setError(''); setMessage(''); try { await updateProfile(name); setMessage('Tu nombre se guardó correctamente.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar tu perfil.'); } finally { setBusy(false); } };
+  const save = async (event: React.FormEvent) => { event.preventDefault(); setError(''); setMessage(''); if (!isValidPersonName(name)) { setError('El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.'); return; } setBusy(true); try { await updateProfile(name); setMessage('Tu nombre se guardó correctamente.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo guardar tu perfil.'); } finally { setBusy(false); } };
   return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Mi cuenta · Perfil de usuario</span><h1>Mi perfil</h1><p>Actualiza tus datos y protege tu acceso.</p></div></div><section className="panel profile-panel"><form className="crud-form" onSubmit={save}><div className="crud-fields"><label className="field"><span>Nombre</span><input required minLength={2} maxLength={160} value={name} onChange={(event) => setName(event.target.value)} /></label><label className="field"><span>Correo electrónico</span><input value={user?.email || ''} readOnly disabled /></label><label className="field"><span>Rol</span><input value={user ? roleLabels[user.role] : ''} readOnly disabled /></label></div>{message && <div className="crud-feedback" role="status">{message}</div>}{error && <div className="crud-error" role="alert">{error}</div>}<p className="crud-form-note">El correo y los permisos solo se cambian desde los procesos administrativos correspondientes.</p><div className="modal-actions"><button className="button button-primary" type="submit" disabled={busy || name.trim() === user?.name}>{busy ? 'Guardando…' : 'Guardar perfil'}</button></div></form></section><ChangePasswordCard /><MfaSettingsCard /></div>;
 }
 
@@ -456,15 +459,16 @@ function SettingsModuleNavigation() {
 }
 
 export function AdminWorkspace({ children }: { children: React.ReactNode }) {
-  const { user, userType, role, authLoading } = useApp();
+  const { user, userType, role, authLoading, authIssue, retrySession } = useApp();
   const pathname = usePathname();
   const router = useRouter();
   const authorized = Boolean(user && userType === 'admin' && role && canVisitAdminPath(role, pathname, user.permissions));
   useEffect(() => {
-    if (authLoading) return;
+    if (authLoading || authIssue) return;
     if (!user || !userType) router.replace(`/access?redirect=${encodeURIComponent(pathname)}`);
     else if (userType !== 'admin' || !role || !canVisitAdminPath(role, pathname, user.permissions)) router.replace(resolveLoginDestination(userType, role, null, user.permissions));
-  }, [authLoading, user, userType, role, pathname, router]);
+  }, [authLoading, authIssue, user, userType, role, pathname, router]);
+  if (!authLoading && authIssue && !user) return <main className="admin-auth-unavailable" role="alert"><h1>No se pudo comprobar la sesión</h1><p>{authIssue}</p><button className="button button-primary" type="button" onClick={retrySession}>Reintentar</button></main>;
   if (authLoading || !authorized) return <AuthPending />;
   return <AdminShell>{children}</AdminShell>;
 }
@@ -530,8 +534,7 @@ function Dashboard() {
   }, [period, reportLowStock]);
   const exportCsv = () => {
     if (!summary) return;
-    const rows = [['Fecha', 'Ventas', 'Operaciones'], ...summary.series.map((item) => [item.date, String(item.sales), String(item.orders)])];
-    const url = URL.createObjectURL(new Blob([`\uFEFF${rows.map((row) => row.join(',')).join('\r\n')}`], { type: 'text/csv;charset=utf-8' }));
+    const url = URL.createObjectURL(new Blob([serializeDashboardCsv(summary.series)], { type: 'text/csv;charset=utf-8' }));
     const link = document.createElement('a'); link.href = url; link.download = `resumen-nexo-${period}.csv`; link.click(); window.setTimeout(() => URL.revokeObjectURL(url), 1000);
   };
   const p = summary?.products || { products: 0, totalUnits: 0, lowStock: 0, outOfStock: 0 };
@@ -604,31 +607,3 @@ moduleConfig.payments = { ...moduleConfig.transfers, title: 'Pagos', description
 moduleConfig.suppliers = { ...moduleConfig.products, title: 'Proveedores', description: 'Administra empresas abastecedoras y sus productos asociados.', action: 'Nuevo proveedor', columns: ['Empresa', 'Contacto', 'Teléfono', 'Correo', 'Productos abastecidos', 'Último pedido', 'Estado'], rows: suppliers.map((supplier) => ({ Empresa: supplier.name, Contacto: supplier.contactPerson || '—', Teléfono: supplier.phone || '—', Correo: supplier.email || '—', 'Productos abastecidos': supplier.productIds.length, 'Último pedido': supplier.lastOrder || 'Sin pedidos', Estado: supplier.status })) };
 moduleConfig['roles-permissions'] = { ...moduleConfig.users, title: 'Roles y permisos', description: 'Define el acceso de cada perfil a las áreas de NEXO.', action: 'Nuevo rol', columns: ['Nombre', 'Usuarios', 'Permisos', 'Última actualización', 'Estado'], rows: [{ Nombre: 'Súper Administrador', Usuarios: 1, Permisos: 'Acceso completo', 'Última actualización': 'Hoy, 09:42', Estado: 'Activo' }, { Nombre: 'Administrador', Usuarios: 1, Permisos: 'Operación completa', 'Última actualización': '12 sep 2025', Estado: 'Activo' }, { Nombre: 'Vendedor', Usuarios: 2, Permisos: 'Ventas y clientes', 'Última actualización': '08 sep 2025', Estado: 'Activo' }, { Nombre: 'Personal de bodega', Usuarios: 2, Permisos: 'Inventario', 'Última actualización': '08 sep 2025', Estado: 'Activo' }] };
 moduleConfig.profile = { ...moduleConfig.settings, title: 'Mi perfil', description: 'Actualiza tus datos personales y preferencias de acceso.', action: 'Guardar perfil', columns: ['Configuración', 'Descripción', 'Estado'], rows: [{ Configuración: 'Información personal', Descripción: 'Nombre y correo del usuario', Estado: 'Activo' }, { Configuración: 'Seguridad', Descripción: 'Contraseña y sesiones activas', Estado: 'Activo' }, { Configuración: 'Preferencias', Descripción: 'Idioma y notificaciones', Estado: 'Activo' }] };
-
-export function AdminAlertHost() {
-  const { adminAlert, dismissAdminAlert } = useApp();
-  const router = useRouter();
-  const closeRef = useRef<HTMLButtonElement>(null);
-  const previousFocus = useRef<HTMLElement | null>(null);
-  useEffect(() => {
-    if (!adminAlert) return;
-    previousFocus.current = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-    closeRef.current?.focus();
-    const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') { event.preventDefault(); dismissAdminAlert(); }
-      if (event.key === 'Tab') {
-        const dialog = document.querySelector<HTMLElement>('.admin-alert-dialog');
-        const focusable = dialog?.querySelectorAll<HTMLElement>('button:not(:disabled), a[href]');
-        if (!focusable?.length) return;
-        const first = focusable[0]; const last = focusable[focusable.length - 1];
-        if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
-        else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
-      }
-    };
-    window.addEventListener('keydown', onKeyDown);
-    return () => { window.removeEventListener('keydown', onKeyDown); previousFocus.current?.focus(); };
-  }, [adminAlert, dismissAdminAlert]);
-  if (!adminAlert) return null;
-  const close = () => dismissAdminAlert();
-  return <div className="admin-alert-backdrop"><section className={`admin-alert-dialog ${adminAlert.type}`} role="alertdialog" aria-modal="true" aria-labelledby="admin-alert-title" aria-describedby="admin-alert-description"><div className={`admin-alert-icon ${adminAlert.type}`} aria-hidden="true">{adminAlert.type === 'warning' ? '!' : adminAlert.type === 'success' ? '✓' : 'i'}</div><div className="admin-alert-content"><span className="eyebrow">{adminAlert.type === 'warning' ? 'Advertencia' : adminAlert.type === 'success' ? 'Operación completada' : 'Actualización'}</span><h2 id="admin-alert-title">{adminAlert.title}</h2><p className="admin-alert-entity">{adminAlert.entity}</p><p id="admin-alert-description">{adminAlert.message}</p><p className="admin-alert-next"><strong>Siguiente acción:</strong> {adminAlert.nextAction}</p><div className="admin-alert-actions"><button type="button" className="button button-outline" ref={closeRef} onClick={close}>Cerrar</button>{adminAlert.actionTo && <button type="button" className="button button-primary" onClick={() => { close(); router.push(adminAlert.actionTo!); }}>Ir al módulo</button>}</div></div></section></div>;
-}

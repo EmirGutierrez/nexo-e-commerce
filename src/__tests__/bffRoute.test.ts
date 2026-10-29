@@ -77,6 +77,19 @@ describe('Next.js API BFF route', () => {
     expect(response.cookies.get('NEXOSESSION')?.maxAge).toBe(0);
   });
 
+  it('uses the same tab-scoped session cookie for /auth/me and a public store request', async () => {
+    vi.mocked(fetch).mockResolvedValue(new Response('[]', { status: 200, headers: { 'content-type': 'application/json' } }));
+    const browserCookie = `${TAB_COOKIE}=authenticated-session`;
+
+    const session = await GET(request('/api/auth/me', { headers: { 'x-nexo-tab-session': TAB_ID, cookie: browserCookie } }), context(['auth', 'me']));
+    const catalog = await GET(request('/api/catalog/products', { headers: { 'x-nexo-tab-session': TAB_ID, cookie: browserCookie } }), context(['catalog', 'products']));
+
+    expect(session.status).toBe(200);
+    expect(catalog.status).toBe(200);
+    expect(vi.mocked(fetch).mock.calls.map(([, options]) => (options?.headers as Headers).get('Cookie')))
+      .toEqual(['NEXOSESSION=authenticated-session', 'NEXOSESSION=authenticated-session']);
+  });
+
   it('rejects malformed and oversized declared request lengths before calling the backend', async () => {
     const malformed = await POST(request('/api/items', {
       method: 'POST', headers: { 'content-length': 'unknown' }, body: 'x',

@@ -6,12 +6,14 @@ import gt.nexo.commerce.business.api.OrderQuoteResponse;
 import gt.nexo.commerce.business.api.OrderSubmissionResponse;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
 import gt.nexo.commerce.identity.application.PermissionAuthorizer;
+import gt.nexo.commerce.shared.validation.DisplayNamePolicy;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -101,6 +103,7 @@ public class BusinessRecordService {
             return readMap(rs.getString(1));
         }, id);
         String email = text(customer.get("email")).toLowerCase(Locale.ROOT);
+        long wishlistItems = jdbc.queryForObject("SELECT COUNT(*) FROM customer_wishlist_items w JOIN app_user u ON u.id = w.customer_user_id WHERE LOWER(u.email) = LOWER(?)", Long.class, email);
         List<Map<String, Object>> orders = jdbc.query("""
                 SELECT id, data::text AS data FROM business_records
                 WHERE resource_code = 'orders' AND LOWER(COALESCE(data ->> 'customerEmail', '')) = ?
@@ -113,6 +116,7 @@ public class BusinessRecordService {
         List<String> addresses = orders.stream().map(order -> text(order.get("address"))).filter(value -> !value.isBlank()).distinct().toList();
         Map<String, Object> result = new LinkedHashMap<>();
         result.put("customer", customer);
+        result.put("wishlistItems", wishlistItems);
         result.put("addresses", addresses);
         result.put("orders", orders);
         return result;
@@ -155,7 +159,7 @@ public class BusinessRecordService {
         if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);
-        validate(normalized, data);
+        validate(normalized, data, true);
         ensureUnique(normalized, data, null);
         UUID id = normalized.equals("customers") ? customerRecordId(data) : UUID.randomUUID();
         ProductImageService.ImageUpload productImage = normalized.equals("products") ? decodeProductImage(data) : null;
@@ -233,7 +237,7 @@ public class BusinessRecordService {
         Map<String, Object> old = lockedRecord(normalized, id);
         String previousImage = text(old.get("image"));
         if (productImage != null) data.put("image", productImagePath(id));
-        validate(normalized, data);
+        validate(normalized, data, false);
         ensureUnique(normalized, data, id);
         if (normalized.equals("categories")) {
             String previousName = text(field(old, "name", "Nombre"));
@@ -1491,7 +1495,7 @@ public class BusinessRecordService {
         }, id, resource);
     }
 
-    private void validate(String resource, Map<String, Object> data) {
+    private void validate(String resource, Map<String, Object> data, boolean creating) {
         if (data.isEmpty()) throw invalid("El registro no puede estar vacío.");
         if (resource.equals("products")) {
             required(data, "name", "Producto"); required(data, "sku", "SKU");
@@ -1523,6 +1527,8 @@ public class BusinessRecordService {
         if (resource.equals("suppliers")) required(data, "name", "Empresa");
         if (resource.equals("customers")) {
             required(data, "name", "Nombre");
+            if (!DisplayNamePolicy.isValid(text(field(data, "name", "Nombre"))))
+                throw invalid("El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.");
             String email = String.valueOf(field(data, "email", "Correo")).trim();
             if (email.isBlank() || !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Ingresa un correo válido para el cliente.");
             if (!Set.of("Activo", "Inactivo", "Pendiente").contains(defaultText(field(data, "status", "Estado"), "Activo"))) throw invalid("El estado del cliente no es válido.");
@@ -1536,11 +1542,26 @@ public class BusinessRecordService {
             BigDecimal amount = decimal(field(data, "amount", "Monto"));
             if (amount.signum() <= 0) throw invalid("El monto debe ser mayor que cero.");
             if (!Set.of("Registrado", "Pendiente", "Anulado").contains(defaultText(field(data, "status", "Estado"), "Registrado"))) throw invalid("El estado del movimiento no es válido.");
-            try { LocalDate.parse(text(field(data, "date", "Fecha"))); }
+            LocalDate movementDate;
+            try { movementDate = LocalDate.parse(text(field(data, "date", "Fecha"))); }
             catch (Exception exception) { throw invalid("La fecha del movimiento no es válida."); }
+            if (creating && movementDate.isBefore(LocalDate.now(ZoneId.of("America/Guatemala")))
+                    && !Boolean.TRUE.equals(data.get("confirmHistoricalDate"))) {
+                throw invalid("La fecha es anterior a hoy. Confirma que este movimiento corresponde a un registro histórico.");
+            }
+            data.remove("confirmHistoricalDate");
         }
         if (resource.equals("purchases")) {
             required(data, "supplier", "Proveedor");
+            required(data, "date", "Fecha");
+            LocalDate purchaseDate;
+            try { purchaseDate = LocalDate.parse(text(field(data, "date", "Fecha"))); }
+            catch (Exception exception) { throw invalid("La fecha de la compra no es válida."); }
+            if (creating && purchaseDate.isBefore(LocalDate.now(ZoneId.of("America/Guatemala")))
+                    && !Boolean.TRUE.equals(data.get("confirmHistoricalDate"))) {
+                throw invalid("La fecha es anterior a hoy. Confirma que esta compra corresponde a un registro histórico.");
+            }
+            data.remove("confirmHistoricalDate");
             if (items(data).isEmpty()) throw invalid("La compra necesita al menos un producto.");
             parseUuid(data.get("supplierId"));
             for (Map<String, Object> item : items(data)) {

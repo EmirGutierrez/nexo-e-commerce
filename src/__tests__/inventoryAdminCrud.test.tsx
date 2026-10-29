@@ -372,6 +372,7 @@ describe('acciones y detalles de registros administrativos', () => {
     vi.mocked(adminTableService.list).mockResolvedValue([customer]);
     vi.spyOn(customerService, 'details').mockResolvedValue({
       customer: { name: 'Cliente Uno', email: 'cliente@example.com', status: 'Activo' },
+      wishlistItems: 3,
       addresses: ['Zona 1, Ciudad'],
       orders: [{ id: 'order-1', orderNumber: 'NEXO-1', status: 'Entregado', total: 75, items: [{ productName: 'Teclado', quantity: 1, unitPrice: 75 }, {}] }],
     });
@@ -383,8 +384,37 @@ describe('acciones y detalles de registros administrativos', () => {
     expect(await screen.findByText('Historial de compras')).toBeTruthy();
     expect(screen.getByText('Zona 1, Ciudad')).toBeTruthy();
     expect(screen.getByText('NEXO-1')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
     expect(screen.getByText(/Teclado · 1 ×/)).toBeTruthy();
     expect(screen.getByText(/Producto · 0 ×/)).toBeTruthy();
+  });
+
+  it('renderiza nombres heredados con etiquetas como texto plano en lista y detalle', async () => {
+    const unsafeName = '<img src=x onerror=alert(1)>';
+    vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: unsafeName, Correo: 'cliente@example.test', Estado: 'Activo' } }]);
+    vi.spyOn(customerService, 'details').mockResolvedValue({ customer: { name: unsafeName, email: 'cliente@example.test' }, wishlistItems: 0, addresses: [], orders: [] });
+    const config = { ...usersConfig, title: 'Clientes', columns: ['Nombre', 'Correo', 'Estado'] };
+    const { container } = render(<AdminCrudModule section="customers" config={config} />);
+
+    expect(await screen.findByText(unsafeName)).toBeTruthy();
+    expect(container.querySelector('img[src="x"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: `Ver Clientes: ${unsafeName}` }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img[src="x"]')).toBeNull();
+    expect(dialog.textContent).toContain(unsafeName);
+  });
+
+  it('rechaza etiquetas HTML al editar el nombre de un cliente', async () => {
+    vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: 'Cliente Uno', Correo: 'cliente@example.test', Estado: 'Activo' } }]);
+    const update = vi.spyOn(adminTableService, 'update');
+    const config = { ...usersConfig, title: 'Clientes', action: 'Nuevo cliente', columns: ['Nombre', 'Correo', 'Estado'] };
+    render(<AdminCrudModule section="customers" config={config} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar Clientes: Cliente Uno' }));
+    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: '<h1>Cliente</h1>' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('solo puede contener letras');
+    expect(update).not.toHaveBeenCalled();
   });
 
   it('presenta error cuando no se puede cargar el detalle del cliente', async () => {
@@ -400,7 +430,7 @@ describe('acciones y detalles de registros administrativos', () => {
 
   it('muestra los estados vacíos del historial y no ofrece crear clientes desde el panel', async () => {
     vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: 'Cliente Uno' } }]);
-    vi.spyOn(customerService, 'details').mockResolvedValue({ customer: {}, addresses: [], orders: [] });
+    vi.spyOn(customerService, 'details').mockResolvedValue({ customer: {}, wishlistItems: 0, addresses: [], orders: [] });
     const config = { ...usersConfig, title: 'Clientes', action: undefined, columns: ['Nombre'] };
 
     render(<AdminCrudModule section="customers" config={config} />);
