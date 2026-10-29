@@ -35,6 +35,12 @@ class DeployWorkflowOrderTest(unittest.TestCase):
         self.assertIn("frontend:", caddy)
         self.assertNotIn("grafana:", caddy)
 
+        exporter_init = compose.split("\n  postgres-exporter-init:\n", maxsplit=1)[1].split(
+            "\n  postgres-exporter:\n", maxsplit=1
+        )[0]
+        self.assertIn("    command:\n      - >-\n", exporter_init)
+        self.assertIn('until pg_isready -h "$${PGHOST}"', exporter_init)
+
         command = (REPOSITORY_ROOT / "deploy/nexo-ssh-command.sh").read_text(encoding="utf-8")
         recovery = command.split("if ! docker compose", maxsplit=1)[1].split("\n  fi", maxsplit=1)[0]
         self.assertIn("up -d --no-deps caddy", recovery)
