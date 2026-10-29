@@ -17,4 +17,9 @@ public class MfaChallengeException extends RuntimeException {
     public static MfaChallengeException invalid() {
         return new MfaChallengeException("MFA_INVALID", "El código de autenticación no es válido o ya fue utilizado.");
     }
+
+    public static MfaChallengeException enrollmentRequired() {
+        return new MfaChallengeException("MFA_ENROLLMENT_REQUIRED",
+                "Esta cuenta de equipo debe activar la verificación en dos pasos desde el acceso web antes de usar la aplicación móvil.");
+    }
 }

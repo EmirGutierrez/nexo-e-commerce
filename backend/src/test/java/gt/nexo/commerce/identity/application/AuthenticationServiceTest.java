@@ -16,11 +16,14 @@ import gt.nexo.commerce.identity.infrastructure.persistence.AppUserRepository;
 import gt.nexo.commerce.identity.infrastructure.persistence.UserStatus;
 import gt.nexo.commerce.shared.errors.InactiveAccountException;
 import gt.nexo.commerce.shared.errors.InvalidCredentialsException;
+import gt.nexo.commerce.shared.security.MfaSessionVerification;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
+import jakarta.servlet.http.HttpSession;
 import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.AfterEach;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
 import org.springframework.security.core.Authentication;
@@ -44,6 +47,11 @@ class AuthenticationServiceTest {
     private final AuthenticationService service = new AuthenticationService(
             authenticationManager, securityContextRepository, sessionAuthenticationStrategy,
             users, userAccountService, passwordEncoder, mfaService);
+
+    @AfterEach
+    void clearSecurityContext() {
+        org.springframework.security.core.context.SecurityContextHolder.clearContext();
+    }
 
     @Test
     void reportsDisabledAccountsOnlyAfterVerifyingTheirPasswordForWebAndMobile() {
@@ -112,5 +120,45 @@ class AuthenticationServiceTest {
 
         verify(account, never()).recordSuccessfulLogin(any());
         verify(users, never()).findById(accountId);
+    }
+
+    @Test
+    void refusesMobileAccessForStaffUntilMandatoryMfaEnrollmentIsComplete() {
+        UUID accountId = UUID.randomUUID();
+        AppUserEntity account = mock(AppUserEntity.class);
+        NexoUserPrincipal principal = mock(NexoUserPrincipal.class);
+        Authentication authentication = mock(Authentication.class);
+        when(authentication.getPrincipal()).thenReturn(principal);
+        when(principal.getId()).thenReturn(accountId);
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        when(mfaService.isRequired(accountId)).thenReturn(true);
+
+        MfaChallengeException exception = assertThrows(MfaChallengeException.class,
+                () -> service.authenticateMobile(new LoginRequest(EMAIL, PASSWORD)));
+
+        assertEquals("MFA_ENROLLMENT_REQUIRED", exception.getCode());
+        verify(mfaService).verifyLogin(accountId, null);
+        verify(account, never()).recordSuccessfulLogin(any());
+        verify(users, never()).findById(accountId);
+    }
+
+    @Test
+    void recordsSecondFactorVerificationInTheNewWebSession() {
+        UUID accountId = UUID.randomUUID();
+        AppUserEntity account = mock(AppUserEntity.class);
+        NexoUserPrincipal principal = mock(NexoUserPrincipal.class);
+        Authentication authentication = mock(Authentication.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        HttpSession session = mock(HttpSession.class);
+        when(authentication.getPrincipal()).thenReturn(principal);
+        when(principal.getId()).thenReturn(accountId);
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        when(mfaService.verifyLogin(accountId, "123456")).thenReturn(true);
+        when(users.findById(accountId)).thenReturn(Optional.of(account));
+        when(request.getSession(false)).thenReturn(session);
+
+        service.login(new LoginRequest(EMAIL, PASSWORD, "123456"), request, mock(HttpServletResponse.class));
+
+        verify(session).setAttribute(MfaSessionVerification.VERIFIED_USER_ATTRIBUTE, accountId.toString());
     }
 }

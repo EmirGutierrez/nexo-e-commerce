@@ -28,12 +28,24 @@ describe('MFA login and account API', () => {
 
   it('sends the MFA code as part of the login request', async () => {
     apiPost.mockResolvedValue(user);
+    apiGet.mockResolvedValue({ required: false, enabled: false, enrollmentPending: false, recoveryCodesRemaining: 0 });
 
-    await authService.login(user.email, 'a-strong-password', '123456');
+    const session = await authService.login(user.email, 'a-strong-password', '123456');
 
     expect(apiPost).toHaveBeenCalledWith('/api/auth/login', {
       email: user.email, password: 'a-strong-password', mfaCode: '123456',
     });
+    expect(apiGet).toHaveBeenCalledWith('/api/auth/mfa');
+    expect(session?.mfaSetupRequired).toBe(false);
+  });
+
+  it('marks a staff account for mandatory MFA enrollment after password login', async () => {
+    apiPost.mockResolvedValue(user);
+    apiGet.mockResolvedValue({ required: true, enabled: false, enrollmentPending: false, recoveryCodesRemaining: 0 });
+
+    const session = await authService.login(user.email, 'a-strong-password');
+
+    expect(session?.mfaSetupRequired).toBe(true);
   });
 
   it.each(['MFA_REQUIRED', 'MFA_INVALID'])('preserves the %s challenge response for the login screen', async (code) => {
@@ -63,7 +75,7 @@ describe('MFA login and account API', () => {
   });
 
   it('uses the authenticated MFA endpoints for enrollment and status', async () => {
-    apiGet.mockResolvedValue({ enabled: false, enrollmentPending: false, recoveryCodesRemaining: 0 });
+    apiGet.mockResolvedValue({ required: false, enabled: false, enrollmentPending: false, recoveryCodesRemaining: 0 });
     apiPost.mockResolvedValue({ secret: 'SECRET', otpauthUri: 'otpauth://totp/NEXO' });
 
     await mfaService.status();

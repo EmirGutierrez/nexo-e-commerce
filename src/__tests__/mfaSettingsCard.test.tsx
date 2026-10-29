@@ -10,16 +10,20 @@ const mfa = vi.hoisted(() => ({
   rotateRecoveryCodes: vi.fn(),
   disable: vi.fn(),
 }));
+const app = vi.hoisted(() => ({ refreshCurrentUser: vi.fn() }));
 
 vi.mock('../services', () => ({ mfaService: mfa }));
+vi.mock('../contexts/AppContext', () => ({ useApp: () => app }));
 
 import MfaSettingsCard from '../modules/auth/components/MfaSettingsCard';
 
-const disabled = { enabled: false, enrollmentPending: false, recoveryCodesRemaining: 0 };
-const enabled = { enabled: true, enrollmentPending: false, recoveryCodesRemaining: 10 };
+const disabled = { required: false, enabled: false, enrollmentPending: false, recoveryCodesRemaining: 0 };
+const required = { required: true, enabled: false, enrollmentPending: false, recoveryCodesRemaining: 0 };
+const enabled = { required: true, enabled: true, enrollmentPending: false, recoveryCodesRemaining: 10 };
 
 beforeEach(() => {
   vi.clearAllMocks();
+  app.refreshCurrentUser.mockResolvedValue({ mfaSetupRequired: false });
   mfa.status.mockResolvedValue(disabled);
   mfa.beginEnrollment.mockResolvedValue({ secret: 'JBSWY3DPEHPK3PXP', otpauthUri: 'otpauth://totp/NEXO' });
   mfa.completeEnrollment.mockResolvedValue({ recoveryCodes: ['AAAAA-BBBBB-CCCCC-DDDDD'] });
@@ -115,5 +119,13 @@ describe('MfaSettingsCard', () => {
     const { container } = render(<MfaSettingsCard hidden />);
     expect(container.querySelector('section')?.hidden).toBe(true);
     expect(await screen.findByText(/No se pudo consultar la configuración/)).toBeTruthy();
+  });
+
+  it('explains that staff MFA is mandatory until enrollment is complete', async () => {
+    mfa.status.mockResolvedValue(required);
+    render(<MfaSettingsCard />);
+
+    expect(await screen.findByText('Obligatoria · pendiente de activación')).toBeTruthy();
+    expect(screen.getByRole('alert').textContent).toContain('solo podrás configurar MFA o cerrar sesión');
   });
 });
