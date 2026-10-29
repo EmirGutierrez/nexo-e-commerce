@@ -154,8 +154,10 @@ class MfaServiceLifecycleTest {
     void refusesEnrollmentForWrongPasswordMissingKeyOrAlreadyEnabledAccount() {
         stubAccount();
         when(passwordEncoder.matches(PASSWORD, PASSWORD_HASH)).thenReturn(false);
-        assertThrows(InvalidCredentialsException.class,
+        BusinessRuleException invalidPassword = assertThrows(BusinessRuleException.class,
                 () -> service.beginEnrollment(USER_ID, "admin@example.com", PASSWORD));
+        assertEquals("MFA_CURRENT_PASSWORD_INVALID", invalidPassword.getCode());
+        assertEquals(org.springframework.http.HttpStatus.UNAUTHORIZED, invalidPassword.getStatus());
         verifyNoInteractions(jdbc);
 
         MfaService withoutKey = new MfaService(jdbc, users, passwordEncoder, "");

@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { KeyRound, ShieldCheck } from 'lucide-react';
+import { QRCodeSVG } from 'qrcode.react';
 import { useApp } from '../../../contexts/AppContext';
 import { mfaService, type MfaEnrollment, type MfaStatus } from '../../../services';
 
@@ -24,6 +25,14 @@ export default function MfaSettingsCard({ hidden = false }: { hidden?: boolean }
   const refresh = useCallback(async () => {
     setStatus(await mfaService.status());
   }, []);
+
+  const retryStatus = async () => {
+    setLoading(true);
+    setError('');
+    try { setStatus(await mfaService.status()); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo consultar la seguridad de la cuenta.'); }
+    finally { setLoading(false); }
+  };
 
   useEffect(() => {
     let active = true;
@@ -79,7 +88,7 @@ export default function MfaSettingsCard({ hidden = false }: { hidden?: boolean }
 
   return <section hidden={hidden} className="panel mfa-settings-card" aria-labelledby="mfa-settings-title">
     <div className="mfa-settings-heading"><span className="mfa-settings-icon"><ShieldCheck size={19} /></span><div><span className="eyebrow">Seguridad de la cuenta</span><h2 id="mfa-settings-title">Verificación en dos pasos</h2><p>Usa una aplicación de autenticación al iniciar sesión en web o móvil.</p></div></div>
-    {loading ? <p className="mfa-settings-muted" role="status">Consultando configuración…</p> : !status ? <p className="mfa-settings-muted">No se pudo consultar la configuración. Recarga la página para intentarlo de nuevo.</p> : status.enabled ? <>
+    {loading ? <p className="mfa-settings-muted" role="status">Consultando configuración…</p> : !status ? <div className="mfa-status-unavailable"><p className="mfa-settings-error" role="alert">{error || 'No se pudo consultar la configuración de seguridad.'}</p><button type="button" className="button button-secondary" onClick={() => void retryStatus()}>Reintentar</button></div> : status.enabled ? <>
       <div className="mfa-settings-state is-enabled"><span />Activa{status.required ? ' · obligatoria' : ''} · {status.recoveryCodesRemaining} códigos de recuperación disponibles</div>
       {recoveryCodes.length > 0 && <div className="mfa-recovery-panel"><strong>Guarda estos códigos en un lugar seguro</strong><p>Cada código sirve una sola vez. Esta lista no volverá a mostrarse.</p><ul>{recoveryCodes.map((code) => <li key={code}><code>{code}</code></li>)}</ul><button type="button" className="button button-secondary" onClick={() => setRecoveryCodes([])}>Ya los guardé</button></div>}
       <form className="mfa-disable-form" onSubmit={rotate}><p>Si perdiste tus códigos, puedes reemplazarlos con tu contraseña y el segundo factor. Los anteriores quedarán revocados.</p><label className="field"><span>Contraseña actual</span><input type="password" autoComplete="current-password" required maxLength={128} value={rotatePassword} onChange={(event) => setRotatePassword(event.target.value)} /></label><label className="field"><span>Código de autenticación o recuperación</span><input type="text" autoComplete="one-time-code" autoCapitalize="characters" required maxLength={32} value={rotateCode} onChange={(event) => setRotateCode(event.target.value)} /></label><button className="button button-secondary" type="submit" disabled={busy}>{busy ? 'Verificando…' : 'Regenerar códigos'}</button></form>
@@ -88,13 +97,14 @@ export default function MfaSettingsCard({ hidden = false }: { hidden?: boolean }
       <div className="mfa-settings-state"><span />{status.required ? 'Obligatoria · pendiente de activación' : 'No está activa'}</div>
       {status.required && <p className="mfa-settings-error" role="alert">Activa la verificación en dos pasos para habilitar las funciones de tu cuenta de equipo. Mientras tanto solo podrás configurar MFA o cerrar sesión.</p>}
       {enrollment ? <form className="mfa-enrollment-form" onSubmit={completeEnrollment}>
-        <div className="mfa-enrollment-key"><KeyRound size={16} /><div><strong>Clave para tu aplicación</strong><code>{enrollment.secret}</code><small>Agrega una cuenta manual en tu aplicación de autenticación con esta clave.</small></div></div>
+        <div className="mfa-qr-panel"><QRCodeSVG data-testid="mfa-enrollment-qr" value={enrollment.otpauthUri} size={216} level="M" marginSize={4} role="img" aria-label="Código QR para configurar la verificación en dos pasos" /><div><strong>Escanea este código con tu aplicación autenticadora</strong><p>Agrega una cuenta nueva y escanea el QR. El código de seis dígitos cambia cada 30 segundos.</p><small>Este QR contiene el secreto de tu cuenta. No lo compartas ni envíes una captura.</small></div></div>
+        <details className="mfa-manual-key"><summary>¿No puedes escanear el QR? Configúrala manualmente</summary><div className="mfa-enrollment-key"><KeyRound size={16} /><div><strong>Clave para tu aplicación</strong><code>{enrollment.secret}</code><small>En tu aplicación elige introducir una clave de configuración. Usa tipo TOTP, 6 dígitos y periodo de 30 segundos.</small></div></div></details>
         <details className="mfa-otpauth-details"><summary>Ver enlace otpauth</summary><code>{enrollment.otpauthUri}</code></details>
         <label className="field"><span>Código de seis dígitos</span><input type="text" inputMode="numeric" autoComplete="one-time-code" required pattern="[0-9]{6}" maxLength={6} value={verificationCode} onChange={(event) => setVerificationCode(event.target.value.replace(/\D/g, '').slice(0, 6))} placeholder="000000" /></label>
         <button className="button button-primary" type="submit" disabled={busy || verificationCode.length !== 6}>{busy ? 'Confirmando…' : 'Activar verificación'}</button>
-      </form> : <form className="mfa-enrollment-form" onSubmit={startEnrollment}><p>Confirma tu contraseña para iniciar el enrolamiento.</p><label className="field"><span>Contraseña actual</span><input type="password" autoComplete="current-password" required maxLength={128} value={startPassword} onChange={(event) => setStartPassword(event.target.value)} /></label><button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Preparando…' : 'Configurar verificación en dos pasos'}</button></form>}
+      </form> : <form className="mfa-enrollment-form" onSubmit={startEnrollment}><p>Confirma tu contraseña actual de NEXO para iniciar el enrolamiento. No es la contraseña de GitHub, Cloudflare ni de tu correo.</p><label className="field"><span>Contraseña actual</span><input type="password" autoComplete="current-password" required maxLength={128} value={startPassword} onChange={(event) => setStartPassword(event.target.value)} /></label><button className="button button-primary" type="submit" disabled={busy}>{busy ? 'Preparando…' : 'Configurar verificación en dos pasos'}</button></form>}
     </>}
     {message && <p className="mfa-settings-message" role="status">{message}</p>}
-    {error && <p className="mfa-settings-error" role="alert">{error}</p>}
+    {error && status && <p className="mfa-settings-error" role="alert">{error}</p>}
   </section>;
 }

@@ -96,7 +96,10 @@ public class MfaService {
     public MfaEnrollmentResponse beginEnrollment(UUID userId, String email, String currentPassword) {
         AppUserEntity account = users.findById(userId)
                 .orElseThrow(() -> new InvalidCredentialsException());
-        if (!passwordEncoder.matches(currentPassword, account.getPasswordHash())) throw new InvalidCredentialsException();
+        if (!passwordEncoder.matches(currentPassword, account.getPasswordHash())) {
+            throw new BusinessRuleException(HttpStatus.UNAUTHORIZED, "MFA_CURRENT_PASSWORD_INVALID",
+                    "La contraseña actual de tu cuenta NEXO no es correcta.");
+        }
         requireEncryptionKey();
         boolean enabled = jdbc.query(
                 "SELECT enabled_at IS NOT NULL FROM app_user_mfa WHERE user_id = ? FOR UPDATE",

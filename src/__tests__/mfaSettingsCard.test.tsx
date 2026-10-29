@@ -41,6 +41,8 @@ describe('MfaSettingsCard', () => {
     fireEvent.change(await screen.findByLabelText('Contraseña actual'), { target: { value: 'correct-password' } });
     fireEvent.click(screen.getByRole('button', { name: 'Configurar verificación en dos pasos' }));
     expect(await screen.findByText('Clave para tu aplicación')).toBeTruthy();
+    expect(await screen.findByRole('img', { name: 'Código QR para configurar la verificación en dos pasos' })).toBeTruthy();
+    expect(document.querySelector('[data-testid="mfa-enrollment-qr"] path')).toBeTruthy();
     expect(mfa.beginEnrollment).toHaveBeenCalledWith('correct-password');
 
     const code = screen.getByLabelText('Código de seis dígitos');
@@ -119,6 +121,16 @@ describe('MfaSettingsCard', () => {
     const { container } = render(<MfaSettingsCard hidden />);
     expect(container.querySelector('section')?.hidden).toBe(true);
     expect(await screen.findByText(/No se pudo consultar la configuración/)).toBeTruthy();
+  });
+
+  it('allows retrying the MFA status request after a temporary failure', async () => {
+    mfa.status.mockRejectedValueOnce(new Error('Servicio temporalmente no disponible.')).mockResolvedValueOnce(disabled);
+    render(<MfaSettingsCard />);
+
+    expect(await screen.findByText('Servicio temporalmente no disponible.')).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    expect(await screen.findByLabelText('Contraseña actual')).toBeTruthy();
+    expect(mfa.status).toHaveBeenCalledTimes(2);
   });
 
   it('explains that staff MFA is mandatory until enrollment is complete', async () => {
