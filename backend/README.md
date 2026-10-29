@@ -36,6 +36,8 @@ Next.js actúa como BFF: el navegador solicita `/api/...` al mismo origen y la r
 
 El perfil `prod` requiere `DATABASE_URL`, `DATABASE_USERNAME`, `DATABASE_PASSWORD` y `CORS_ALLOWED_ORIGINS`. Usa HTTPS para navegador → Next.js y Next.js → Spring, y conserva `SESSION_COOKIE_SECURE=true`. La cookie que Next.js entrega al navegador es `HttpOnly`, `Secure` para orígenes de producción y `SameSite=Lax`; en localhost sobre HTTP se omite `Secure` para poder probar el flujo. Spring valida cada solicitud protegida. OpenAPI queda deshabilitado en producción por defecto; puede habilitarse con `OPENAPI_ENABLED=true`.
 
+Para entregar recuperación de contraseña configura el correo SMTP con `MAIL_HOST`, `MAIL_PORT`, `MAIL_USERNAME`, `MAIL_PASSWORD` y `MAIL_FROM`. `NEXO_PASSWORD_RESET_URL` debe apuntar a la página web pública `/reset-password` (por ejemplo, `https://tienda.example.com/reset-password` en producción); su valor local predeterminado es `http://localhost:3000/reset-password`.
+
 ## PostgreSQL compartido por el equipo
 
 `docker compose up -d` crea una base local persistente en la computadora actual; no comparte datos con otras computadoras. El equipo puede utilizar una instancia PostgreSQL compartida; el proveedor, host, nombre de proyecto y credenciales se distribuyen únicamente por el canal privado del equipo. La API se conecta por TLS con verificación del certificado.
@@ -59,14 +61,17 @@ No se crean cuentas ni contraseñas en Flyway. Para crear el primer administrado
 
 ## API de identidad
 
-Todas las escrituras requieren un token CSRF; las operaciones privadas también requieren una sesión. Obtén el token antes de iniciar sesión o registrarte y envía la cookie de sesión y la cabecera `X-CSRF-TOKEN` en cada POST. El navegador usa `credentials: include` con rutas relativas; la autorización se aplica en Spring.
+Las escrituras con sesión web requieren un token CSRF; las rutas públicas de recuperación de contraseña están exentas y limitadas por IP para que también puedan usarse desde la app móvil. Las operaciones privadas requieren una sesión. Obtén el token antes de iniciar sesión o registrarte y envía la cookie de sesión y la cabecera `X-CSRF-TOKEN` en cada escritura protegida. El navegador usa `credentials: include` con rutas relativas; la autorización se aplica en Spring.
 
 | Método y ruta | Acceso | Resultado |
 |---|---|---|
 | `GET /api/auth/csrf` | Público | `{ "token": "…" }` |
 | `POST /api/auth/login` | Público + CSRF | Envía `mfaCode` si la cuenta tiene MFA activa; la API responde `401` con `MFA_REQUIRED` o `MFA_INVALID` hasta validar el segundo factor |
 | `POST /api/auth/register` | Público + CSRF | Crea un usuario con rol `customer`, inicia sesión y devuelve la cuenta |
+| `POST /api/auth/password-reset/request` | Público, limitado por IP | Siempre responde `202`; si la cuenta existe, envía un enlace de un solo uso válido por 30 minutos |
+| `POST /api/auth/password-reset/complete` | Público, limitado por IP | Consume el enlace, cambia la contraseña y revoca sesiones web y tokens móviles; `204 No Content` |
 | `GET /api/auth/me` | Sesión | Usuario autenticado y permisos vigentes |
+| `POST /api/auth/me/password` | Sesión + CSRF | Verifica la contraseña actual y, si está activa, MFA; cambia el hash y revoca las sesiones web y los tokens móviles de la cuenta; `204 No Content` |
 | `GET /api/auth/mfa` | Sesión | Estado MFA y cantidad de códigos de recuperación disponibles |
 | `POST /api/auth/mfa/enroll/start` | Sesión + CSRF | Requiere la contraseña actual; devuelve el secreto TOTP y URI de enrolamiento |
 | `POST /api/auth/mfa/enroll/complete` | Sesión + CSRF | Confirma TOTP y devuelve diez códigos de recuperación una sola vez |

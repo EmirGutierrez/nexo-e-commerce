@@ -7,6 +7,18 @@ spring:
     url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/nexo_commerce}
     username: ${DATABASE_USERNAME}
     password: ${DATABASE_PASSWORD}
+  mail:
+    host: ${MAIL_HOST:}
+    port: ${MAIL_PORT:587}
+    username: ${MAIL_USERNAME:}
+    password: ${MAIL_PASSWORD:}
+    from: ${MAIL_FROM:${MAIL_USERNAME:}}
+    properties:
+      mail.smtp.connectiontimeout: 5000
+      mail.smtp.timeout: 5000
+      mail.smtp.writetimeout: 5000
+      mail.smtp.auth: ${MAIL_SMTP_AUTH:true}
+      mail.smtp.starttls.enable: ${MAIL_SMTP_STARTTLS:true}
   jpa:
     open-in-view: false
     hibernate:
@@ -52,6 +64,8 @@ nexo:
       absolute-timeout: ${SESSION_ABSOLUTE_TIMEOUT:8h}
   mobile:
     access-token-lifetime: ${MOBILE_ACCESS_TOKEN_LIFETIME:7d}
+  auth:
+    password-reset-url: ${NEXO_PASSWORD_RESET_URL:http://localhost:3000/reset-password}
   bootstrap:
     admin:
       enabled: ${BOOTSTRAP_ADMIN_ENABLED:false}

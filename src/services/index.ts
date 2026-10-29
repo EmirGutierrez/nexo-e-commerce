@@ -10,7 +10,7 @@ interface ApiRecord<T extends JsonRecord = JsonRecord> { id: string; resource: s
 export type AdminTableRecord = Record<string, string | number>;
 export interface CheckoutQuote { subtotal: number; discount: number; total: number; items: { productId: string; productName: string; quantity: number; unitPrice: number; subtotal: number }[] }
 export interface OrderSubmission { reference: string; total: number; paymentMethod: PaymentMethod; paymentStatus: string }
-type CheckoutInput = { customerName: string; customerEmail: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[]; discountCode?: string; receiptImage?: string; receiptFileName?: string; receiptReference?: string };
+type CheckoutInput = { customerName: string; customerEmail: string; nit: string; customerPhone?: string; address: string; paymentMethod: PaymentMethod; items: { productId: string; quantity: number }[]; discountCode?: string; receiptImage?: string; receiptFileName?: string; receiptReference?: string };
 
 const business = {
   list: (resource: string) => apiClient.get<ApiRecord[]>(`/api/business/${encodeURIComponent(resource)}`),
@@ -22,6 +22,11 @@ const dataWithId = <T extends JsonRecord>(record: ApiRecord<T>): T & { id: strin
 const value = (data: JsonRecord, ...keys: string[]) => keys.map((key) => data[key]).find((entry) => entry !== undefined && entry !== null);
 const stringValue = (data: JsonRecord, ...keys: string[]) => String(value(data, ...keys) ?? '');
 const numberValue = (data: JsonRecord, ...keys: string[]) => Number(value(data, ...keys) ?? 0);
+function parseRequiredCount(raw: unknown, label: string): number {
+  const count = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d+$/.test(raw.trim()) ? Number(raw) : Number.NaN;
+  if (!Number.isSafeInteger(count) || count < 0) throw new Error(`La API devolvió un conteo de ${label} inválido o incompleto.`);
+  return count;
+}
 
 function mapProduct(record: ApiRecord): Product {
   const data = record.data;
@@ -71,7 +76,17 @@ export const authService = {
   acceptInvitation: async (token: string, password: string): Promise<void> => {
     await apiClient.post<void>('/api/auth/accept-invitation', { token, password });
   },
+  requestPasswordReset: (email: string): Promise<void> =>
+    apiClient.post<void>('/api/auth/password-reset/request', { email }),
+  completePasswordReset: async (token: string, newPassword: string): Promise<void> => {
+    await apiClient.post<void>('/api/auth/password-reset/complete', { token, newPassword });
+    clearCsrfToken();
+  },
   logout: async (): Promise<void> => { try { await apiClient.post<void>('/api/auth/logout'); } finally { clearCsrfToken(); } },
+  changePassword: async (currentPassword: string, newPassword: string, mfaCode?: string): Promise<void> => {
+    await apiClient.post<void>('/api/auth/me/password', { currentPassword, newPassword, ...(mfaCode ? { mfaCode } : {}) });
+    clearCsrfToken();
+  },
   currentUser: async (): Promise<User | null> => {
     try { return mapApiUser(await apiClient.get<ApiUser>('/api/auth/me')); }
     catch (error) { if (error instanceof ApiError && error.status === 401) return null; throw error; }
@@ -147,7 +162,10 @@ function mapOrder(record: ApiRecord): Order {
     date: stringValue(data, 'date', 'Fecha').slice(0, 10), items: itemDetails.length || numberValue(data, 'itemsCount'), itemDetails,
     total: numberValue(data, 'total', 'Total'),
     status: stringValue(data, 'status', 'Estado') as Order['status'],
-    payment: rawPayment === 'transfer' || rawPayment === 'Transferencia' ? 'Transferencia' : 'Tarjeta' };
+    payment: rawPayment === 'transfer' || rawPayment === 'Transferencia' ? 'Transferencia' : 'Tarjeta',
+    customerEmail: stringValue(data, 'customerEmail'), customerPhone: stringValue(data, 'customerPhone'), address: stringValue(data, 'address'),
+    nit: stringValue(data, 'nit'), paymentStatus: stringValue(data, 'paymentStatus'), subtotal: numberValue(data, 'subtotal'),
+    discountAmount: numberValue(data, 'discountAmount'), discountCode: stringValue(data, 'discountCode') };
 }
 function orderData(order: Partial<Order>): JsonRecord {
   return { customer: order.customer || '', date: order.date || new Date().toISOString(), total: order.total || 0,
@@ -156,7 +174,9 @@ function orderData(order: Partial<Order>): JsonRecord {
 
 export const merchandisePurchaseService = {
   list: async (): Promise<MerchandisePurchase[]> => (await business.list('purchases')).map(mapPurchase),
-  create: async (purchase: Omit<MerchandisePurchase, 'id'>): Promise<MerchandisePurchase> => mapPurchase(await business.create('purchases', purchase as unknown as JsonRecord)),
+  create: async (purchase: Omit<MerchandisePurchase, 'id'>, options: { confirmHistoricalDate?: boolean } = {}): Promise<MerchandisePurchase> => mapPurchase(await business.create('purchases', {
+    ...purchase, ...(options.confirmHistoricalDate ? { confirmHistoricalDate: true } : {}),
+  } as unknown as JsonRecord)),
   updateStatus: async (id: string, status: MerchandisePurchase['status']) => {
     const record = (await business.list('purchases')).find((entry) => entry.id === id);
     if (!record) throw new Error('No se encontró la compra.');
@@ -170,12 +190,28 @@ function mapPurchase(record: ApiRecord): MerchandisePurchase {
     date: stringValue(data, 'date').slice(0, 10), items: Array.isArray(data.items) ? data.items as MerchandisePurchase['items'] : [],
     total: numberValue(data, 'total'), status: stringValue(data, 'status') as MerchandisePurchase['status'] };
 }
+export interface CustomerDetails {
+  customer: Record<string, unknown>;
+  wishlistItems: number;
+  addresses: string[];
+  orders: { id: string; orderNumber?: string; date?: string; status?: string; paymentMethod?: string; paymentStatus?: string; total?: number;
+    items?: { productName?: string; quantity?: number; unitPrice?: number; subtotal?: number }[] }[];
+}
 export const customerService = {
   list: async (): Promise<User[]> => (await business.list('customers')).map((record) => {
     const data = record.data; const words = stringValue(data, 'name').trim().split(/\s+/).filter(Boolean);
     return { id: record.id, name: stringValue(data, 'name'), email: stringValue(data, 'email'), role: 'customer',
       initials: words.slice(0, 2).map((word) => word[0]).join('').toUpperCase(), status: stringValue(data, 'status') === 'Inactivo' ? 'Inactivo' : 'Activo' };
   }),
+  details: async (id: string): Promise<CustomerDetails> => {
+    const response = await apiClient.get<Record<string, unknown>>(`/api/business/customers/${encodeURIComponent(id)}/details`);
+    const wishlistItems = parseRequiredCount(response.wishlistItems, 'favoritos');
+    if (!response.customer || typeof response.customer !== 'object' || Array.isArray(response.customer)
+      || !Array.isArray(response.addresses) || !Array.isArray(response.orders)) {
+      throw new Error('La API devolvió un detalle de cliente incompleto.');
+    }
+    return { ...response, wishlistItems } as unknown as CustomerDetails;
+  },
 };
 
 export const supplierService = {
@@ -246,14 +282,14 @@ export const salesService = {
   },
   listInPerson: async (): Promise<InPersonSale[]> => (await business.list('sales')).map((record) => {
     const data = record.data;
-    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
+    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), customerEmail: stringValue(data, 'customerEmail'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
       paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], ...(data.amountReceived === undefined ? {} : { amountReceived: numberValue(data, 'amountReceived') }),
       ...(data.change === undefined ? {} : { change: numberValue(data, 'change') }), items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
   }),
-  createInPerson: async (input: { customerName: string; nit: string; paymentMethod: 'cash' | 'card'; amountReceived?: number; items: { productId: string; quantity: number }[] }): Promise<InPersonSale> => {
+  createInPerson: async (input: { customerName: string; customerEmail: string; nit: string; paymentMethod: 'cash' | 'card'; amountReceived?: number; items: { productId: string; quantity: number }[] }): Promise<InPersonSale> => {
     const record = await apiClient.post<ApiRecord>('/api/business/sales/record', input);
     const data = record.data;
-    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
+    return { id: record.id, date: stringValue(data, 'date'), seller: stringValue(data, 'seller'), customerName: stringValue(data, 'customerName'), customerEmail: stringValue(data, 'customerEmail'), nit: stringValue(data, 'nit'), paymentMethod: stringValue(data, 'paymentMethod') as InPersonSale['paymentMethod'],
       paymentStatus: stringValue(data, 'paymentStatus') as InPersonSale['paymentStatus'], ...(data.amountReceived === undefined ? {} : { amountReceived: numberValue(data, 'amountReceived') }),
       ...(data.change === undefined ? {} : { change: numberValue(data, 'change') }), items: Array.isArray(data.items) ? data.items as InPersonSale['items'] : [], total: numberValue(data, 'total') };
   },
@@ -334,8 +370,10 @@ export const accountingService = {
   list: async (): Promise<AccountingMovement[]> => (await business.list('accounting')).map((record) => ({ id: record.id, date: stringValue(record.data, 'date'),
     concept: stringValue(record.data, 'concept'), category: stringValue(record.data, 'category'), type: stringValue(record.data, 'type') as AccountingMovement['type'],
     amount: numberValue(record.data, 'amount'), status: stringValue(record.data, 'status') as AccountingMovement['status'] })),
-  create: async (movement: Omit<AccountingMovement, 'id'>): Promise<AccountingMovement> => {
-    const record = await business.create('accounting', movement as unknown as JsonRecord);
+  create: async (movement: Omit<AccountingMovement, 'id'>, options: { confirmHistoricalDate?: boolean } = {}): Promise<AccountingMovement> => {
+    const record = await business.create('accounting', {
+      ...movement, ...(options.confirmHistoricalDate ? { confirmHistoricalDate: true } : {}),
+    } as unknown as JsonRecord);
     return { ...movement, id: record.id };
   },
   updateStatus: async (id: string, status: AccountingMovement['status']) => {
@@ -387,7 +425,7 @@ function toAdminRow(section: string, data: JsonRecord): AdminTableRecord {
     Ubicación: stringValue(data, 'location', 'Ubicación'), Descripción: stringValue(data, 'description', 'Descripción'),
   };
   if (section === 'categories') return { Nombre: stringValue(data, 'name'), Productos: numberValue(data, 'products'), 'Ventas del mes': numberValue(data, 'monthlySales'), Estado: stringValue(data, 'status') };
-  if (section === 'customers') return { Nombre: stringValue(data, 'name'), Correo: stringValue(data, 'email'), Pedidos: numberValue(data, 'orders'), 'Total comprado': numberValue(data, 'totalPurchased'), Favoritos: numberValue(data, 'wishlistItems'), Estado: stringValue(data, 'status') };
+  if (section === 'customers') return { Nombre: stringValue(data, 'name'), Correo: stringValue(data, 'email'), Pedidos: numberValue(data, 'orders'), 'Total comprado': numberValue(data, 'totalPurchased'), Favoritos: parseRequiredCount(value(data, 'wishlistItems'), 'favoritos'), Estado: stringValue(data, 'status') };
   if (section === 'orders' || section === 'sales') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };
   if (section === 'transfers' || section === 'payments') return { Pedido: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Valor: numberValue(data, 'total'), 'Estado de pago': stringValue(data, 'paymentStatus') };
   if (section === 'invoices') return { Referencia: stringValue(data, 'orderNumber') || String(data.id || ''), Cliente: stringValue(data, 'customer'), Fecha: stringValue(data, 'date').slice(0, 10), Total: numberValue(data, 'total'), Estado: stringValue(data, 'status') };
@@ -400,7 +438,8 @@ export const adminTableService = {
     if (section === 'inventory') return (await inventoryProductRecords()).map((record) => ({ id: record.id, data: toAdminRow('inventory', dataWithId(record)) }));
     if (section === 'users') return (await apiClient.get<ApiUser[]>('/api/users')).map((user) => ({ id: user.id,
       data: { Nombre: user.name, Correo: user.email, Rol: roleLabels[user.role as User['role']] || user.role,
-        'Último acceso': user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('es-GT') : 'Nunca', Estado: user.status === 'ACTIVE' ? 'Activo' : user.status === 'PENDING' ? 'Pendiente' : 'Inactivo' } }));
+        'Último acceso': user.lastLoginAt ? new Date(user.lastLoginAt).toLocaleString('es-GT') : 'Nunca', __lastLoginAt: user.lastLoginAt ? Date.parse(user.lastLoginAt) : -1,
+        Estado: user.status === 'ACTIVE' ? 'Activo' : user.status === 'PENDING' ? 'Pendiente' : 'Inactivo' } }));
     if (section === 'roles-permissions') return (await roleService.list()).map((role) => ({ id: role.id,
       data: { Nombre: role.name, Usuarios: role.users, Permisos: Object.values(role.permissions).flat().length, 'Última actualización': '—', Estado: 'Activo' } }));
     if (section === 'inventory/history') return (await inventoryService.movements()).map((movement) => ({ id: String(movement.id), data: {

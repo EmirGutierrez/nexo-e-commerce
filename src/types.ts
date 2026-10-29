@@ -20,6 +20,7 @@ export interface Announcement {
   title: string;
   description: string;
   href: string;
+  image?: string;
   status: 'Activa' | 'Pausada';
 }
 
@@ -98,6 +99,14 @@ export interface Order {
   total: number;
   status: 'Completado' | 'En preparación' | 'Pendiente de pago' | 'Cancelado';
   payment: 'Tarjeta' | 'Transferencia';
+  customerEmail?: string;
+  customerPhone?: string;
+  address?: string;
+  nit?: string;
+  paymentStatus?: string;
+  subtotal?: number;
+  discountAmount?: number;
+  discountCode?: string;
 }
 
 export interface OrderItem {
@@ -123,6 +132,7 @@ export interface InPersonSale {
   date: string;
   seller: string;
   customerName?: string;
+  customerEmail?: string;
   nit?: string;
   paymentMethod: 'cash' | 'card' | 'transfer';
   paymentStatus: 'Completada' | 'Simulada' | 'Pendiente de verificación';

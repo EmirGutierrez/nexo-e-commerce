@@ -56,6 +56,13 @@ services:
       SESSION_COOKIE_SAME_SITE: Lax
       OPENAPI_ENABLED: "false"
       MFA_ENCRYPTION_KEY: ${MFA_ENCRYPTION_KEY:-}
+      MAIL_HOST: ${MAIL_HOST:-}
+      MAIL_PORT: ${MAIL_PORT:-587}
+      MAIL_USERNAME: ${MAIL_USERNAME:-}
+      MAIL_PASSWORD: ${MAIL_PASSWORD:-}
+      MAIL_FROM: ${MAIL_FROM:-}
+      MAIL_SMTP_AUTH: ${MAIL_SMTP_AUTH:-true}
+      MAIL_SMTP_STARTTLS: ${MAIL_SMTP_STARTTLS:-true}
       BOOTSTRAP_ADMIN_ENABLED: ${BOOTSTRAP_ADMIN_ENABLED:-false}
       BOOTSTRAP_ADMIN_NAME: ${BOOTSTRAP_ADMIN_NAME:-}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
@@ -135,6 +142,54 @@ services:
       - site
       - api
 
+  cloudflared:
+    image: cloudflare/cloudflared:2026.10.2@sha256:0e56c13c7058fcef9c4f0e7d83372f82330548dbf8f8b366f3d8b506526d93b2
+    profiles:
+      - cloudflare-tunnel
+    command: ["tunnel", "run", "--token", "${CLOUDFLARE_TUNNEL_TOKEN:-}"]
+    restart: unless-stopped
+    logging: *default-logging
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    read_only: true
+    tmpfs:
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - cloudflare-egress
+
+  wireguard:
+    build:
+      context: ./deploy/wireguard
+      dockerfile: Dockerfile
+    profiles:
+      - wireguard
+    restart: unless-stopped
+    logging: *default-logging
+    network_mode: host
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+    cap_add:
+      - NET_ADMIN
+      - DAC_READ_SEARCH
+    read_only: true
+    tmpfs:
+      - /run:rw,noexec,nosuid,nodev,size=8m
+      - /tmp:rw,noexec,nosuid,nodev,size=16m
+    volumes:
+      - ./deploy/.runtime/wireguard/wg0.conf:/etc/wireguard/wg0.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "ip link show wg0 >/dev/null 2>&1"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+
 volumes:
   nexo-commerce-prod-data:
   nexo-commerce-caddy-data:
@@ -150,3 +205,4 @@ networks:
     internal: true
   database:
     internal: true
+  cloudflare-egress:

@@ -32,6 +32,10 @@ public class BusinessRecordController {
     @Operation(summary = "Lista registros persistentes del módulo autorizado.")
     public List<BusinessRecordResponse> list(@PathVariable String resource) { return service.list(resource); }
 
+    @GetMapping("/customers/{id}/details")
+    @Operation(summary = "Consulta perfil, direcciones e historial de pedidos de un cliente autorizado.")
+    public Map<String, Object> customerDetails(@PathVariable UUID id) { return service.customerDetails(id); }
+
     @PostMapping("/{resource}")
     @ResponseStatus(HttpStatus.CREATED)
     @Operation(summary = "Crea un registro de negocio con validaciones y auditoría de inventario.")

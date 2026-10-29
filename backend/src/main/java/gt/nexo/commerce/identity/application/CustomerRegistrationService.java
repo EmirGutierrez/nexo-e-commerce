@@ -7,6 +7,7 @@ import gt.nexo.commerce.identity.infrastructure.persistence.RoleEntity;
 import gt.nexo.commerce.identity.infrastructure.persistence.RoleRepository;
 import gt.nexo.commerce.identity.infrastructure.persistence.UserStatus;
 import gt.nexo.commerce.shared.errors.AccountAlreadyExistsException;
+import gt.nexo.commerce.shared.validation.DisplayNamePolicy;
 import gt.nexo.commerce.business.application.BusinessRuleException;
 import org.springframework.http.HttpStatus;
 import java.util.Locale;
@@ -33,6 +34,10 @@ public class CustomerRegistrationService {
 
     @Transactional
     public void register(RegisterRequest request) {
+        if (!DisplayNamePolicy.isValid(request.name())) {
+            throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "INVALID_PROFILE_NAME",
+                    "El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.");
+        }
         if (!PasswordPolicy.isWithinBcryptLimit(request.password())) {
             throw new BusinessRuleException(HttpStatus.BAD_REQUEST, "PASSWORD_TOO_LONG",
                     "La contraseña no puede superar 72 bytes UTF-8 por el algoritmo de almacenamiento seguro.");

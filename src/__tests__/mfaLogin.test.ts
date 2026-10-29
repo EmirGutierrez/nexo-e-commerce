@@ -49,6 +49,19 @@ describe('MFA login and account API', () => {
     await expect(authService.login(user.email, 'wrong-password')).resolves.toBeNull();
   });
 
+  it('requests and completes password recovery through the public endpoints', async () => {
+    apiPost.mockResolvedValue(undefined);
+
+    await authService.requestPasswordReset(user.email);
+    expect(apiPost).toHaveBeenNthCalledWith(1, '/api/auth/password-reset/request', { email: user.email });
+
+    await authService.completePasswordReset('single-use-token', 'a-new-secure-password');
+    expect(apiPost).toHaveBeenNthCalledWith(2, '/api/auth/password-reset/complete', {
+      token: 'single-use-token', newPassword: 'a-new-secure-password',
+    });
+    expect(clearCsrfToken).toHaveBeenCalledOnce();
+  });
+
   it('uses the authenticated MFA endpoints for enrollment and status', async () => {
     apiGet.mockResolvedValue({ enabled: false, enrollmentPending: false, recoveryCodesRemaining: 0 });
     apiPost.mockResolvedValue({ secret: 'SECRET', otpauthUri: 'otpauth://totp/NEXO' });

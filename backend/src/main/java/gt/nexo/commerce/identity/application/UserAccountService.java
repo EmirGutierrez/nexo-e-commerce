@@ -4,6 +4,7 @@ import gt.nexo.commerce.identity.api.dto.UserResponse;
 import gt.nexo.commerce.identity.infrastructure.persistence.AppUserRepository;
 import gt.nexo.commerce.identity.infrastructure.persistence.UserStatus;
 import gt.nexo.commerce.business.application.BusinessRuleException;
+import gt.nexo.commerce.shared.validation.DisplayNamePolicy;
 import org.springframework.http.HttpStatus;
 import gt.nexo.commerce.identity.infrastructure.persistence.RoleRepository;
 import org.springframework.security.access.AccessDeniedException;
@@ -46,8 +47,8 @@ public class UserAccountService {
     @Transactional
     public UserResponse updateOwnProfile(UUID id, String displayName) {
         String name = displayName == null ? "" : displayName.trim();
-        if (name.length() < 2 || name.length() > 160) throw new BusinessRuleException(
-                HttpStatus.BAD_REQUEST, "INVALID_PROFILE_NAME", "El nombre debe tener entre 2 y 160 caracteres.");
+        if (!DisplayNamePolicy.isValid(name)) throw new BusinessRuleException(
+                HttpStatus.BAD_REQUEST, "INVALID_PROFILE_NAME", "El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.");
         var user = users.findById(id)
                 .filter(account -> account.getStatus() == UserStatus.ACTIVE)
                 .orElseThrow(() -> new UsernameNotFoundException("The authenticated account is unavailable"));

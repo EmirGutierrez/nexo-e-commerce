@@ -3,15 +3,15 @@ import { roleLabels } from '../types';
 import { apiClient } from '../shared/services/http-client';
 
 export const permissionModules: { id: PermissionModule; label: string; actions: PermissionAction[] }[] = [
-  { id: 'dashboard', label: 'Dashboard', actions: ['view'] },
-  { id: 'products', label: 'Productos', actions: ['view', 'create', 'edit', 'delete'] },
+  { id: 'dashboard', label: 'Resumen', actions: ['view'] },
+  { id: 'products', label: 'Catálogo', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'inventory', label: 'Inventario', actions: ['view', 'create', 'edit', 'delete', 'approve'] },
   { id: 'orders', label: 'Pedidos', actions: ['view', 'edit', 'approve'] },
   { id: 'sales', label: 'Ventas', actions: ['view', 'create', 'edit', 'approve'] },
   { id: 'customers', label: 'Clientes', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'suppliers', label: 'Proveedores', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'accounting', label: 'Ingresos y egresos', actions: ['view', 'create', 'edit'] },
-  { id: 'promotions', label: 'Promociones', actions: ['view', 'create', 'edit', 'delete'] },
+  { id: 'promotions', label: 'Ofertas y anuncios', actions: ['view', 'create', 'edit', 'delete'] },
   { id: 'settings', label: 'Configuración', actions: ['view', 'edit'] },
   { id: 'users', label: 'Usuarios y roles', actions: ['view', 'create', 'edit', 'delete'] },
 ];

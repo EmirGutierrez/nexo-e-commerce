@@ -150,7 +150,7 @@ async function forward(request: NextRequest, context: RouteContext<'/api/[...pat
     });
     relaySessionCookie(upstream, outgoing, request, tabCookieName);
     clearLegacySessionCookie(outgoing, request);
-    if (request.method === 'POST' && path.join('/') === 'auth/logout' && upstream.ok) {
+    if (request.method === 'POST' && ['auth/logout', 'auth/me/password', 'auth/password-reset/complete'].includes(path.join('/')) && upstream.ok) {
       if (tabCookieName) setSessionCookie(outgoing, request, tabCookieName, '', true);
     }
     return outgoing;

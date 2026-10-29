@@ -1,10 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Archive, Ban, Check, ChevronDown, Download, Eye, Filter, Package, Pencil, Plus, Search, SlidersHorizontal, Trash2, X } from 'lucide-react';
-import { adminTableService, brandService, inventoryService, type AdminTableRecord } from '../../../services';
+import { adminTableService, brandService, customerService, inventoryService, type AdminTableRecord } from '../../../services';
 import { formatQ } from '../../../data/mockData';
 import { useApp } from '../../../contexts/AppContext';
 import { roleLabels, type Brand, type Role } from '../../../types';
 import { roleService } from '../../../services/roleService';
+import { PRODUCT_IMAGE_MAX_DATA_URL_LENGTH, PRODUCT_IMAGE_MIN_SIDE, productImageCompressionDimensions } from '../utils/productImageProcessing';
+import { isValidPersonName } from '../../../shared/utils/personName';
 
 export interface AdminModuleConfig {
   title: string;
@@ -58,20 +60,22 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const [locationOptions, setLocationOptions] = useState<string[]>([]);
   const [locationOptionsLoading, setLocationOptionsLoading] = useState(false);
   const [locationOptionsError, setLocationOptionsError] = useState('');
+  const [customerDetail, setCustomerDetail] = useState<Awaited<ReturnType<typeof customerService.details>> | null>(null);
+  const [customerDetailLoading, setCustomerDetailLoading] = useState(false);
   const { reportLowStock, assignRole, user, role } = useApp();
   const isProductSection = section === 'products' || section === 'inventory';
   const loadBrandOptions = useCallback(async () => {
     setBrandOptionsLoading(true);
     setBrandOptionsError('');
     try { setBrandOptions(await brandService.list()); }
-    catch (cause) { setBrandOptionsError(cause instanceof Error ? cause.message : 'No se pudieron cargar las marcas desde la API.'); }
+    catch (cause) { setBrandOptionsError(cause instanceof Error ? cause.message : 'No se pudieron cargar las marcas.'); }
     finally { setBrandOptionsLoading(false); }
   }, []);
   const loadLocationOptions = useCallback(async () => {
     setLocationOptionsLoading(true);
     setLocationOptionsError('');
     try { setLocationOptions(await inventoryService.locations()); }
-    catch (cause) { setLocationOptionsError(cause instanceof Error ? cause.message : 'No se pudieron cargar las ubicaciones desde la API.'); }
+    catch (cause) { setLocationOptionsError(cause instanceof Error ? cause.message : 'No se pudieron cargar las ubicaciones.'); }
     finally { setLocationOptionsLoading(false); }
   }, []);
 
@@ -82,7 +86,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
       if (!active) return;
       setEntries(rows);
       if (section === 'inventory') inventoryService.products().then((products) => { if (active) reportLowStock(products); });
-    }).catch((cause) => { if (active) setLoadError(cause instanceof Error ? cause.message : 'No se pudieron cargar los registros desde PostgreSQL.'); })
+    }).catch((cause) => { if (active) setLoadError(cause instanceof Error ? cause.message : 'No se pudieron cargar los registros.'); })
       .finally(() => { if (active) setLoading(false); });
     return () => { active = false; };
   }, [section, reportLowStock]);
@@ -116,7 +120,8 @@ export default function AdminCrudModule({ section, config }: { section: string; 
       const statusMatch = statusFilter === 'Todos' || (stateColumn && data[stateColumn] === statusFilter);
       return textMatch && statusMatch;
     });
-    if (sortBy) filtered.sort((a, b) => String(a.data[sortBy] ?? '').localeCompare(String(b.data[sortBy] ?? ''), 'es', { numeric: true }));
+    if (sortBy === 'Último acceso') filtered.sort((a, b) => Number(b.data.__lastLoginAt ?? -1) - Number(a.data.__lastLoginAt ?? -1));
+    else if (sortBy) filtered.sort((a, b) => String(a.data[sortBy] ?? '').localeCompare(String(b.data[sortBy] ?? ''), 'es', { numeric: true }));
     return filtered;
   }, [entries, query, statusFilter, stateColumn, sortBy, brandOptions]);
   const pageCount = Math.max(1, Math.ceil(entriesForView.length / pageSize));
@@ -127,7 +132,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     if (section === 'products') {
       const publicCount = statuses.filter((status) => status !== 'Inactivo').length;
       return [
-        { label: 'Productos registrados', value: String(entries.length), detail: 'Almacenados en PostgreSQL' },
+        { label: 'Productos registrados', value: String(entries.length), detail: 'Registrados' },
         { label: 'Visibles en tienda', value: String(publicCount), detail: 'Publicación activa', tone: 'positive' },
         { label: 'Ocultos', value: String(statuses.length - publicCount), detail: 'No aparecen en la página pública', tone: 'warning' },
         { label: 'Resultado actual', value: String(entriesForView.length), detail: 'Según búsqueda y filtros' },
@@ -136,14 +141,14 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     if (section === 'inventory') {
       const quantities = entries.map(({ data }) => Number(data.Existencias || 0));
       return [
-        { label: 'Productos', value: String(entries.length), detail: 'Almacenados en PostgreSQL' },
+        { label: 'Productos', value: String(entries.length), detail: 'Registrados' },
         { label: 'Unidades disponibles', value: String(quantities.reduce((sum, quantity) => sum + quantity, 0)), detail: 'Suma de existencias' },
         { label: 'Sin stock', value: String(statuses.filter((status) => status === 'Sin stock').length), detail: 'Requieren reposición', tone: 'warning' },
         { label: 'Inactivos', value: String(statuses.filter((status) => status === 'Inactivo').length), detail: 'No disponibles para venta' },
       ];
     }
     return [
-      { label: 'Registros', value: String(entries.length), detail: 'Almacenados en PostgreSQL' },
+      { label: 'Registros', value: String(entries.length), detail: 'Registrados' },
       { label: 'Coinciden con filtros', value: String(entriesForView.length), detail: query || statusFilter !== 'Todos' ? 'Resultado actual' : 'Todos los registros' },
       { label: 'Activos', value: String(statuses.filter((status) => ['Activo', 'Activa', 'En stock', 'Completado', 'Aprobada', 'Emitida'].includes(status)).length), detail: 'Estado vigente', tone: 'positive' },
       { label: 'Pendientes / inactivos', value: String(statuses.filter((status) => !['Activo', 'Activa', 'En stock', 'Completado', 'Aprobada', 'Emitida'].includes(status)).length), detail: 'Requieren seguimiento', tone: 'warning' },
@@ -163,7 +168,7 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     setActiveId(''); setDraft(initialDraft); setError(''); setFeedback(''); setInviteLink(''); setMode('create');
   };
   const openEdit = (entry: Entry) => { if (isProductSection) void loadBrandOptions(); setActiveId(entry.id); setDraft(Object.fromEntries(formColumns.map((column) => [column, String(entry.data[column] ?? '')]))); setError(''); setMode('edit'); };
-  const openView = (entry: Entry) => { setActiveId(entry.id); setMode('view'); };
+  const openView = (entry: Entry) => { setActiveId(entry.id); setCustomerDetail(null); setMode('view'); };
   const openConfirm = (entry: Entry, action: 'delete' | 'annul' | 'archive') => {
     setActiveId(entry.id); setConfirmMessage(action); setError(''); setMode('confirm');
   };
@@ -174,6 +179,16 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     window.addEventListener('keydown', closeOnEscape);
     return () => window.removeEventListener('keydown', closeOnEscape);
   }, [mode, isProductSection]);
+
+  useEffect(() => {
+    if (mode !== 'view' || section !== 'customers' || !activeId) return;
+    let active = true;
+    setCustomerDetailLoading(true);
+    customerService.details(activeId).then((details) => { if (active) setCustomerDetail(details); })
+      .catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudo cargar el detalle del cliente.'); })
+      .finally(() => { if (active) setCustomerDetailLoading(false); });
+    return () => { active = false; };
+  }, [activeId, mode, section]);
 
   const saveRecord = async (event: React.FormEvent) => {
     event.preventDefault(); setError('');
@@ -195,6 +210,9 @@ export default function AdminCrudModule({ section, config }: { section: string; 
         nextRecord[column] = parsed;
       } else nextRecord[column] = value;
     }
+    if ((section === 'customers' || section === 'users') && !isValidPersonName(String(nextRecord.Nombre || ''))) {
+      setError('El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.'); return;
+    }
     if (section === 'inventory') {
       const quantity = Number(nextRecord.Existencias);
       if (nextRecord.Estado === 'En stock' && quantity <= 0) { setError('Un producto En stock debe tener al menos una existencia.'); return; }
@@ -204,13 +222,13 @@ export default function AdminCrudModule({ section, config }: { section: string; 
     try {
       if (mode === 'create') {
         const entry = await adminTableService.create(section, nextRecord);
-        replaceEntries((current) => [entry, ...current]); setPage(1); setFeedback(section === 'users' ? 'Invitación creada. Comparte el enlace una sola vez por un canal seguro.' : 'Registro guardado en PostgreSQL.');
+        replaceEntries((current) => [entry, ...current]); setPage(1); setFeedback(section === 'users' ? 'Invitación creada. Comparte el enlace una sola vez por un canal seguro.' : 'Registro guardado correctamente.');
         setInviteLink(entry.inviteUrl || '');
       } else {
         const result = await adminTableService.update(section, activeId, nextRecord);
         const selectedRole = section === 'users' ? (Object.keys(roleLabels) as Role[]).find((role) => roleLabels[role] === nextRecord.Rol) : undefined;
         if (selectedRole && activeId === user?.id) assignRole(activeId, selectedRole);
-        replaceEntries((current) => current.map((entry) => entry.id === activeId ? result : entry)); setFeedback('Cambios guardados en PostgreSQL.');
+        replaceEntries((current) => current.map((entry) => entry.id === activeId ? result : entry)); setFeedback('Cambios guardados correctamente.');
       }
       if (section === 'inventory') await loadLocationOptions();
       closeDialog();
@@ -262,14 +280,14 @@ export default function AdminCrudModule({ section, config }: { section: string; 
             ? 'Invitación revocada y registro pendiente eliminado.'
             : section === 'users'
               ? 'Usuario eliminado del equipo, sus sesiones se cerraron y el historial operativo se conservó.'
-              : 'Registro eliminado de PostgreSQL.');
+              : 'Registro eliminado correctamente.');
         }
       } else if (confirmMessage === 'archive') {
-        const updated = { ...entry.data, Estado: 'Inactivo' }; const result = await adminTableService.update(section, activeId, updated); replaceEntries((current) => current.map((item) => item.id === activeId ? result : item)); setFeedback('Proveedor archivado en PostgreSQL.');
+        const updated = { ...entry.data, Estado: 'Inactivo' }; const result = await adminTableService.update(section, activeId, updated); replaceEntries((current) => current.map((item) => item.id === activeId ? result : item)); setFeedback('Proveedor archivado correctamente.');
       } else {
         const statusKey = stateColumn || 'Estado';
         const nextStatus = section === 'sales' ? 'Cancelado' : section === 'invoices' ? 'Cancelada' : 'Rechazada';
-        const updated = { ...entry.data, [statusKey]: nextStatus }; const result = await adminTableService.update(section, activeId, updated); replaceEntries((current) => current.map((item) => item.id === activeId ? result : item)); setFeedback('Estado actualizado en PostgreSQL.');
+        const updated = { ...entry.data, [statusKey]: nextStatus }; const result = await adminTableService.update(section, activeId, updated); replaceEntries((current) => current.map((item) => item.id === activeId ? result : item)); setFeedback('Estado actualizado correctamente.');
       }
       closeDialog();
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo completar la acción. Intenta nuevamente.'); }
@@ -303,22 +321,26 @@ export default function AdminCrudModule({ section, config }: { section: string; 
   const isPendingInvitation = section === 'users' && activeEntry?.data.Estado === 'Pendiente';
   const actionLabel = confirmMessage === 'delete' ? isPendingInvitation ? 'revocar invitación' : section === 'users' ? 'eliminar del equipo' : 'eliminar' : confirmMessage === 'archive' ? 'archivar' : 'anular';
 
-  return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Gestión NEXO · Datos persistentes</span><h1>{config.title}</h1><p>{config.description}</p></div><div className="heading-actions"><button className="button button-outline" onClick={exportRows} disabled={!entriesForView.length}><Download size={16} /> Exportar CSV</button>{canCreate && <button className="button button-primary" onClick={openCreate}><Plus size={17} /> {config.action}</button>}</div></div>
+  return <div className="module-page"><div className="admin-page-heading"><div><span className="eyebrow">Gestión NEXO</span><h1>{config.title}</h1><p>{config.description}</p></div><div className="heading-actions"><button className="button button-outline" onClick={exportRows} disabled={!entriesForView.length}><Download size={16} /> Exportar CSV</button>{canCreate && <button className="button button-primary" onClick={openCreate}><Plus size={17} /> {config.action}</button>}</div></div>
     <div className="module-stats">{actualStats.map((stat) => <div key={stat.label}><span>{stat.label}</span><strong>{stat.value}</strong><small className={stat.tone || ''}>{stat.detail}</small></div>)}</div>
     {feedback && <div className="crud-feedback" role="status">{feedback}{inviteLink && <p><a href={inviteLink}>{inviteLink}</a></p>}<button aria-label="Cerrar mensaje" onClick={() => { setFeedback(''); setInviteLink(''); }}><X size={14} /></button></div>}
     {loadError && <div className="crud-error" role="alert">{loadError}</div>}
-    <section className="panel module-panel"><div className="panel-heading"><div><h2>{config.title}</h2><span>{entriesForView.length} registros persistentes</span></div></div><div className="module-toolbar"><label className="search-box admin-search"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={`Buscar ${config.title.toLowerCase()}...`} />{query && <button type="button" onClick={() => { setQuery(''); setPage(1); }} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label>{stateColumn && <label className="crud-filter"><Filter size={15} /><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}>{statusOptions.map((option) => <option key={option}>{option}</option>)}</select></label>}<label className="crud-filter"><SlidersHorizontal size={15} /><select value={sortBy} onChange={(event) => { setSortBy(event.target.value); setPage(1); }} aria-label="Ordenar tabla"><option value="">Orden original</option>{config.columns.map((column) => <option key={column} value={column}>{column}</option>)}</select><ChevronDown size={13} /></label></div>
-      {loading ? <div className="empty-state">Cargando desde PostgreSQL…</div> : entriesForView.length ? <div className={`data-table crud-table ${tableLayoutClass}`}><div className="table-head">{config.columns.map((column) => <span key={column}>{section === 'products' && column === 'Estado' ? 'Visibilidad pública' : column}</span>)}<span>Acciones</span></div>{pageEntries.map((entry) => <div className="table-row" key={entry.id}>{config.columns.map((column) => <CrudCell key={column} value={column === "Marca" ? brandOptions.find((brand) => brand.id === entry.data.Marca)?.name || "Sin marca" : entry.data[column]} column={column} image={isProductSection && column === 'Producto' ? String(entry.data.Imagen || '') : undefined} onSelect={isProductSection && column === 'Producto' ? () => openView(entry) : undefined} />)}<div className="table-actions crud-actions"><button className="icon-button" aria-label={`Ver ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Ver detalle" onClick={() => openView(entry)}><Eye size={15} /></button>{canEdit && <button className="icon-button" aria-label={`Editar ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Editar" onClick={() => openEdit(entry)}><Pencil size={15} /></button>}{section === 'sales' && <button className="icon-button danger" aria-label={`Anular ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Anular con confirmación" onClick={() => openConfirm(entry, 'annul')}><Ban size={15} /></button>}{section === 'suppliers' && entry.data.Estado !== 'Inactivo' && <button className="icon-button danger" aria-label={`Archivar proveedor ${String(entry.data.Nombre)}`} title="Archivar con confirmación" onClick={() => openConfirm(entry, 'archive')}><Archive size={15} /></button>}{canDelete && <button className="icon-button danger" aria-label={`Eliminar ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Eliminar con confirmación" onClick={() => openConfirm(entry, 'delete')}><Trash2 size={15} /></button>}{canDeleteTeamMember && entry.data.Estado !== 'Pendiente' && entry.id !== user?.id && <button className="icon-button danger" aria-label={'Eliminar usuario del equipo: ' + String(entry.data.Nombre)} title="Eliminar usuario del equipo" onClick={() => openConfirm(entry, 'delete')}><Trash2 size={15} /></button>}{canRevokeInvitation && entry.data.Estado === 'Pendiente' && <button className="icon-button danger" aria-label={`Revocar invitación: ${String(entry.data.Nombre)}`} title="Revocar invitación pendiente" onClick={() => openConfirm(entry, 'delete')}><Trash2 size={15} /></button>}</div></div>)}</div> : loadError ? null : <AdminCrudEmptyState search={query} />}
+    <section className="panel module-panel"><div className="panel-heading"><div><h2>{config.title}</h2><span>{entriesForView.length} registros</span></div></div><div className="module-toolbar"><label className="search-box admin-search"><Search size={17} /><input value={query} onChange={(event) => { setQuery(event.target.value); setPage(1); }} placeholder={`Buscar ${config.title.toLowerCase()}...`} />{query && <button type="button" onClick={() => { setQuery(''); setPage(1); }} aria-label="Limpiar búsqueda"><X size={15} /></button>}</label>{stateColumn && <label className="crud-filter"><Filter size={15} /><select value={statusFilter} onChange={(event) => { setStatusFilter(event.target.value); setPage(1); }}>{statusOptions.map((option) => <option key={option}>{option}</option>)}</select><ChevronDown size={13} /></label>}<label className="crud-filter"><SlidersHorizontal size={15} /><select value={sortBy} onChange={(event) => { setSortBy(event.target.value); setPage(1); }} aria-label="Ordenar tabla"><option value="">Orden original</option>{config.columns.map((column) => <option key={column} value={column}>{column}</option>)}</select><ChevronDown size={13} /></label></div>
+      {loading ? <div className="empty-state">Cargando desde NEXO…</div> : entriesForView.length ? <div className={`data-table crud-table ${tableLayoutClass}`}><div className="table-head">{config.columns.map((column) => <span key={column}>{section === 'products' && column === 'Estado' ? 'Visibilidad pública' : column}</span>)}<span>Acciones</span></div>{pageEntries.map((entry) => <div className="table-row" key={entry.id}>{config.columns.map((column) => <CrudCell key={column} value={column === "Marca" ? brandOptions.find((brand) => brand.id === entry.data.Marca)?.name || "Sin marca" : entry.data[column]} column={column} image={isProductSection && column === 'Producto' ? String(entry.data.Imagen || '') : undefined} onSelect={isProductSection && column === 'Producto' ? () => openView(entry) : undefined} />)}<div className="table-actions crud-actions"><button className="icon-button" aria-label={`Ver ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Ver detalle" onClick={() => openView(entry)}><Eye size={15} /></button>{canEdit && <button className="icon-button" aria-label={`Editar ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Editar" onClick={() => openEdit(entry)}><Pencil size={15} /></button>}{section === 'sales' && <button className="icon-button danger" aria-label={`Anular ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Anular con confirmación" onClick={() => openConfirm(entry, 'annul')}><Ban size={15} /></button>}{section === 'suppliers' && entry.data.Estado !== 'Inactivo' && <button className="icon-button danger" aria-label={`Archivar proveedor ${String(entry.data.Nombre)}`} title="Archivar con confirmación" onClick={() => openConfirm(entry, 'archive')}><Archive size={15} /></button>}{canDelete && <button className="icon-button danger" aria-label={`Eliminar ${config.title}: ${String(entry.data[config.columns[0]])}`} title="Eliminar con confirmación" onClick={() => openConfirm(entry, 'delete')}><Trash2 size={15} /></button>}{canDeleteTeamMember && entry.data.Estado !== 'Pendiente' && entry.id !== user?.id && <button className="icon-button danger" aria-label={'Eliminar usuario del equipo: ' + String(entry.data.Nombre)} title="Eliminar usuario del equipo" onClick={() => openConfirm(entry, 'delete')}><Trash2 size={15} /></button>}{canRevokeInvitation && entry.data.Estado === 'Pendiente' && <button className="icon-button danger" aria-label={`Revocar invitación: ${String(entry.data.Nombre)}`} title="Revocar invitación pendiente" onClick={() => openConfirm(entry, 'delete')}><Trash2 size={15} /></button>}</div></div>)}</div> : loadError ? null : <AdminCrudEmptyState search={query} />}
       <div className="pagination"><span>Mostrando {entriesForView.length ? (page - 1) * pageSize + 1 : 0}–{Math.min(page * pageSize, entriesForView.length)} de {entriesForView.length} registros</span><label className="table-page-size">Filas<select value={pageSize} onChange={(event) => { setPageSize(Number(event.target.value)); setPage(1); }}><option value={10}>10</option><option value={25}>25</option><option value={50}>50</option></select></label><div className="table-pagination-actions"><button type="button" className="icon-button" aria-label="Página anterior" disabled={page <= 1} onClick={() => setPage((current) => current - 1)}>‹</button><span>Página {page} de {pageCount}</span><button type="button" className="icon-button" aria-label="Página siguiente" disabled={page >= pageCount} onClick={() => setPage((current) => current + 1)}>›</button></div></div>
     </section>
     {mode && <div className="modal-backdrop" onClick={closeDialog}><div className={`modal crud-modal${mode === 'view' && isProductSection ? ' product-preview-modal' : ''}`} role="dialog" aria-modal="true" aria-labelledby="crud-dialog-title" onClick={(event) => event.stopPropagation()}><div className="modal-header"><div><span className="eyebrow">{mode === 'view' ? 'Detalle' : mode === 'edit' ? 'Actualizar registro' : mode === 'create' ? 'Nuevo registro' : 'Confirmar acción'}</span><h2 id="crud-dialog-title">{mode === 'view' ? config.title : mode === 'confirm' ? `Confirmar ${actionLabel}` : mode === 'edit' ? `Editar ${config.title}` : config.action || `Crear ${config.title}`}</h2></div><button type="button" className="icon-button" aria-label="Cerrar" onClick={closeDialog}><X size={18} /></button></div>
-      {mode === 'view' && activeEntry && isProductSection ? <ProductPreview entry={activeEntry.data} brandName={brandOptions.find((brand) => brand.id === activeEntry.data.Marca)?.name || 'Sin marca'} onClose={closeDialog} /> : mode === 'view' && activeEntry && <div className="crud-detail-list">{config.columns.map((column) => <div key={column}><span>{column}</span><strong>{String(activeEntry.data[column] ?? '—')}</strong></div>)}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Cerrar</button></div></div>}
-      {(mode === 'create' || mode === 'edit') && <form className="crud-form" onSubmit={saveRecord} noValidate><div className="crud-fields">{formColumns.map((column) => <label className={column === 'Descripción' || column === 'Descripcion' || column === 'Imagen' ? 'field crud-field-wide' : 'field'} key={column}><span>{column === 'Estado' && section === 'inventory' ? 'Estado actual' : column === 'Estado' && section === 'products' ? 'Publicación en tienda' : column === 'SKU' && section === 'inventory' ? 'Código del producto (SKU)' : column}</span>{column === 'Rol' && section === 'users' ? <select value={draft.Rol ?? ''} onChange={(event) => setDraft({ ...draft, Rol: event.target.value })}><option value="">Selecciona un rol</option>{(Object.keys(roleLabels) as Role[]).filter((role) => role !== 'customer' && (mode !== 'create' || role !== 'superadmin')).map((role) => <option key={role} value={roleLabels[role]}>{roleLabels[role]}</option>)}</select> : column === 'Marca' && isProductSection ? <><select value={draft.Marca ?? ''} disabled={brandOptionsLoading} onChange={(event) => setDraft({ ...draft, Marca: event.target.value })}><option value="">{brandOptionsLoading ? 'Cargando marcas…' : 'Sin marca'}</option>{brandOptions.filter((brand) => brand.status === 'Activa').map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select>{brandOptionsError && <small role="alert">{brandOptionsError} <button type="button" className="text-link" onClick={() => void loadBrandOptions()}>Reintentar</button></small>}</> : column === 'Ubicación' && section === 'inventory' ? <><input type="text" aria-label={column} list="inventory-location-options" value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={locationOptionsLoading ? 'Cargando ubicaciones…' : locationOptions.length ? 'Selecciona o escribe una ubicación' : 'Escribe una ubicación nueva'} /><datalist id="inventory-location-options">{locationOptions.map((location) => <option key={location} value={location} />)}</datalist>{locationOptionsError ? <small role="alert">{locationOptionsError} <button type="button" className="text-link" onClick={() => void loadLocationOptions()}>Reintentar</button></small> : <small>Las ubicaciones guardadas en la API aparecen aquí. Puedes escribir una nueva; se agregará al catálogo al guardar el producto.</small>}</> : column === 'Imagen' && isProductSection ? <><input type="file" accept="image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setError(''); try { const image = await prepareProductImage(file); setDraft((current) => ({ ...current, Imagen: image })); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo preparar la imagen.'); } }} />{draft.Imagen && <div className="product-image-upload-preview"><ProductImage src={draft.Imagen} alt="Vista previa del producto" className="product-table-thumb" /><button type="button" className="text-link" onClick={() => setDraft((current) => ({ ...current, Imagen: '' }))}>Quitar imagen</button></div>}</> : column === 'Estado' || column === 'Estado de pago' ? <select value={draft[column] || (column === 'Estado de pago' ? 'Pendiente' : section === 'inventory' ? 'En stock' : 'Activo')} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })}>{Array.from(new Set([...statusChoices(section), draft[column]].filter(Boolean))).map((value) => <option key={value}>{value}</option>)}</select> : <input type={column === 'Correo' ? 'email' : typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? 'number' : 'text'} min={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? '0' : undefined} step={column === 'Existencias' ? '1' : numericColumns.has(column) ? '0.01' : undefined} value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={`Ingresa ${column.toLowerCase()}`} />}</label>)}</div>{error && <div className="crud-error" role="alert">{error}</div>}<div className="crud-form-note">{isProductSection ? section === 'inventory' ? 'La disponibilidad se determina por las existencias y el estado. La imagen se guarda junto con el producto.' : 'Usa el estado Activo para publicar el producto o Inactivo para ocultarlo de la tienda pública.' : section === 'users' && mode === 'create' ? 'El enlace se muestra una sola vez. La persona definirá su propia contraseña al aceptar la invitación.' : 'Los cambios se guardarán en PostgreSQL.'}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeDialog}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy}><Check size={16} /> Guardar</button></div></form>}
-      {mode === 'confirm' && <div className="crud-confirm"><p>{isPendingInvitation ? <>¿Revocar la invitación de <strong>{String(activeEntry?.data.Nombre || 'este usuario')}</strong>? El enlace dejará de funcionar y se quitará el registro pendiente.</> : section === 'users' ? <>¿Eliminar a <strong>{String(activeEntry?.data.Nombre || 'este usuario')}</strong> del equipo? Se cerrarán sus sesiones. Sus ventas y movimientos históricos se conservarán.</> : section === 'inventory' ? <>¿Eliminar <strong>{String(activeEntry?.data.Producto || 'este producto')}</strong>? Si tiene movimientos u otras relaciones, se desactivará para conservar la trazabilidad.</> : <>¿Confirmas {actionLabel} este registro? La acción se validará y guardará en PostgreSQL.</>}</p>{error && <div className="crud-error" role="alert">{error}</div>}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Volver</button><button className="button button-primary" disabled={busy} onClick={confirmAction}>{busy ? 'Procesando...' : isPendingInvitation ? 'Revocar invitación' : section === 'users' ? 'Eliminar usuario' : section === 'inventory' ? 'Eliminar producto' : 'Confirmar ' + actionLabel}</button></div></div>}
+      {mode === 'view' && section === 'customers' && activeEntry ? customerDetailLoading ? <p>Cargando detalle del cliente…</p> : customerDetail ? <CustomerDetail details={customerDetail} onClose={closeDialog} /> : error ? <div className="crud-error" role="alert">{error}</div> : <p>No hay historial disponible.</p> : mode === 'view' && activeEntry && isProductSection ? <ProductPreview entry={activeEntry.data} brandName={brandOptions.find((brand) => brand.id === activeEntry.data.Marca)?.name || 'Sin marca'} onClose={closeDialog} /> : mode === 'view' && activeEntry && <div className="crud-detail-list">{config.columns.map((column) => <div key={column}><span>{column}</span><strong>{String(activeEntry.data[column] ?? '—')}</strong></div>)}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Cerrar</button></div></div>}
+      {(mode === 'create' || mode === 'edit') && <form className="crud-form" onSubmit={saveRecord} noValidate><div className="crud-fields">{formColumns.map((column) => <label className={column === 'Descripción' || column === 'Descripcion' || column === 'Imagen' ? 'field crud-field-wide' : 'field'} key={column}><span>{column === 'Estado' && section === 'inventory' ? 'Estado actual' : column === 'Estado' && section === 'products' ? 'Publicación en tienda' : column === 'SKU' && section === 'inventory' ? 'Código del producto (SKU)' : column}</span>{column === 'Rol' && section === 'users' ? <select value={draft.Rol ?? ''} onChange={(event) => setDraft({ ...draft, Rol: event.target.value })}><option value="">Selecciona un rol</option>{(Object.keys(roleLabels) as Role[]).filter((role) => role !== 'customer' && (mode !== 'create' || role !== 'superadmin')).map((role) => <option key={role} value={roleLabels[role]}>{roleLabels[role]}</option>)}</select> : column === 'Marca' && isProductSection ? <><select value={draft.Marca ?? ''} disabled={brandOptionsLoading} onChange={(event) => setDraft({ ...draft, Marca: event.target.value })}><option value="">{brandOptionsLoading ? 'Cargando marcas…' : 'Sin marca'}</option>{brandOptions.filter((brand) => brand.status === 'Activa').map((brand) => <option key={brand.id} value={brand.id}>{brand.name}</option>)}</select>{brandOptionsError && <small role="alert">{brandOptionsError} <button type="button" className="text-link" onClick={() => void loadBrandOptions()}>Reintentar</button></small>}</> : column === 'Ubicación' && section === 'inventory' ? <><input type="text" aria-label={column} list="inventory-location-options" value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={locationOptionsLoading ? 'Cargando ubicaciones…' : locationOptions.length ? 'Selecciona o escribe una ubicación' : 'Escribe una ubicación nueva'} /><datalist id="inventory-location-options">{locationOptions.map((location) => <option key={location} value={location} />)}</datalist>{locationOptionsError ? <small role="alert">{locationOptionsError} <button type="button" className="text-link" onClick={() => void loadLocationOptions()}>Reintentar</button></small> : <small>Las ubicaciones disponibles aparecen aquí. Puedes escribir una nueva; se agregará al catálogo al guardar el producto.</small>}</> : column === 'Imagen' && isProductSection ? <><input type="file" accept="image/jpeg,image/png,image/webp" onChange={async (event) => { const file = event.target.files?.[0]; if (!file) return; setError(''); try { const image = await prepareProductImage(file); setDraft((current) => ({ ...current, Imagen: image })); } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo preparar la imagen.'); } }} />{draft.Imagen && <div className="product-image-upload-preview"><ProductImage src={draft.Imagen} alt="Vista previa del producto" className="product-table-thumb" /><button type="button" className="text-link" onClick={() => setDraft((current) => ({ ...current, Imagen: '' }))}>Quitar imagen</button></div>}</> : column === 'Estado' || column === 'Estado de pago' ? <select value={draft[column] || (column === 'Estado de pago' ? 'Pendiente' : section === 'inventory' ? 'En stock' : 'Activo')} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })}>{Array.from(new Set([...statusChoices(section), draft[column]].filter(Boolean))).map((value) => <option key={value}>{value}</option>)}</select> : <input type={column === 'Correo' ? 'email' : typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? 'number' : 'text'} min={typeof activeEntry?.data[column] === 'number' || numericColumns.has(column) ? '0' : undefined} step={column === 'Existencias' ? '1' : numericColumns.has(column) ? '0.01' : undefined} value={draft[column] ?? ''} onChange={(event) => setDraft({ ...draft, [column]: event.target.value })} placeholder={`Ingresa ${column.toLowerCase()}`} />}</label>)}</div>{error && <div className="crud-error" role="alert">{error}</div>}<div className="crud-form-note">{isProductSection ? section === 'inventory' ? 'La disponibilidad se determina por las existencias y el estado. La imagen se guarda junto con el producto.' : 'Usa el estado Activo para publicar el producto o Inactivo para ocultarlo de la tienda pública.' : section === 'users' && mode === 'create' ? 'El enlace se muestra una sola vez. La persona definirá su propia contraseña al aceptar la invitación.' : 'Guarda para aplicar los cambios.'}</div><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeDialog}>Cancelar</button><button type="submit" className="button button-primary" disabled={busy}><Check size={16} /> Guardar</button></div></form>}
+      {mode === 'confirm' && <div className="crud-confirm"><p>{isPendingInvitation ? <>¿Revocar la invitación de <strong>{String(activeEntry?.data.Nombre || 'este usuario')}</strong>? El enlace dejará de funcionar y se quitará el registro pendiente.</> : section === 'users' ? <>¿Eliminar a <strong>{String(activeEntry?.data.Nombre || 'este usuario')}</strong> del equipo? Se cerrarán sus sesiones. Sus ventas y movimientos históricos se conservarán.</> : section === 'inventory' ? <>¿Eliminar <strong>{String(activeEntry?.data.Producto || 'este producto')}</strong>? Si tiene movimientos u otras relaciones, se desactivará para conservar la trazabilidad.</> : <>¿Confirmas {actionLabel} este registro? La acción se validará y guardará en NEXO.</>}</p>{error && <div className="crud-error" role="alert">{error}</div>}<div className="modal-actions"><button className="button button-outline" onClick={closeDialog}>Volver</button><button className="button button-primary" disabled={busy} onClick={confirmAction}>{busy ? 'Procesando...' : isPendingInvitation ? 'Revocar invitación' : section === 'users' ? 'Eliminar usuario' : section === 'inventory' ? 'Eliminar producto' : 'Confirmar ' + actionLabel}</button></div></div>}
       </div></div>}
   </div>;
 }
 
+function CustomerDetail({ details, onClose }: { details: { customer: Record<string, unknown>; wishlistItems: number; addresses: string[]; orders: { id: string; orderNumber?: string; date?: string; status?: string; paymentMethod?: string; paymentStatus?: string; total?: number; items?: { productName?: string; quantity?: number; unitPrice?: number; subtotal?: number }[] }[] }; onClose: () => void }) {
+  const { customer, addresses, orders } = details;
+  return <div className="customer-detail"><dl className="crud-detail-list"><div><span>Nombre</span><strong>{String(customer.name || '—')}</strong></div><div><span>Correo</span><strong>{String(customer.email || '—')}</strong></div><div><span>Teléfono</span><strong>{String(customer.phone || '—')}</strong></div><div><span>Estado</span><strong>{String(customer.status || 'Activo')}</strong></div><div><span>Pedidos</span><strong>{orders.length}</strong></div><div><span>Favoritos</span><strong>{details.wishlistItems}</strong></div></dl><section><h3>Direcciones</h3>{addresses.length ? <ul>{addresses.map((address) => <li key={address}>{address}</li>)}</ul> : <p>No hay direcciones registradas.</p>}</section><section><h3>Historial de compras</h3>{orders.length ? orders.map((order) => <article className="customer-order-detail" key={order.id}><header><strong>{String(order.orderNumber || order.id)}</strong><span>{String(order.status || '—')} · {formatQ(Number(order.total || 0))}</span></header><small>{order.date ? new Date(order.date).toLocaleString('es-GT') : 'Fecha no disponible'} · {String(order.paymentStatus || order.paymentMethod || '—')}</small>{order.items?.map((item, index) => <p key={String(item.productName || index)}>{String(item.productName || 'Producto')} · {Number(item.quantity || 0)} × {formatQ(Number(item.unitPrice || 0))}</p>)}</article>) : <p>Aún no hay compras asociadas a este cliente.</p>}</section><div className="modal-actions"><button className="button button-outline" onClick={onClose}>Cerrar</button></div></div>;
+}
 function CrudCell({ value, column, image, onSelect }: { value: string | number | undefined; column: string; image?: string; onSelect?: () => void }) {
   if (column === 'Estado' || column === 'Estado de pago') return <span className={`status-pill ${String(value).includes('Complet') || value === 'Activo' || value === 'En stock' || value === 'Emitida' || value === 'Aprobada' ? 'success' : String(value).includes('Anul') || String(value).includes('Cancel') || value === 'Inactivo' || value === 'Sin stock' ? 'danger' : 'warning'}`}><i />{value}</span>;
   if (typeof value === 'number' && ['Total', 'Ventas', 'Valor', 'Costo unitario', 'Precio de venta', 'Ventas del mes', 'Total comprado'].includes(column)) return <strong>{formatQ(value)}</strong>;
@@ -364,20 +386,21 @@ async function prepareProductImage(file: File): Promise<string> {
     image.onerror = () => { URL.revokeObjectURL(url); reject(new Error('No se pudo leer la imagen.')); };
     image.src = url;
   });
+  const dimensions = productImageCompressionDimensions(source.width, source.height);
+  if (!dimensions.length) throw new Error(`La imagen original debe medir al menos ${PRODUCT_IMAGE_MIN_SIDE} × ${PRODUCT_IMAGE_MIN_SIDE} px. No se ampliarán imágenes pequeñas.`);
   const canvas = document.createElement('canvas');
   const context = canvas.getContext('2d');
   if (!context) throw new Error('No se pudo preparar la imagen.');
-  for (const maxDimension of [1280, 1024, 840, 680, 520]) {
-    const scale = Math.min(1, maxDimension / Math.max(source.width, source.height));
-    canvas.width = Math.max(1, Math.round(source.width * scale));
-    canvas.height = Math.max(1, Math.round(source.height * scale));
+  for (const target of dimensions) {
+    canvas.width = target.width;
+    canvas.height = target.height;
     context.drawImage(source, 0, 0, canvas.width, canvas.height);
-    for (const quality of [0.72, 0.62, 0.52, 0.42]) {
+    for (const quality of [0.88, 0.84, 0.8, 0.76]) {
       const image = canvas.toDataURL('image/jpeg', quality);
-      if (image.length <= 180_000) return image;
+      if (image.length <= PRODUCT_IMAGE_MAX_DATA_URL_LENGTH) return image;
     }
   }
-  throw new Error('No se pudo comprimir la imagen al tamaño permitido. Prueba una imagen más pequeña.');
+  throw new Error('La imagen supera 140 KB después de comprimirla sin reducirla por debajo de la resolución mínima. Usa una imagen optimizada o un recorte más ajustado.');
 }
 
 function AdminCrudEmptyState({ search }: { search: string }) { return <div className="empty-state"><Search size={28} /><h3>{search ? 'No encontramos resultados' : 'No hay registros disponibles'}</h3><p>{search ? 'Prueba con otra búsqueda.' : 'Crea un registro para comenzar.'}</p></div>; }

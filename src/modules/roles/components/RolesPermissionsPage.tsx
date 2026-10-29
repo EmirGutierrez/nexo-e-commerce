@@ -4,9 +4,13 @@ import { useApp } from '../../../contexts/AppContext';
 import { roleLabels, type PermissionAction, type PermissionModule, type Role, type RolePermissions } from '../../../types';
 import { permissionActionLabels, permissionModules, roleService } from '../../../services/roleService';
 
+type RoleSummary = Awaited<ReturnType<typeof roleService.list>>[number];
+
 export default function RolesPermissionsPage() {
   const { role } = useApp();
   const canEditPermissions = Boolean(role && roleService.can(role, 'users', 'edit'));
+  const [roleRows, setRoleRows] = useState<RoleSummary[]>([]);
+  const [rolesLoading, setRolesLoading] = useState(true);
   const [availableRoles, setAvailableRoles] = useState<Role[]>([]);
   const [selected, setSelected] = useState<Role>('admin');
   const [saved, setSaved] = useState<RolePermissions>(() => roleService.getPermissions('admin'));
@@ -21,6 +25,7 @@ export default function RolesPermissionsPage() {
     roleService.list().then((rows) => {
       if (!active) return;
       const roles = rows.map((row) => row.id);
+      setRoleRows(rows);
       setAvailableRoles(roles);
       const nextRole = roles.includes(selected) ? selected : roles[0];
       if (nextRole) {
@@ -28,7 +33,8 @@ export default function RolesPermissionsPage() {
         const current = roleService.getPermissions(nextRole);
         setSaved(current); setDraft(current);
       }
-    }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los roles.'); });
+    }).catch((cause) => { if (active) setError(cause instanceof Error ? cause.message : 'No se pudieron cargar los roles.'); })
+      .finally(() => { if (active) setRolesLoading(false); });
     return () => { active = false; };
   }, []);
 
@@ -46,13 +52,25 @@ export default function RolesPermissionsPage() {
     if (!canEditPermissions) { setError('Tu rol puede consultar la matriz, pero no modificar permisos.'); return; }
     try {
       const next = await roleService.save(selected, draft);
-      setSaved(next); setDraft(next); setMessage(`Permisos de ${roleLabels[selected]} guardados en PostgreSQL.`);
+      setRoleRows((rows) => rows.map((row) => row.id === selected ? { ...row, permissions: next } : row));
+      setSaved(next); setDraft(next); setMessage(`Permisos de ${roleLabels[selected]} guardados correctamente.`);
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudieron guardar los permisos.'); }
   };
   return <div className="module-page permissions-page">
     <div className="admin-page-heading"><div><span className="eyebrow">Gestión NEXO · Acceso</span><h1>Roles y permisos</h1><p>Configura qué puede hacer cada perfil en los módulos de la operación.</p></div></div>
-    <div className="permission-notice"><ShieldCheck size={19}/><p>Los cambios se guardan en PostgreSQL y Spring Security los valida en cada operación protegida.</p></div>
+    <div className="permission-notice"><ShieldCheck size={19}/><p>Los permisos actualizados se aplican a cada operación protegida.</p></div>
     {(message || error) && <div className={error ? 'crud-error' : 'crud-feedback'} role={error ? 'alert' : 'status'}>{error || message}</div>}
+    <section className="panel role-access-overview" aria-labelledby="role-access-overview-title">
+      <div className="role-access-overview-heading"><div><h2 id="role-access-overview-title">Módulos asignados por rol</h2><p>Consulta de un vistazo a qué áreas puede acceder cada perfil.</p></div></div>
+      {rolesLoading ? <p className="role-access-state" role="status">Cargando módulos por rol…</p> : roleRows.length ? <div className="role-access-grid">{roleRows.map((row) => {
+        const assignedModules = permissionModules.filter(({ id }) => row.permissions[id].length > 0);
+        return <article className={row.id === selected ? 'role-access-card selected' : 'role-access-card'} key={row.id}>
+          <div className="role-access-card-heading"><h3>{row.name}</h3><span>{row.users} {row.users === 1 ? 'usuario' : 'usuarios'}</span></div>
+          <p className="role-access-card-count">{assignedModules.length ? `${assignedModules.length} ${assignedModules.length === 1 ? 'módulo habilitado' : 'módulos habilitados'}` : 'Sin módulos habilitados'}</p>
+          {assignedModules.length ? <ul className="role-access-module-list">{assignedModules.map(({ id, label }) => <li key={id} title={row.permissions[id].map((action) => permissionActionLabels[action]).join(', ')}>{label}</li>)}</ul> : <p className="role-access-empty">Este rol no tiene acceso a módulos administrativos.</p>}
+        </article>;
+      })}</div> : <p className="role-access-state">No hay roles disponibles para mostrar.</p>}
+    </section>
     <section className="panel permission-panel"><div className="permission-toolbar"><label className="field"><span>Rol que vas a configurar</span><select value={selected} onChange={(event) => setSelected(event.target.value as Role)}>{availableRoles.map((role) => <option key={role} value={role}>{roleLabels[role] || role}</option>)}</select></label><div className="permission-toolbar-note">{selected === 'superadmin' ? 'Acceso completo protegido' : `${permissionModules.reduce((sum, item) => sum + draft[item.id].length, 0)} permisos activos`}</div></div>
       <div className="permission-matrix-wrap"><table className="permission-matrix"><thead><tr><th scope="col">Módulo / función</th>{(['view','create','edit','delete','approve'] as PermissionAction[]).map((action) => <th key={action} scope="col">{permissionActionLabels[action]}</th>)}</tr></thead><tbody>{permissionModules.map(({ id, label, actions }) => { const all = actions.every((action) => draft[id].includes(action)); const disabled = selected === 'superadmin' || selected === 'customer' || !canEditPermissions; return <tr key={id}><th scope="row"><label className="permission-module-check"><input type="checkbox" aria-label={`Seleccionar todos los permisos de ${label}`} checked={all} disabled={disabled} onChange={(event) => setModule(id, event.target.checked)}/><span>{label}</span></label></th>{(['view','create','edit','delete','approve'] as PermissionAction[]).map((action) => <td key={action}>{actions.includes(action) ? <input type="checkbox" aria-label={`${permissionActionLabels[action]} ${label}`} checked={draft[id].includes(action)} disabled={disabled} onChange={(event) => setAction(id, action, event.target.checked)}/> : <span className="permission-not-applicable" aria-label="No aplica">—</span>}</td>)}</tr>; })}</tbody></table></div>
       {(selected === 'superadmin' || selected === 'customer') && <p className="permission-locked">{selected === 'superadmin' ? 'El Súper Administrador siempre tiene todas las acciones disponibles y no se puede editar.' : 'El perfil de cliente no recibe permisos administrativos.'}</p>}

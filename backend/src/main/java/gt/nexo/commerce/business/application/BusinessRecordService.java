@@ -6,12 +6,14 @@ import gt.nexo.commerce.business.api.OrderQuoteResponse;
 import gt.nexo.commerce.business.api.OrderSubmissionResponse;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
 import gt.nexo.commerce.identity.application.PermissionAuthorizer;
+import gt.nexo.commerce.shared.validation.DisplayNamePolicy;
 import java.math.BigDecimal;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Instant;
 import java.time.LocalDate;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
 import java.time.Duration;
 import java.util.ArrayList;
@@ -25,6 +27,8 @@ import java.util.TreeMap;
 import java.util.UUID;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.context.SecurityContextHolder;
@@ -46,6 +50,7 @@ public class BusinessRecordService {
     private final PermissionAuthorizer permissions;
     private final CommercePromotionService promotions;
     private final ProductImageService productImages;
+    private ApplicationEventPublisher eventPublisher;
 
     public BusinessRecordService(JdbcTemplate jdbc, ObjectMapper mapper, PermissionAuthorizer permissions,
                                  CommercePromotionService promotions, ProductImageService productImages) {
@@ -55,6 +60,9 @@ public class BusinessRecordService {
         this.promotions = promotions;
         this.productImages = productImages;
     }
+
+    @Autowired
+    public void setEventPublisher(ApplicationEventPublisher eventPublisher) { this.eventPublisher = eventPublisher; }
 
     @Transactional(readOnly = true)
     public List<BusinessRecordResponse> list(String resource) {
@@ -85,6 +93,33 @@ public class BusinessRecordService {
             data.put("wishlistItems", wishlistItems);
             return new BusinessRecordResponse(record.id(), record.resource(), data, record.createdAt(), record.updatedAt());
         }).toList();
+    }
+
+    @Transactional(readOnly = true)
+    public Map<String, Object> customerDetails(UUID id) {
+        authorize("customers", "view");
+        Map<String, Object> customer = jdbc.query("SELECT data::text FROM business_records WHERE id = ? AND resource_code = 'customers'", rs -> {
+            if (!rs.next()) throw missing();
+            return readMap(rs.getString(1));
+        }, id);
+        String email = text(customer.get("email")).toLowerCase(Locale.ROOT);
+        long wishlistItems = jdbc.queryForObject("SELECT COUNT(*) FROM customer_wishlist_items w JOIN app_user u ON u.id = w.customer_user_id WHERE LOWER(u.email) = LOWER(?)", Long.class, email);
+        List<Map<String, Object>> orders = jdbc.query("""
+                SELECT id, data::text AS data FROM business_records
+                WHERE resource_code = 'orders' AND LOWER(COALESCE(data ->> 'customerEmail', '')) = ?
+                ORDER BY created_at DESC
+                """, (rs, row) -> {
+            Map<String, Object> order = readMap(rs.getString("data"));
+            order.put("id", rs.getObject("id", UUID.class).toString());
+            return order;
+        }, email);
+        List<String> addresses = orders.stream().map(order -> text(order.get("address"))).filter(value -> !value.isBlank()).distinct().toList();
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("customer", customer);
+        result.put("wishlistItems", wishlistItems);
+        result.put("addresses", addresses);
+        result.put("orders", orders);
+        return result;
     }
 
     @Transactional(readOnly = true)
@@ -124,7 +159,7 @@ public class BusinessRecordService {
         if (normalized.equals("orders") || normalized.equals("sales") || Set.of("transfers", "payments", "invoices", "settings", "profile", "roles-permissions", "inventory-alerts").contains(normalized))
             throw invalid("Este módulo requiere su flujo de negocio específico.");
         Map<String, Object> data = clean(input);
-        validate(normalized, data);
+        validate(normalized, data, true);
         ensureUnique(normalized, data, null);
         UUID id = normalized.equals("customers") ? customerRecordId(data) : UUID.randomUUID();
         ProductImageService.ImageUpload productImage = normalized.equals("products") ? decodeProductImage(data) : null;
@@ -168,7 +203,7 @@ public class BusinessRecordService {
         Map<String, Object> product = lockedRecord("products", id);
         jdbc.queryForObject("SELECT record_id FROM products WHERE record_id = ? FOR UPDATE", UUID.class, id);
         boolean hasHistory = Boolean.TRUE.equals(jdbc.queryForObject("""
-                SELECT EXISTS (SELECT 1 FROM inventory_movements WHERE product_record_id = ?)
+                SELECT EXISTS (SELECT 1 FROM inventory_movements WHERE product_record_id = ? AND movement_type <> 'OPENING')
                     OR EXISTS (SELECT 1 FROM commerce_order_items WHERE product_record_id = ?)
                     OR EXISTS (SELECT 1 FROM merchandise_purchase_items WHERE product_record_id = ?)
                     OR EXISTS (SELECT 1 FROM in_person_sale_items WHERE product_record_id = ?)
@@ -187,6 +222,7 @@ public class BusinessRecordService {
             return new InventoryProductRemovalResponse(false);
         }
 
+        jdbc.update("DELETE FROM inventory_movements WHERE product_record_id = ? AND movement_type = 'OPENING'", id);
         productImages.delete(id);
         int deleted = jdbc.update("DELETE FROM business_records WHERE id = ? AND resource_code = 'products'", id);
         if (deleted == 0) throw missing();
@@ -201,7 +237,7 @@ public class BusinessRecordService {
         Map<String, Object> old = lockedRecord(normalized, id);
         String previousImage = text(old.get("image"));
         if (productImage != null) data.put("image", productImagePath(id));
-        validate(normalized, data);
+        validate(normalized, data, false);
         ensureUnique(normalized, data, id);
         if (normalized.equals("categories")) {
             String previousName = text(field(old, "name", "Nombre"));
@@ -306,9 +342,11 @@ public class BusinessRecordService {
         String method = String.valueOf(input.getOrDefault("paymentMethod", ""));
         if (!Set.of("cash", "card").contains(method)) throw invalid("El método de pago no es válido para una venta presencial.");
         if (method.equals("card") && !paymentEnabled(method)) throw conflict("El pago con tarjeta está desactivado.");
-        String customerName = defaultText(input.get("customerName"), "Cliente");
+        String customerName = text(input.get("customerName"));
+        String customerEmail = text(input.get("customerEmail")).toLowerCase(Locale.ROOT);
         String customerNit = text(input.get("nit")).toUpperCase(Locale.ROOT);
-        if (customerName.length() > 160) throw invalid("El nombre del cliente no puede superar 160 caracteres.");
+        if (!validPersonName(customerName)) throw invalid("Ingresa el nombre del cliente con letras, espacios o guiones.");
+        if (!validEmail(customerEmail)) throw invalid("Ingresa un correo electrónico válido para enviar el comprobante.");
         if (customerNit.length() < 2 || customerNit.length() > 20 || !customerNit.matches("[A-Z0-9-]+")) {
             throw invalid("Ingresa un NIT válido (letras, números o guion).");
         }
@@ -356,6 +394,7 @@ public class BusinessRecordService {
         data.put("date", now.toString());
         data.put("seller", principalName());
         data.put("customerName", customerName);
+        data.put("customerEmail", customerEmail);
         data.put("nit", customerNit);
         data.put("paymentMethod", method);
         data.put("paymentStatus", method.equals("cash") ? "Completada" : "Simulada");
@@ -370,6 +409,15 @@ public class BusinessRecordService {
                 saleId, writeJson(data), data.get("paymentStatus"), actor);
         syncProjection(saleId, "sales", data, actor);
         for (var entry : quantities.entrySet()) changeStock(entry.getKey(), -entry.getValue(), "SALE", "Venta presencial " + saleId, saleId, actor);
+        StringBuilder receipt = new StringBuilder("Hola ").append(customerName)
+                .append(",\n\nResumen de tu compra presencial.\nFolio: ").append(saleId)
+                .append("\nNIT: ").append(customerNit).append("\n\nProductos:\n");
+        for (Map<String, Object> item : items) receipt.append("• ").append(text(item.get("productName"))).append(" × ")
+                .append(number(item.get("quantity"), 0)).append(" — Q ").append(text(item.get("subtotal"))).append("\n");
+        receipt.append("\nTotal: Q ").append(total.toPlainString())
+                .append("\nPago: ").append(text(data.get("paymentStatus")))
+                .append("\n\nGracias por tu compra. Este correo sirve como comprobante de la venta.");
+        requestEmail(customerEmail, "Comprobante de venta " + saleId.toString().substring(0, 8).toUpperCase(Locale.ROOT), receipt.toString());
         return new BusinessRecordResponse(saleId, "sales", data, now, now);
     }
 
@@ -460,9 +508,11 @@ public class BusinessRecordService {
         String customerEmail = text(input.get("customerEmail")).toLowerCase(Locale.ROOT);
         String paymentMethod = text(input.get("paymentMethod"));
         String address = text(input.get("address"));
-        if (customerName.isBlank() || customerName.length() > 160) throw invalid("Ingresa el nombre de quien recibe el pedido.");
-        if (!customerEmail.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Ingresa un correo válido para el pedido.");
-        if (address.isBlank() || address.length() > 500) throw invalid("Ingresa una dirección de entrega válida.");
+        if (!validPersonName(customerName)) throw invalid("Ingresa un nombre válido con letras, espacios o guiones.");
+        if (!validEmail(customerEmail)) throw invalid("Ingresa un correo válido para el pedido.");
+        if (address.isBlank() || address.length() > 500 || !address.matches("(?s).*\\p{L}.*")) throw invalid("Ingresa una dirección de entrega válida.");
+        String nit = text(input.get("nit")).toUpperCase(Locale.ROOT);
+        if (nit.length() < 2 || nit.length() > 20 || !nit.matches("[A-Z0-9-]+")) throw invalid("Ingresa un NIT válido.");
         if (!Set.of("card", "transfer").contains(paymentMethod) || !paymentEnabled(paymentMethod)) throw conflict("El método de pago ya no está disponible.");
         Map<UUID, Integer> quantities = orderQuantities(input);
         List<Map<String, Object>> orderItems = new ArrayList<>();
@@ -491,7 +541,7 @@ public class BusinessRecordService {
         String paymentStatus = paymentMethod.equals("card") ? "Simulada" : "Pendiente de verificación";
         Map<String, Object> data = new LinkedHashMap<>();
         data.put("customer", customerName); data.put("customerEmail", customerEmail); data.put("customerPhone", optionalText(input.get("customerPhone")));
-        data.put("address", address); data.put("date", now.toString()); data.put("status", status);
+        data.put("address", address); data.put("nit", nit); data.put("date", now.toString()); data.put("status", status);
         data.put("paymentMethod", paymentMethod); data.put("payment", paymentMethod.equals("card") ? "Tarjeta" : "Transferencia");
         data.put("paymentStatus", paymentStatus); data.put("items", orderItems); data.put("subtotal", subtotal);
         data.put("discountAmount", discount); data.put("discountCode", discountCode); data.put("total", total);
@@ -506,6 +556,7 @@ public class BusinessRecordService {
         if (customerUserId != null) createCustomerNotification(customerUserId, orderId, "ORDER_RECEIVED", "Pedido recibido",
                 "Recibimos " + data.get("orderNumber") + ". " + (paymentMethod.equals("transfer")
                         ? "Tu comprobante está pendiente de revisión." : "El pago con tarjeta fue simulado."), "order-received:" + orderId);
+        else sendOrderReceipt(data);
         return new BusinessRecordResponse(orderId, "orders", data, now, now);
     }
 
@@ -631,7 +682,6 @@ public class BusinessRecordService {
 
     private void createOrderStatusNotification(UUID orderId, String status) {
         UUID customerUserId = orderCustomerId(orderId);
-        if (customerUserId == null) return;
         String number = orderNumber(orderId);
         String message = switch (status) {
             case "En preparación" -> "Tu pedido " + number + " está en preparación.";
@@ -639,8 +689,35 @@ public class BusinessRecordService {
             case "Cancelado" -> "El pedido " + number + " fue cancelado.";
             default -> "El estado de tu pedido " + number + " cambió a " + status + ".";
         };
-        createCustomerNotification(customerUserId, orderId, "ORDER_STATUS", "Actualización de tu pedido", message,
-                "order-status:" + orderId + ":" + status);
+        if (customerUserId != null) {
+            createCustomerNotification(customerUserId, orderId, "ORDER_STATUS", "Actualización de tu pedido", message,
+                    "order-status:" + orderId + ":" + status);
+        } else {
+            Map<String, Object> order = jdbc.query("SELECT data::text FROM business_records WHERE id = ? AND resource_code = 'orders'", rs ->
+                    rs.next() ? readMap(rs.getString(1)) : Map.of(), orderId);
+            String email = text(order.get("customerEmail"));
+            if (validEmail(email)) requestEmail(email, "Actualización del pedido " + number,
+                    "Hola " + text(order.get("customer")) + ",\n\n" + message + "\n\nGracias por comprar en NEXO.");
+        }
+    }
+
+    private void sendOrderReceipt(Map<String, Object> order) {
+        String email = text(order.get("customerEmail"));
+        if (!validEmail(email)) return;
+        StringBuilder body = new StringBuilder("Hola ").append(text(order.get("customer"))).append(",\n\n")
+                .append("Recibimos tu pedido ").append(text(order.get("orderNumber"))).append(".\n")
+                .append("Estado: ").append(text(order.get("status"))).append("\n")
+                .append("Total: Q ").append(text(order.get("total"))).append("\n\nProductos:\n");
+        for (Map<String, Object> item : items(order)) body.append("• ").append(text(item.get("productName"))).append(" × ")
+                .append(number(item.get("quantity"), 0)).append(" — Q ").append(text(item.get("subtotal"))).append("\n");
+        body.append("\nEl seguimiento de tu pedido estará disponible por correo. Gracias por comprar en NEXO.");
+        requestEmail(email, "Pedido recibido " + text(order.get("orderNumber")), body.toString());
+    }
+
+    private void requestEmail(String recipient, String subject, String body) {
+        if (eventPublisher != null && validEmail(recipient)) {
+            eventPublisher.publishEvent(new BusinessEmailService.EmailRequested(recipient, subject, body));
+        }
     }
 
     private UUID orderCustomerId(UUID orderId) {
@@ -797,6 +874,14 @@ public class BusinessRecordService {
                     approved ? "Tu pago para el pedido " + text(data.get("orderNumber")) + " fue aprobado. Ya estamos preparando tu compra."
                             : "No pudimos aprobar el comprobante del pedido " + text(data.get("orderNumber")) + ". Revisa los detalles del pedido y contacta a la tienda si necesitas ayuda.",
                     "payment-review:" + id + ":" + status);
+        } else {
+            boolean approved = status.equals("Aprobada");
+            String email = text(data.get("customerEmail"));
+            String message = approved
+                    ? "Tu comprobante del pedido " + text(data.get("orderNumber")) + " fue aprobado. Ya estamos preparando tu compra."
+                    : "No pudimos aprobar el comprobante del pedido " + text(data.get("orderNumber")) + ". Contacta a la tienda si necesitas ayuda.";
+            if (validEmail(email)) requestEmail(email, approved ? "Comprobante aprobado" : "Comprobante rechazado",
+                    "Hola " + text(data.get("customer")) + ",\n\n" + message + "\n\nGracias por comprar en NEXO.");
         }
         return Map.of("id", id, "status", status);
     }
@@ -970,7 +1055,7 @@ public class BusinessRecordService {
     public List<Map<String, Object>> publicProducts() {
         return jdbc.query("SELECT id, data::text FROM business_records WHERE resource_code = 'products' ORDER BY created_at DESC", (rs, row) -> {
             Map<String, Object> data = readMap(rs.getString("data"));
-            if (isInactive(data)) return null;
+            if (isInactive(data) || number(field(data, "stock", "Existencias"), 0) <= 0) return null;
             data.put("id", rs.getObject("id", UUID.class).toString());
             return data;
         }).stream().filter(java.util.Objects::nonNull).toList();
@@ -981,7 +1066,7 @@ public class BusinessRecordService {
         return jdbc.query("SELECT data::text FROM business_records WHERE id = ? AND resource_code = 'products'", rs -> {
             if (!rs.next()) throw missing();
             Map<String, Object> product = readMap(rs.getString(1));
-            if (isInactive(product)) throw missing();
+            if (isInactive(product) || number(field(product, "stock", "Existencias"), 0) <= 0) throw missing();
             product.put("id", id.toString());
             return product;
         }, id);
@@ -1018,7 +1103,9 @@ public class BusinessRecordService {
         for (Map<String, Object> item : items(data)) {
             int quantity = number(item.get("quantity"), 0);
             if (quantity < 1) throw invalid("Las cantidades de compra deben ser enteros mayores que cero.");
-            changeStock(parseUuid(item.get("productId")), quantity, "PURCHASE", "Compra " + purchaseId, purchaseId, actor);
+            UUID productId = parseUuid(item.get("productId"));
+            changeStock(productId, quantity, "PURCHASE", "Compra " + purchaseId, purchaseId, actor);
+            saveProductCost(productId, decimal(item.get("unitCost")), actor);
         }
     }
 
@@ -1038,6 +1125,17 @@ public class BusinessRecordService {
             int quantity = number(item.get("quantity"), 0) * multiplier;
             changeStock(parseUuid(item.get("productId")), quantity, "REVERSAL", "Cambio de estado de compra " + id, id, actor);
         }
+        if (next.equals("Registrada") && !previous.equals("Registrada")) {
+            for (Map<String, Object> item : items(after)) saveProductCost(parseUuid(item.get("productId")), decimal(item.get("unitCost")), actor);
+        }
+    }
+
+    private void saveProductCost(UUID productId, BigDecimal cost, UUID actor) {
+        if (cost.signum() <= 0) throw invalid("El costo unitario debe ser mayor que cero.");
+        Map<String, Object> product = lockedRecord("products", productId);
+        product.put("cost", cost);
+        jdbc.update("UPDATE business_records SET data = ?::jsonb, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND resource_code = 'products'", writeJson(product), productId);
+        syncProjection(productId, "products", product, actor);
     }
 
     private void transitionOrder(UUID id, Map<String, Object> before, Map<String, Object> after, UUID actor) {
@@ -1397,7 +1495,7 @@ public class BusinessRecordService {
         }, id, resource);
     }
 
-    private void validate(String resource, Map<String, Object> data) {
+    private void validate(String resource, Map<String, Object> data, boolean creating) {
         if (data.isEmpty()) throw invalid("El registro no puede estar vacío.");
         if (resource.equals("products")) {
             required(data, "name", "Producto"); required(data, "sku", "SKU");
@@ -1420,11 +1518,17 @@ public class BusinessRecordService {
                 }
             }
         }
-        if (resource.equals("brands")) required(data, "name", "Nombre");
+        if (resource.equals("brands")) {
+            required(data, "name", "Nombre");
+            required(data, "description", "Descripción");
+            required(data, "contact", "Contacto");
+        }
         if (resource.equals("categories")) required(data, "name", "Nombre");
         if (resource.equals("suppliers")) required(data, "name", "Empresa");
         if (resource.equals("customers")) {
             required(data, "name", "Nombre");
+            if (!DisplayNamePolicy.isValid(text(field(data, "name", "Nombre"))))
+                throw invalid("El nombre solo puede contener letras, tildes, espacios, guiones y apóstrofes.");
             String email = String.valueOf(field(data, "email", "Correo")).trim();
             if (email.isBlank() || !email.matches("^[^\\s@]+@[^\\s@]+\\.[^\\s@]+$")) throw invalid("Ingresa un correo válido para el cliente.");
             if (!Set.of("Activo", "Inactivo", "Pendiente").contains(defaultText(field(data, "status", "Estado"), "Activo"))) throw invalid("El estado del cliente no es válido.");
@@ -1438,11 +1542,26 @@ public class BusinessRecordService {
             BigDecimal amount = decimal(field(data, "amount", "Monto"));
             if (amount.signum() <= 0) throw invalid("El monto debe ser mayor que cero.");
             if (!Set.of("Registrado", "Pendiente", "Anulado").contains(defaultText(field(data, "status", "Estado"), "Registrado"))) throw invalid("El estado del movimiento no es válido.");
-            try { LocalDate.parse(text(field(data, "date", "Fecha"))); }
+            LocalDate movementDate;
+            try { movementDate = LocalDate.parse(text(field(data, "date", "Fecha"))); }
             catch (Exception exception) { throw invalid("La fecha del movimiento no es válida."); }
+            if (creating && movementDate.isBefore(LocalDate.now(ZoneId.of("America/Guatemala")))
+                    && !Boolean.TRUE.equals(data.get("confirmHistoricalDate"))) {
+                throw invalid("La fecha es anterior a hoy. Confirma que este movimiento corresponde a un registro histórico.");
+            }
+            data.remove("confirmHistoricalDate");
         }
         if (resource.equals("purchases")) {
             required(data, "supplier", "Proveedor");
+            required(data, "date", "Fecha");
+            LocalDate purchaseDate;
+            try { purchaseDate = LocalDate.parse(text(field(data, "date", "Fecha"))); }
+            catch (Exception exception) { throw invalid("La fecha de la compra no es válida."); }
+            if (creating && purchaseDate.isBefore(LocalDate.now(ZoneId.of("America/Guatemala")))
+                    && !Boolean.TRUE.equals(data.get("confirmHistoricalDate"))) {
+                throw invalid("La fecha es anterior a hoy. Confirma que esta compra corresponde a un registro histórico.");
+            }
+            data.remove("confirmHistoricalDate");
             if (items(data).isEmpty()) throw invalid("La compra necesita al menos un producto.");
             parseUuid(data.get("supplierId"));
             for (Map<String, Object> item : items(data)) {
@@ -1567,6 +1686,34 @@ public class BusinessRecordService {
         catch (Exception ignored) { throw invalid("La marca seleccionada no es válida."); }
     }
     private static String text(Object value) { return value == null ? "" : String.valueOf(value).trim(); }
+    private static boolean validPersonName(String value) {
+        if (value == null || value.isEmpty() || value.length() > 160) return false;
+        boolean expectingNameCharacter = true;
+        for (int offset = 0; offset < value.length();) {
+            int codePoint = value.codePointAt(offset);
+            offset += Character.charCount(codePoint);
+            int characterType = Character.getType(codePoint);
+            boolean isCombiningMark = characterType == Character.NON_SPACING_MARK
+                    || characterType == Character.COMBINING_SPACING_MARK
+                    || characterType == Character.ENCLOSING_MARK;
+            if (Character.isLetter(codePoint)) {
+                expectingNameCharacter = false;
+            } else if (isCombiningMark && !expectingNameCharacter) {
+                // Combining marks can decorate a name character, but cannot start a name or follow a separator.
+            } else if (isNameSeparator(codePoint) && !expectingNameCharacter) {
+                expectingNameCharacter = true;
+            } else {
+                return false;
+            }
+        }
+        return !expectingNameCharacter;
+    }
+    private static boolean isNameSeparator(int codePoint) { return codePoint == ' ' || codePoint == '\'' || codePoint == '\u2019' || codePoint == '-'; }
+    private static boolean validEmail(String value) {
+        return value != null && value.length() <= 254
+                && value.matches("(?i)^[a-z0-9._%+-]+@[a-z0-9.-]+\\.[a-z]{2,}$")
+                && value.substring(value.indexOf('@') + 1).matches("(?s).*\\p{L}.*");
+    }
     private static boolean isInactive(Map<String, Object> data) { return Set.of("Inactivo", "Inactiva", "Inactive", "DISABLED").contains(String.valueOf(field(data, "status", "Estado"))); }
     private static String optionalText(Object value) { String text = text(value); return text.isBlank() ? null : text; }
     private static String defaultText(Object value, String fallback) { String text = text(value); return text.isBlank() ? fallback : text; }

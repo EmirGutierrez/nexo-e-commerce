@@ -4,7 +4,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react';
 import AdminCrudModule, { statusChoices, tableColumnWidth } from '../modules/products/components/AdminCrudModule';
 import { moduleConfig } from '../modules/app/components/NexoPages';
-import { adminTableService, brandService, inventoryService, userService } from '../services';
+import { adminTableService, brandService, customerService, inventoryService, userService } from '../services';
 import { roleService } from '../services/roleService';
 
 const appContext = vi.hoisted(() => ({
@@ -280,5 +280,179 @@ describe('revocación de invitaciones del equipo', () => {
     await adminTableService.delete('users', 'user-1');
 
     expect(remove).toHaveBeenCalledWith('user-1');
+  });
+
+  it('crea una invitación, muestra el enlace de un solo uso y permite cerrar el mensaje', async () => {
+    vi.mocked(adminTableService.list).mockResolvedValue([]);
+    vi.mocked(adminTableService.create).mockResolvedValue({
+      id: 'invitation-new', inviteUrl: 'https://nexo.example/accept-invitation?token=once',
+      data: { Nombre: 'Ana García', Correo: 'ana@example.com', Rol: 'Ventas', 'Último acceso': 'Nunca', Estado: 'Pendiente' },
+    });
+    render(<AdminCrudModule section="users" config={usersConfig} />);
+
+    fireEvent.click(await screen.findByRole('button', { name: 'Invitar usuario' }));
+    expect(screen.queryByLabelText('Último acceso')).toBeNull();
+    expect(screen.queryByLabelText('Estado')).toBeNull();
+    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: 'Ana García' } });
+    fireEvent.change(screen.getByLabelText('Correo'), { target: { value: 'ana@example.com' } });
+    fireEvent.change(screen.getByLabelText('Rol'), { target: { value: 'Vendedor' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+
+    await waitFor(() => expect(adminTableService.create).toHaveBeenCalledWith('users', expect.objectContaining({ Nombre: 'Ana García', Correo: 'ana@example.com', Rol: 'Vendedor' })));
+    expect((await screen.findByRole('status')).textContent).toContain('Invitación creada');
+    expect(screen.getByRole('link', { name: /accept-invitation\?token=once/ })).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Cerrar mensaje' }));
+    expect(screen.queryByRole('status')).toBeNull();
+  });
+
+  it('ordena el último acceso por fecha, filtra registros y limpia la búsqueda', async () => {
+    vi.mocked(adminTableService.list).mockResolvedValue([
+      { id: 'older', data: { Nombre: 'Usuario Antiguo', Correo: 'old@example.com', Rol: 'Ventas', 'Último acceso': 'Ayer', __lastLoginAt: 1_700_000_000_000, Estado: 'Activo' } },
+      { id: 'newer', data: { Nombre: 'Usuario Reciente', Correo: 'new@example.com', Rol: 'Ventas', 'Último acceso': 'Hoy', __lastLoginAt: 1_800_000_000_000, Estado: 'Activo' } },
+      { id: 'never', data: { Nombre: 'Usuario Nunca', Correo: 'never@example.com', Rol: 'Ventas', 'Último acceso': 'Nunca', __lastLoginAt: -1, Estado: 'Inactivo' } },
+    ]);
+    render(<AdminCrudModule section="users" config={usersConfig} />);
+    await screen.findByText('Usuario Antiguo');
+    fireEvent.change(screen.getByLabelText('Ordenar tabla'), { target: { value: 'Último acceso' } });
+
+    const names = Array.from(document.querySelectorAll('.crud-table .table-row strong')).map((node) => node.textContent);
+    expect(names.slice(0, 3)).toEqual(['Usuario Reciente', 'Usuario Antiguo', 'Usuario Nunca']);
+    fireEvent.change(screen.getByPlaceholderText('Buscar usuarios y equipo...'), { target: { value: 'never@' } });
+    expect(screen.getByText('Usuario Nunca')).toBeTruthy();
+    expect(screen.queryByText('Usuario Reciente')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: 'Limpiar búsqueda' }));
+    expect(screen.getByText('Usuario Reciente')).toBeTruthy();
+  });
+});
+
+describe('acciones y detalles de registros administrativos', () => {
+  it('archiva proveedores con confirmación y conserva el registro', async () => {
+    const supplier = { id: 'supplier-1', data: { Nombre: 'Proveedor Uno', Estado: 'Activo' } };
+    vi.mocked(adminTableService.list).mockResolvedValue([supplier]);
+    const update = vi.spyOn(adminTableService, 'update').mockResolvedValue({ ...supplier, data: { ...supplier.data, Estado: 'Inactivo' } });
+    const config = { ...usersConfig, title: 'Proveedores', action: 'Nuevo proveedor', columns: ['Nombre', 'Estado'] };
+
+    render(<AdminCrudModule section="suppliers" config={config} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Archivar proveedor Proveedor Uno' }));
+    expect(screen.getByText(/¿Confirmas archivar este registro/)).toBeTruthy();
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar archivar' }));
+
+    await waitFor(() => expect(update).toHaveBeenCalledWith('suppliers', 'supplier-1', { Nombre: 'Proveedor Uno', Estado: 'Inactivo' }));
+    expect(screen.getByRole('status').textContent).toContain('Proveedor archivado correctamente');
+    expect(screen.getByRole('button', { name: 'Ver Proveedores: Proveedor Uno' })).toBeTruthy();
+    expect(screen.queryByRole('button', { name: 'Archivar proveedor Proveedor Uno' })).toBeNull();
+  });
+
+  it('anula ventas con el estado de cancelación y muestra error cuando falla el guardado', async () => {
+    const sale = { id: 'sale-1', data: { Referencia: 'V-1', Cliente: 'Cliente uno', Total: 125, Estado: 'Completada' } };
+    vi.mocked(adminTableService.list).mockResolvedValue([sale]);
+    const update = vi.spyOn(adminTableService, 'update').mockRejectedValueOnce(new Error('No se pudo actualizar'));
+    const config = { ...usersConfig, title: 'Ventas', columns: ['Referencia', 'Cliente', 'Total', 'Estado'] };
+
+    render(<AdminCrudModule section="sales" config={config} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Anular Ventas: V-1' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Confirmar anular' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('No se pudo actualizar');
+    expect(update).toHaveBeenCalledWith('sales', 'sale-1', expect.objectContaining({ Estado: 'Cancelado' }));
+  });
+
+  it('elimina un inventario sin relaciones y muestra el estado vacío resultante', async () => {
+    vi.spyOn(adminTableService, 'delete').mockResolvedValue({ deleted: true });
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Eliminar Inventario: Monitor' }));
+    fireEvent.click(screen.getByRole('button', { name: 'Eliminar producto' }));
+
+    await waitFor(() => expect(screen.queryByText('Monitor')).toBeNull());
+    expect(screen.getByRole('status').textContent).toContain('Registro eliminado correctamente');
+    expect(screen.getByText('No hay registros disponibles')).toBeTruthy();
+  });
+
+  it('muestra la ficha completa de cliente y maneja datos opcionales del historial', async () => {
+    const customer = { id: 'customer-1', data: { Nombre: 'Cliente Uno', Correo: 'cliente@example.com', Estado: 'Activo' } };
+    vi.mocked(adminTableService.list).mockResolvedValue([customer]);
+    vi.spyOn(customerService, 'details').mockResolvedValue({
+      customer: { name: 'Cliente Uno', email: 'cliente@example.com', status: 'Activo' },
+      wishlistItems: 3,
+      addresses: ['Zona 1, Ciudad'],
+      orders: [{ id: 'order-1', orderNumber: 'NEXO-1', status: 'Entregado', total: 75, items: [{ productName: 'Teclado', quantity: 1, unitPrice: 75 }, {}] }],
+    });
+    const config = { ...usersConfig, title: 'Clientes', columns: ['Nombre', 'Correo', 'Estado'] };
+
+    render(<AdminCrudModule section="customers" config={config} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver Clientes: Cliente Uno' }));
+
+    expect(await screen.findByText('Historial de compras')).toBeTruthy();
+    expect(screen.getByText('Zona 1, Ciudad')).toBeTruthy();
+    expect(screen.getByText('NEXO-1')).toBeTruthy();
+    expect(screen.getByText('3')).toBeTruthy();
+    expect(screen.getByText(/Teclado · 1 ×/)).toBeTruthy();
+    expect(screen.getByText(/Producto · 0 ×/)).toBeTruthy();
+  });
+
+  it('renderiza nombres heredados con etiquetas como texto plano en lista y detalle', async () => {
+    const unsafeName = '<img src=x onerror=alert(1)>';
+    vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: unsafeName, Correo: 'cliente@example.test', Estado: 'Activo' } }]);
+    vi.spyOn(customerService, 'details').mockResolvedValue({ customer: { name: unsafeName, email: 'cliente@example.test' }, wishlistItems: 0, addresses: [], orders: [] });
+    const config = { ...usersConfig, title: 'Clientes', columns: ['Nombre', 'Correo', 'Estado'] };
+    const { container } = render(<AdminCrudModule section="customers" config={config} />);
+
+    expect(await screen.findByText(unsafeName)).toBeTruthy();
+    expect(container.querySelector('img[src="x"]')).toBeNull();
+    fireEvent.click(screen.getByRole('button', { name: `Ver Clientes: ${unsafeName}` }));
+    const dialog = await screen.findByRole('dialog');
+    expect(dialog.querySelector('img[src="x"]')).toBeNull();
+    expect(dialog.textContent).toContain(unsafeName);
+  });
+
+  it('rechaza etiquetas HTML al editar el nombre de un cliente', async () => {
+    vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: 'Cliente Uno', Correo: 'cliente@example.test', Estado: 'Activo' } }]);
+    const update = vi.spyOn(adminTableService, 'update');
+    const config = { ...usersConfig, title: 'Clientes', action: 'Nuevo cliente', columns: ['Nombre', 'Correo', 'Estado'] };
+    render(<AdminCrudModule section="customers" config={config} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Editar Clientes: Cliente Uno' }));
+    fireEvent.change(screen.getByLabelText('Nombre'), { target: { value: '<h1>Cliente</h1>' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('solo puede contener letras');
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('presenta error cuando no se puede cargar el detalle del cliente', async () => {
+    vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: 'Cliente Uno' } }]);
+    vi.spyOn(customerService, 'details').mockRejectedValue(new Error('Servicio de clientes no disponible'));
+    const config = { ...usersConfig, title: 'Clientes', columns: ['Nombre'] };
+
+    render(<AdminCrudModule section="customers" config={config} />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver Clientes: Cliente Uno' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Servicio de clientes no disponible');
+  });
+
+  it('muestra los estados vacíos del historial y no ofrece crear clientes desde el panel', async () => {
+    vi.mocked(adminTableService.list).mockResolvedValue([{ id: 'customer-1', data: { Nombre: 'Cliente Uno' } }]);
+    vi.spyOn(customerService, 'details').mockResolvedValue({ customer: {}, wishlistItems: 0, addresses: [], orders: [] });
+    const config = { ...usersConfig, title: 'Clientes', action: undefined, columns: ['Nombre'] };
+
+    render(<AdminCrudModule section="customers" config={config} />);
+    expect(screen.queryByRole('button', { name: 'Nuevo cliente' })).toBeNull();
+    fireEvent.click(await screen.findByRole('button', { name: 'Ver Clientes: Cliente Uno' }));
+
+    expect(await screen.findByText('Aún no hay compras asociadas a este cliente.')).toBeTruthy();
+    expect(screen.getByText('No hay direcciones registradas.')).toBeTruthy();
+    expect(screen.getAllByText('—').length).toBeGreaterThan(0);
+  });
+
+  it('permite reintentar cargar las marcas después de un error de la API', async () => {
+    vi.mocked(brandService.list).mockRejectedValueOnce(new Error('Marcas no disponibles'))
+      .mockRejectedValueOnce(new Error('Marcas no disponibles')).mockResolvedValueOnce([
+      { id: 'brand-1', name: 'NEXO', description: '', contact: '', website: '', status: 'Activa' },
+    ]);
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    await screen.findByText('Monitor');
+    fireEvent.click(screen.getByRole('button', { name: 'Editar Inventario: Monitor' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('Marcas no disponibles');
+    fireEvent.click(screen.getByRole('button', { name: 'Reintentar' }));
+    expect(await screen.findByRole('option', { name: 'NEXO' })).toBeTruthy();
   });
 });

@@ -40,6 +40,18 @@ class TeamInvitationServiceTest {
             users, roles, jdbc, passwordEncoder, permissions);
 
     @Test
+    void rejectsMarkupNamesBeforeCreatingTeamInvitations() {
+        Authentication authentication = mock(Authentication.class);
+        when(permissions.has(authentication, "users", "create")).thenReturn(true);
+
+        assertThrows(BusinessRuleException.class, () -> service.invite(
+                new TeamInvitationRequest("<h1>Administrador</h1>", "staff@example.test", "admin"), authentication));
+
+        verify(users, org.mockito.Mockito.never()).saveAndFlush(any(AppUserEntity.class));
+        org.mockito.Mockito.verifyNoInteractions(roles, jdbc, passwordEncoder);
+    }
+
+    @Test
     void persistsInvitationExpiryAsJdbcTimestamp() {
         String email = "invited-user@example.com";
         RoleEntity adminRole = mock(RoleEntity.class);
