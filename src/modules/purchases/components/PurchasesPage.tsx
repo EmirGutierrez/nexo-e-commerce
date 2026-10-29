@@ -6,9 +6,11 @@ import { useApp } from '../../../contexts/AppContext';
 import type { MerchandisePurchase, MerchandisePurchaseItem, Product, Supplier } from '../../../types';
 import { roleService } from '../../../services/roleService';
 import { businessToday, isHistoricalBusinessDate, isValidBusinessDate } from '../../../shared/utils/businessDate';
+import { isValidIntegerInput, isValidMoneyDraft, isValidMoneyInput, sanitizeDecimalInput } from '../../../shared/utils/adminFieldValidation';
 
 const today = businessToday;
 const csvCell = (value: string | number) => `"${String(value).replaceAll('"', '""')}"`;
+type PurchaseItemDraft = Omit<MerchandisePurchaseItem, 'quantity' | 'unitCost'> & { quantity: string; unitCost: string };
 
 export default function PurchasesPage() {
   const { notifyAdmin, role } = useApp();
@@ -30,7 +32,7 @@ export default function PurchasesPage() {
   const [date, setDate] = useState(today());
   const [historicalDateConfirmed, setHistoricalDateConfirmed] = useState(false);
   const [status, setStatus] = useState<MerchandisePurchase['status']>('Registrada');
-  const [items, setItems] = useState<MerchandisePurchaseItem[]>([]);
+  const [items, setItems] = useState<PurchaseItemDraft[]>([]);
 
   useEffect(() => {
     Promise.all([merchandisePurchaseService.list(), supplierService.list(), productInventoryService.list()])
@@ -46,27 +48,27 @@ export default function PurchasesPage() {
   const filteredPurchases = useMemo(() => purchases.filter((purchase) =>
     (statusFilter === 'Todos' || purchase.status === statusFilter) &&
     `${purchase.id} ${purchase.supplier} ${purchase.items.map((item) => item.productName).join(' ')}`.toLowerCase().includes(query.toLowerCase())), [purchases, statusFilter, query]);
-  const total = items.reduce((sum, item) => sum + item.quantity * item.unitCost, 0);
-  const totalUnits = items.reduce((sum, item) => sum + item.quantity, 0);
+  const total = items.reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unitCost || 0), 0);
+  const totalUnits = items.reduce((sum, item) => sum + Number(item.quantity || 0), 0);
   const activePurchases = purchases.filter((purchase) => purchase.status !== 'Anulada');
   const purchaseTotal = activePurchases.reduce((sum, purchase) => sum + purchase.total, 0);
 
-  const changeItem = (index: number, patch: Partial<MerchandisePurchaseItem>) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  const changeItem = (index: number, patch: Partial<PurchaseItemDraft>) => setItems((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
   const selectProduct = (index: number, productId: string) => {
     const product = suppliedProducts.find((entry) => entry.id === productId);
     if (items.some((item, itemIndex) => itemIndex !== index && item.productId === productId)) { setFormError('El producto ya está en otra línea de la compra.'); return; }
-    if (product) changeItem(index, { productId, productName: product.name, unitCost: product.cost || 0 });
+    if (product) changeItem(index, { productId, productName: product.name, unitCost: product.cost ? String(product.cost) : '' });
   };
   const changeSupplier = (id: string) => {
     setSupplierId(id);
     const supplier = activeSuppliers.find((entry) => entry.id === id);
     const firstProduct = products.find((product) => product.status !== 'Inactivo' && supplier?.productIds.includes(product.id));
-    setItems(firstProduct ? [{ productId: firstProduct.id, productName: firstProduct.name, quantity: 1, unitCost: firstProduct.cost || 0 }] : []);
+    setItems(firstProduct ? [{ productId: firstProduct.id, productName: firstProduct.name, quantity: '1', unitCost: firstProduct.cost ? String(firstProduct.cost) : '' }] : []);
   };
   const addItem = () => {
     setItems((current) => {
       const firstProduct = suppliedProducts.find((product) => !current.some((item) => item.productId === product.id));
-      return firstProduct ? [...current, { productId: firstProduct.id, productName: firstProduct.name, quantity: 1, unitCost: firstProduct.cost || 0 }] : current;
+      return firstProduct ? [...current, { productId: firstProduct.id, productName: firstProduct.name, quantity: '1', unitCost: firstProduct.cost ? String(firstProduct.cost) : '' }] : current;
     });
   };
   const closeForm = () => { setFormOpen(false); setFormError(''); };
@@ -74,19 +76,19 @@ export default function PurchasesPage() {
     const firstSupplier = activeSuppliers[0];
     const firstProduct = products.find((product) => product.status !== 'Inactivo' && firstSupplier?.productIds.includes(product.id));
     setSupplierId(firstSupplier?.id || ''); setDate(today()); setHistoricalDateConfirmed(false); setStatus('Registrada');
-    setItems(firstProduct ? [{ productId: firstProduct.id, productName: firstProduct.name, quantity: 1, unitCost: firstProduct.cost || 0 }] : []);
+    setItems(firstProduct ? [{ productId: firstProduct.id, productName: firstProduct.name, quantity: '1', unitCost: firstProduct.cost ? String(firstProduct.cost) : '' }] : []);
     setFormError(''); setSuccess(''); setFormOpen(true);
   };
 
   const savePurchase = async (event: React.FormEvent) => {
     event.preventDefault(); setFormError('');
-    if (!selectedSupplier || !isValidBusinessDate(date) || !items.length || items.some((item) => !selectedSupplier.productIds.includes(item.productId) || !Number.isInteger(item.quantity) || item.quantity <= 0 || !Number.isFinite(item.unitCost) || item.unitCost <= 0)) {
+    if (!selectedSupplier || !isValidBusinessDate(date) || !items.length || items.some((item) => !selectedSupplier.productIds.includes(item.productId) || !isValidIntegerInput(item.quantity) || Number(item.quantity) <= 0 || !isValidMoneyInput(item.unitCost, 0.01))) {
       setFormError(!isValidBusinessDate(date) ? 'Selecciona una fecha de compra válida.' : !selectedSupplier ? 'Selecciona un proveedor con productos asignados.' : 'Valida cantidades enteras y costos mayores que cero.'); return;
     }
     const historicalDate = isHistoricalBusinessDate(date);
     if (historicalDate && !historicalDateConfirmed) { setFormError('La fecha es anterior a hoy. Confirma que esta compra corresponde a un registro histórico.'); return; }
     try {
-      const payload = { supplierId: selectedSupplier.id, supplier: selectedSupplier.name, date, items, total, status };
+      const payload = { supplierId: selectedSupplier.id, supplier: selectedSupplier.name, date, items: items.map((item) => ({ ...item, quantity: Number(item.quantity), unitCost: Number(item.unitCost) })), total, status };
       const saved = historicalDate
         ? await merchandisePurchaseService.create(payload, { confirmHistoricalDate: true })
         : await merchandisePurchaseService.create(payload);
@@ -127,7 +129,7 @@ export default function PurchasesPage() {
       <div className="purchase-items-heading"><div><strong>Productos del proveedor</strong><span>{selectedSupplier ? `${suppliedProducts.length} productos disponibles` : 'Selecciona un proveedor para ver su catálogo.'}</span></div><button type="button" className="button button-outline" onClick={addItem} disabled={!remainingProducts.length}><Plus size={15} /> {remainingProducts.length ? 'Agregar producto' : 'Todos agregados'}</button></div>
       {selectedSupplier && suppliedProducts.length === 0 && <div className="purchase-catalog-empty">Este proveedor aún no tiene productos asociados. Completa sus productos en el catálogo de proveedores.</div>}
       {selectedSupplier && suppliedProducts.length > 0 && remainingProducts.length === 0 && <div className="purchase-catalog-empty">Todos los productos de este proveedor ya están en la compra. Asocia otro producto al proveedor para agregar otra línea.</div>}
-      <div className="purchase-items-list">{items.map((item, index) => <div className="purchase-item-row" key={`${index}-${item.productId}`}><label className="field purchase-product-field"><span>Producto</span><select className="purchase-select" value={item.productId} onChange={(event) => selectProduct(index, event.target.value)}>{suppliedProducts.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</select></label><label className="field"><span>Cantidad</span><input type="number" min="1" step="1" value={item.quantity || ''} onChange={(event) => changeItem(index, { quantity: event.target.value === '' ? 0 : Number(event.target.value) })} /></label><label className="field"><span>Costo unitario (Q)</span><input type="number" min="0.01" step="0.01" value={item.unitCost || ''} placeholder="0.00" onChange={(event) => changeItem(index, { unitCost: Number(event.target.value) })} /></label><div className="purchase-subtotal"><span>Subtotal</span><strong>{formatQ(item.quantity * item.unitCost)}</strong></div><button type="button" className="icon-button danger purchase-remove" disabled={items.length === 1} aria-label={`Quitar ${item.productName}`} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={16} /></button></div>)}</div>
+      <div className="purchase-items-list">{items.map((item, index) => <div className="purchase-item-row" key={`${index}-${item.productId}`}><label className="field purchase-product-field"><span>Producto</span><select className="purchase-select" value={item.productId} onChange={(event) => selectProduct(index, event.target.value)}>{suppliedProducts.map((product) => <option key={product.id} value={product.id}>{product.name} · {product.sku}</option>)}</select></label><label className="field"><span>Cantidad</span><input type="text" inputMode="numeric" pattern="[0-9]+" maxLength={10} value={item.quantity} onChange={(event) => { const value = event.target.value; if (value && !/^[0-9]+$/.test(value)) return; changeItem(index, { quantity: value }); }} /></label><label className="field"><span>Costo unitario (Q)</span><input type="text" inputMode="decimal" pattern="[0-9]+([.][0-9]{1,2})?" maxLength={15} value={item.unitCost} placeholder="0.00" onChange={(event) => { const value = event.target.value; if (value && !isValidMoneyDraft(value)) return; changeItem(index, { unitCost: sanitizeDecimalInput(value) }); }} /></label><div className="purchase-subtotal"><span>Subtotal</span><strong>{formatQ(Number(item.quantity || 0) * Number(item.unitCost || 0))}</strong></div><button type="button" className="icon-button danger purchase-remove" disabled={items.length === 1} aria-label={`Quitar ${item.productName}`} onClick={() => setItems((current) => current.filter((_, itemIndex) => itemIndex !== index))}><Trash2 size={16} /></button></div>)}</div>
       <div className="purchase-total"><span>Total de compra · {totalUnits} unidades</span><strong>{formatQ(total)}</strong></div>
       {formError && <div className="purchase-feedback error" role="alert">{formError}</div>}<p className="purchase-demo-note">La compra se persiste. Al registrarla como recibida aumenta el inventario; al anularla se revierte ese movimiento.</p><div className="modal-actions"><button type="button" className="button button-outline" onClick={closeForm}>Cancelar</button><button type="submit" className="button button-primary"><Check size={16} /> Guardar compra</button></div>
       </form></div></div>}

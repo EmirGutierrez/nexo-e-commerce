@@ -32,6 +32,24 @@ afterEach(() => {
 });
 
 describe('marcas', () => {
+  it('acepta nombres mixtos y rechaza contactos que no son correo ni teléfono válidos', async () => {
+    render(<BrandsPage />);
+    await screen.findByText('NEXO Labs');
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva marca' }));
+    fireEvent.change(screen.getByPlaceholderText('Nombre de la marca'), { target: { value: '3M Audio' } });
+    fireEvent.change(screen.getByPlaceholderText('Productos o especialidad de la marca'), { target: { value: 'Audio 50%' } });
+    fireEvent.change(screen.getByPlaceholderText('Correo o teléfono'), { target: { value: 'contacto@7777' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar marca' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('correo válido');
+    expect(brandService.create).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByPlaceholderText('Correo o teléfono'), { target: { value: '+502 5555-1212' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar marca' }));
+    await waitFor(() => expect(brandService.create).toHaveBeenCalledWith(expect.objectContaining({
+      name: '3M Audio', description: 'Audio 50%', contact: '+50255551212',
+    })));
+  });
+
   it('exige descripción y contacto, guarda valores normalizados y permite reasignar productos antes de eliminar', async () => {
     render(<BrandsPage />);
     await screen.findByText('NEXO Labs');
@@ -57,5 +75,27 @@ describe('marcas', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Confirmar eliminación' }));
 
     await waitFor(() => expect(brandService.delete).toHaveBeenCalledWith('brand-1', 'brand-2'));
+  });
+
+  it('rechaza nombres sin letras ni números, valida URL y cierra al pulsar el fondo', async () => {
+    render(<BrandsPage />);
+    await screen.findByText('NEXO Labs');
+    fireEvent.click(screen.getByRole('button', { name: 'Nueva marca' }));
+    fireEvent.change(screen.getByPlaceholderText('Nombre de la marca'), { target: { value: '!!!' } });
+    fireEvent.change(screen.getByPlaceholderText('Productos o especialidad de la marca'), { target: { value: 'Accesorios' } });
+    fireEvent.change(screen.getByPlaceholderText('Correo o teléfono'), { target: { value: 'ventas@nexo.gt' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar marca' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('nombre de la marca');
+    fireEvent.pointerDown(screen.getByRole('dialog'));
+    expect(screen.getByRole('dialog')).toBeTruthy();
+
+    fireEvent.change(screen.getByPlaceholderText('Nombre de la marca'), { target: { value: 'NEXO Audio' } });
+    fireEvent.change(screen.getByPlaceholderText('https://ejemplo.com'), { target: { value: 'javascript:alert(1)' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar marca' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('http:// o https://');
+    expect(brandService.create).not.toHaveBeenCalled();
+
+    fireEvent.pointerDown(document.querySelector('.modal-backdrop') as HTMLElement);
+    await waitFor(() => expect(screen.queryByRole('dialog')).toBeNull());
   });
 });
