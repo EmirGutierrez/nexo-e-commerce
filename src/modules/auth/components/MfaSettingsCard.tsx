@@ -2,9 +2,11 @@
 
 import { useCallback, useEffect, useState } from 'react';
 import { KeyRound, ShieldCheck } from 'lucide-react';
+import { useApp } from '../../../contexts/AppContext';
 import { mfaService, type MfaEnrollment, type MfaStatus } from '../../../services';
 
 export default function MfaSettingsCard({ hidden = false }: { hidden?: boolean }) {
+  const { refreshCurrentUser } = useApp();
   const [status, setStatus] = useState<MfaStatus | null>(null);
   const [enrollment, setEnrollment] = useState<MfaEnrollment | null>(null);
   const [verificationCode, setVerificationCode] = useState('');
@@ -45,8 +47,9 @@ export default function MfaSettingsCard({ hidden = false }: { hidden?: boolean }
       const result = await mfaService.completeEnrollment(verificationCode.trim());
       setRecoveryCodes(result.recoveryCodes);
       setEnrollment(null); setVerificationCode('');
-      await refresh();
       setMessage('La verificación en dos pasos quedó activa. Guarda los códigos de recuperación.');
+      try { await refresh(); await refreshCurrentUser(); }
+      catch { setError('MFA quedó activa, pero no se actualizó el estado de la sesión. Recarga la página después de guardar los códigos.'); }
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo confirmar el código.'); }
     finally { setBusy(false); }
   };
@@ -56,8 +59,9 @@ export default function MfaSettingsCard({ hidden = false }: { hidden?: boolean }
     try {
       await mfaService.disable(currentPassword, disableCode.trim());
       setCurrentPassword(''); setDisableCode(''); setRecoveryCodes([]); setEnrollment(null);
-      await refresh();
       setMessage('La verificación en dos pasos se desactivó.');
+      try { await refresh(); await refreshCurrentUser(); }
+      catch { setError('MFA se desactivó, pero no se actualizó el estado de la sesión. Recarga la página para continuar.'); }
     } catch (cause) { setError(cause instanceof Error ? cause.message : 'No se pudo desactivar MFA.'); }
     finally { setBusy(false); }
   };
@@ -76,12 +80,13 @@ export default function MfaSettingsCard({ hidden = false }: { hidden?: boolean }
   return <section hidden={hidden} className="panel mfa-settings-card" aria-labelledby="mfa-settings-title">
     <div className="mfa-settings-heading"><span className="mfa-settings-icon"><ShieldCheck size={19} /></span><div><span className="eyebrow">Seguridad de la cuenta</span><h2 id="mfa-settings-title">Verificación en dos pasos</h2><p>Usa una aplicación de autenticación al iniciar sesión en web o móvil.</p></div></div>
     {loading ? <p className="mfa-settings-muted" role="status">Consultando configuración…</p> : !status ? <p className="mfa-settings-muted">No se pudo consultar la configuración. Recarga la página para intentarlo de nuevo.</p> : status.enabled ? <>
-      <div className="mfa-settings-state is-enabled"><span />Activa · {status.recoveryCodesRemaining} códigos de recuperación disponibles</div>
+      <div className="mfa-settings-state is-enabled"><span />Activa{status.required ? ' · obligatoria' : ''} · {status.recoveryCodesRemaining} códigos de recuperación disponibles</div>
       {recoveryCodes.length > 0 && <div className="mfa-recovery-panel"><strong>Guarda estos códigos en un lugar seguro</strong><p>Cada código sirve una sola vez. Esta lista no volverá a mostrarse.</p><ul>{recoveryCodes.map((code) => <li key={code}><code>{code}</code></li>)}</ul><button type="button" className="button button-secondary" onClick={() => setRecoveryCodes([])}>Ya los guardé</button></div>}
       <form className="mfa-disable-form" onSubmit={rotate}><p>Si perdiste tus códigos, puedes reemplazarlos con tu contraseña y el segundo factor. Los anteriores quedarán revocados.</p><label className="field"><span>Contraseña actual</span><input type="password" autoComplete="current-password" required maxLength={128} value={rotatePassword} onChange={(event) => setRotatePassword(event.target.value)} /></label><label className="field"><span>Código de autenticación o recuperación</span><input type="text" autoComplete="one-time-code" autoCapitalize="characters" required maxLength={32} value={rotateCode} onChange={(event) => setRotateCode(event.target.value)} /></label><button className="button button-secondary" type="submit" disabled={busy}>{busy ? 'Verificando…' : 'Regenerar códigos'}</button></form>
       <form className="mfa-disable-form" onSubmit={disable}><p>Para desactivarla confirma tu contraseña y un código actual o de recuperación.</p><label className="field"><span>Contraseña actual</span><input type="password" autoComplete="current-password" required maxLength={128} value={currentPassword} onChange={(event) => setCurrentPassword(event.target.value)} /></label><label className="field"><span>Código de autenticación o recuperación</span><input type="text" autoComplete="one-time-code" autoCapitalize="characters" required maxLength={32} value={disableCode} onChange={(event) => setDisableCode(event.target.value)} /></label><button className="button button-secondary" type="submit" disabled={busy}>{busy ? 'Verificando…' : 'Desactivar verificación'}</button></form>
     </> : <>
-      <div className="mfa-settings-state"><span />No está activa</div>
+      <div className="mfa-settings-state"><span />{status.required ? 'Obligatoria · pendiente de activación' : 'No está activa'}</div>
+      {status.required && <p className="mfa-settings-error" role="alert">Activa la verificación en dos pasos para habilitar las funciones de tu cuenta de equipo. Mientras tanto solo podrás configurar MFA o cerrar sesión.</p>}
       {enrollment ? <form className="mfa-enrollment-form" onSubmit={completeEnrollment}>
         <div className="mfa-enrollment-key"><KeyRound size={16} /><div><strong>Clave para tu aplicación</strong><code>{enrollment.secret}</code><small>Agrega una cuenta manual en tu aplicación de autenticación con esta clave.</small></div></div>
         <details className="mfa-otpauth-details"><summary>Ver enlace otpauth</summary><code>{enrollment.otpauthUri}</code></details>

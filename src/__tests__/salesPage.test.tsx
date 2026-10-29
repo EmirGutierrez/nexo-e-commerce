@@ -57,6 +57,9 @@ describe('ventas presenciales e historial', () => {
     expect(screen.queryByText('Agotado')).toBeNull();
     expect(screen.queryByText('Inactivo')).toBeNull();
     fireEvent.click(screen.getByRole('button', { name: /Agregar Monitor NEXO/ }));
+    const quantity = screen.getByRole('textbox', { name: 'Cantidad de Monitor NEXO' }) as HTMLInputElement;
+    fireEvent.change(quantity, { target: { value: '1.5' } });
+    expect(quantity.value).toBe('1');
     fireEvent.click(screen.getByRole('button', { name: 'Continuar al cobro' }));
     fireEvent.change(screen.getByPlaceholderText('Ej. 1234567-8 o CF'), { target: { value: '1234567-8' } });
     fireEvent.click(screen.getByRole('button', { name: /Registrar venta y comprobante/ }));

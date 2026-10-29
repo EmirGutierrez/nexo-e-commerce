@@ -88,6 +88,7 @@ export interface User {
   status: 'Activo' | 'Pendiente' | 'Inactivo';
   permissions?: string[];
   lastLoginAt?: string | null;
+  mfaSetupRequired?: boolean;
 }
 
 export interface Order {

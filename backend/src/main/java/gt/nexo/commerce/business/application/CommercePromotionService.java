@@ -74,8 +74,8 @@ public class CommercePromotionService {
             String description = text(announcement.get("description"));
             String href = text(announcement.get("href"));
             String image = text(announcement.get("image"));
-            if (title.isBlank() || title.length() > 70 || description.isBlank() || description.length() > 160
-                    || href.length() > 500 || !href.startsWith("/") || href.startsWith("//") || href.contains("\\"))
+            if (title.isBlank() || title.length() > 70 || !validText(title) || description.isBlank() || description.length() > 160 || !validText(description)
+                    || href.length() > 500 || !validText(href) || !href.startsWith("/") || href.startsWith("//") || href.contains("\\"))
                 throw invalid("El anuncio necesita texto y un enlace interno válidos.");
             if (!image.isBlank() && (image.length() > 250000 || !image.matches("^data:image/(jpeg|png|webp);base64,[A-Za-z0-9+/]+={0,2}$")))
                 throw invalid("La imagen del anuncio debe ser JPG, PNG o WEBP y pesar menos de 180 KB.");
@@ -259,13 +259,29 @@ public class CommercePromotionService {
     }
 
     private static BigDecimal money(Object value) {
-        try { return new BigDecimal(text(value)).setScale(2, RoundingMode.HALF_UP); }
+        String raw = text(value);
+        if (raw.isBlank() || value instanceof String && !raw.matches("^[0-9]+(?:\\.[0-9]{1,2})?$"))
+            throw invalid("El importe de la promoción debe tener hasta dos decimales.");
+        try {
+            BigDecimal amount = new BigDecimal(raw);
+            BigDecimal normalized = amount.stripTrailingZeros();
+            if (normalized.scale() > 2 || normalized.precision() - normalized.scale() > 12)
+                throw invalid("El importe de la promoción supera la precisión permitida.");
+            return amount.setScale(2, RoundingMode.UNNECESSARY);
+        } catch (BusinessRuleException exception) { throw exception; }
         catch (Exception exception) { throw invalid("El importe de la promoción no es válido."); }
     }
 
     private static int integer(Object value) {
-        try { return new BigDecimal(text(value)).intValueExact(); }
+        String raw = text(value);
+        if (!raw.matches("^[0-9]+$")) throw invalid("El número de usos o descuento debe ser entero.");
+        try { return new BigDecimal(raw).intValueExact(); }
         catch (Exception exception) { throw invalid("El número de usos o descuento no es válido."); }
+    }
+
+    private static boolean validText(String value) {
+        return value.codePoints().noneMatch(codePoint -> Character.isISOControl(codePoint)
+                && codePoint != '\n' && codePoint != '\r' && codePoint != '\t');
     }
 
     private static String text(Object value) { return value == null ? "" : String.valueOf(value).trim(); }

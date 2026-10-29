@@ -52,21 +52,85 @@ class MfaServiceLifecycleTest {
 
     @Test
     void returnsTheCurrentMfaStatusAndRecoveryCount() {
-        doAnswer(invocation -> {
-            ResultSet result = mock(ResultSet.class);
-            when(result.next()).thenReturn(true);
-            when(result.getBoolean(1)).thenReturn(true);
-            ResultSetExtractor<?> extractor = invocation.getArgument(1);
-            return extractor.extractData(result);
-        }).when(jdbc).query(contains("SELECT enabled_at IS NOT NULL FROM app_user_mfa"),
-                any(ResultSetExtractor.class), any(Object[].class));
+        stubAccessState(true, true, true);
         when(jdbc.queryForObject(contains("COUNT(*)"), eq(Integer.class), any(Object[].class))).thenReturn(4);
 
         MfaStatusResponse status = service.status(USER_ID);
 
+        assertTrue(status.required());
         assertTrue(status.enabled());
         assertFalse(status.enrollmentPending());
         assertEquals(4, status.recoveryCodesRemaining());
+    }
+
+    @Test
+    void distinguishesPendingEnrollmentFromAnAccountThatHasNotStartedEnrollment() {
+        stubAccessState(true, true, false);
+        when(jdbc.queryForObject(contains("COUNT(*)"), eq(Integer.class), any(Object[].class))).thenReturn(0);
+        stubEnrollmentPending(true, true);
+
+        assertTrue(service.status(USER_ID).enrollmentPending());
+
+        stubEnrollmentPending(false, false);
+        assertFalse(service.status(USER_ID).enrollmentPending());
+    }
+
+    @Test
+    void treatsAnUnknownAccountAsInactiveAndRequiresMfaByDefault() {
+        doAnswer(invocation -> {
+            ResultSet result = mock(ResultSet.class);
+            when(result.next()).thenReturn(false);
+            ResultSetExtractor<?> extractor = invocation.getArgument(1);
+            return extractor.extractData(result);
+        }).when(jdbc).query(contains("AS account_active"), any(ResultSetExtractor.class), any(Object[].class));
+
+        MfaService.MfaAccessState state = service.accessState(USER_ID);
+
+        assertFalse(state.accountActive());
+        assertTrue(state.required());
+        assertFalse(state.enabled());
+    }
+
+    @Test
+    void requiresMfaForStaffRoles() {
+        stubAccessState(true, true, false);
+        assertTrue(service.isRequired(USER_ID));
+    }
+
+    @Test
+    void leavesCustomerMfaOptional() {
+        stubAccessState(true, false, false);
+        assertFalse(service.isRequired(USER_ID));
+    }
+
+    @Test
+    void restrictsInactiveOrUnenrolledAccounts() {
+        assertTrue(new MfaService.MfaAccessState(false, true, false).enrollmentRequired());
+        assertTrue(new MfaService.MfaAccessState(true, true, false).enrollmentRequired());
+    }
+
+    @Test
+    void allowsActiveEnrolledAccounts() {
+        assertFalse(new MfaService.MfaAccessState(true, true, true).enrollmentRequired());
+        assertFalse(new MfaService.MfaAccessState(true, false, false).enrollmentRequired());
+    }
+
+    @Test
+    void recognizesEnabledMfa() {
+        stubAccessState(true, true, true);
+        assertTrue(service.accessState(USER_ID).enabled());
+    }
+
+    @Test
+    void acceptsMobileTokensIssuedAfterMfaWasEnabled() {
+        stubBooleanQuery("SELECT m.enabled_at IS NULL OR t.created_at >= m.enabled_at", true);
+        assertTrue(service.isMobileTokenVerified(USER_ID, "hash-after-mfa"));
+    }
+
+    @Test
+    void rejectsMobileTokensIssuedBeforeMfaWasEnabled() {
+        stubBooleanQuery("SELECT m.enabled_at IS NULL OR t.created_at >= m.enabled_at", false);
+        assertFalse(service.isMobileTokenVerified(USER_ID, "hash-before-mfa"));
     }
 
     @Test
@@ -260,6 +324,28 @@ class MfaServiceLifecycleTest {
         return account;
     }
 
+    private void stubBooleanQuery(String sql, boolean value) {
+        doAnswer(invocation -> {
+            ResultSet result = mock(ResultSet.class);
+            when(result.next()).thenReturn(true);
+            when(result.getBoolean(1)).thenReturn(value);
+            ResultSetExtractor<?> extractor = invocation.getArgument(1);
+            return extractor.extractData(result);
+        }).when(jdbc).query(contains(sql), any(ResultSetExtractor.class), any(Object[].class));
+    }
+
+    private void stubAccessState(boolean active, boolean required, boolean enabled) {
+        doAnswer(invocation -> {
+            ResultSet result = mock(ResultSet.class);
+            when(result.next()).thenReturn(true);
+            when(result.getBoolean("account_active")).thenReturn(active);
+            when(result.getBoolean("mfa_required")).thenReturn(required);
+            when(result.getBoolean("mfa_enabled")).thenReturn(enabled);
+            ResultSetExtractor<?> extractor = invocation.getArgument(1);
+            return extractor.extractData(result);
+        }).when(jdbc).query(contains("AS account_active"), any(ResultSetExtractor.class), any(Object[].class));
+    }
+
     private void stubEnrollmentState(boolean enabled) {
         doAnswer(invocation -> {
             ResultSet result = mock(ResultSet.class);
@@ -268,6 +354,16 @@ class MfaServiceLifecycleTest {
             ResultSetExtractor<?> extractor = invocation.getArgument(1);
             return extractor.extractData(result);
         }).when(jdbc).query(contains("FOR UPDATE"), any(ResultSetExtractor.class), any(Object[].class));
+    }
+
+    private void stubEnrollmentPending(boolean found, boolean pending) {
+        doAnswer(invocation -> {
+            ResultSet result = mock(ResultSet.class);
+            when(result.next()).thenReturn(found);
+            when(result.getBoolean(1)).thenReturn(pending);
+            ResultSetExtractor<?> extractor = invocation.getArgument(1);
+            return extractor.extractData(result);
+        }).when(jdbc).query(contains("SELECT enabled_at IS NULL"), any(ResultSetExtractor.class), any(Object[].class));
     }
 
     private void stubMfaRecord(byte[] ciphertext, Timestamp enabledAt, long lastUsedStep, boolean found) {
