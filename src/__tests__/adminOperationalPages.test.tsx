@@ -64,7 +64,7 @@ describe('ingresos y egresos', () => {
     fireEvent.change(screen.getByLabelText('Categoría'), { target: { value: 'Servicios' } });
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '0' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
-    expect((await screen.findByRole('alert')).textContent).toContain('monto mayor que cero');
+    expect((await screen.findByRole('alert')).textContent).toContain('monto positivo');
 
     fireEvent.change(screen.getByPlaceholderText('0.00'), { target: { value: '75' } });
     fireEvent.click(screen.getByRole('button', { name: 'Guardar movimiento' }));
@@ -107,6 +107,22 @@ describe('proveedores', () => {
     fireEvent.click(screen.getByRole('button', { name: 'Archivar proveedor' }));
     await waitFor(() => expect(supplierService.archive).toHaveBeenCalledWith('supplier-1'));
     expect((await screen.findByRole('status')).textContent).toContain('Proveedor archivado');
+  });
+
+  it('valida los formatos de correo, teléfono y nombre de contacto', async () => {
+    vi.mocked(supplierService.list).mockResolvedValue([]);
+    vi.mocked(merchandisePurchaseService.list).mockResolvedValue([]);
+    render(<SuppliersPage />);
+    fireEvent.click(await screen.findByRole('button', { name: 'Nuevo proveedor' }));
+    fireEvent.change(screen.getByLabelText('Empresa / nombre *'), { target: { value: 'Distribuidora 3M' } });
+    fireEvent.change(screen.getByLabelText('Correo'), { target: { value: '7777@7777' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Guardar proveedor' }));
+    expect((await screen.findByRole('alert')).textContent).toContain('correo válido');
+    expect(supplierService.create).not.toHaveBeenCalled();
+
+    fireEvent.change(screen.getByLabelText('Correo'), { target: { value: 'compras@empresa.gt' } });
+    fireEvent.change(screen.getByLabelText('Persona de contacto'), { target: { value: 'Ana 3' } });
+    expect((screen.getByLabelText('Persona de contacto') as HTMLInputElement).value).toBe('Ana ');
   });
 
   it('permite asociar productos existentes al crear un proveedor', async () => {

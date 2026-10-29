@@ -128,6 +128,24 @@ describe('configuración y formularios de inventario', () => {
     })));
   });
 
+  it('limita campos numéricos y conserva nombres mixtos y SKU válidos', async () => {
+    render(<AdminCrudModule section="inventory" config={inventoryConfig} />);
+    await screen.findByText('Monitor');
+    fireEvent.click(screen.getByRole('button', { name: 'Nuevo producto' }));
+
+    fireEvent.change(screen.getByLabelText('Producto'), { target: { value: 'Router 5G' } });
+    fireEvent.change(screen.getByLabelText('Código del producto (SKU)'), { target: { value: 'ABC# 12' } });
+    fireEvent.change(screen.getByLabelText('Costo unitario'), { target: { value: '1.001' } });
+    fireEvent.change(screen.getByLabelText('Precio de venta'), { target: { value: '1e3' } });
+    fireEvent.change(screen.getByLabelText('Existencias'), { target: { value: '2.5' } });
+
+    expect((screen.getByLabelText('Producto') as HTMLInputElement).value).toBe('Router 5G');
+    expect((screen.getByLabelText('Código del producto (SKU)') as HTMLInputElement).value).toBe('ABC12');
+    expect((screen.getByLabelText('Costo unitario') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Precio de venta') as HTMLInputElement).value).toBe('');
+    expect((screen.getByLabelText('Existencias') as HTMLInputElement).value).toBe('');
+  });
+
   it('rechaza stock cero cuando el estado elegido es En stock', async () => {
     const create = vi.mocked(adminTableService.create);
     render(<AdminCrudModule section="inventory" config={inventoryConfig} />);

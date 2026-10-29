@@ -79,7 +79,10 @@ describe('compras de mercancía', () => {
     expect(screen.getByRole('alert').textContent).toContain('fecha de compra válida');
 
     fireEvent.change(screen.getByLabelText('Fecha de compra'), { target: { value: businessToday() } });
-    fireEvent.change(screen.getByLabelText('Cantidad'), { target: { value: '1.5' } });
+    const quantity = screen.getByLabelText('Cantidad') as HTMLInputElement;
+    fireEvent.change(quantity, { target: { value: '' } });
+    fireEvent.change(quantity, { target: { value: '1.5' } });
+    expect(quantity.value).toBe('');
     save();
     expect(screen.getByRole('alert').textContent).toContain('cantidades enteras');
 
