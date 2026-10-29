@@ -428,50 +428,6 @@ jobs:
             exit 1
           fi
 
-      - name: Confirmar conectividad SSH por WireGuard
-        env:
-          VPS_USER: ${{ secrets.VPS_USER }}
-          WIREGUARD_SERVER_PUBLIC_KEY: ${{ vars.WIREGUARD_SERVER_PUBLIC_KEY }}
-        run: |
-          ssh -i "$HOME/.ssh/nexo_deploy" \
-            -p "$NEXO_SSH_PORT" \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ConnectTimeout=10 \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$VPS_USER@$NEXO_SSH_HOST" health
-          observed_public_key="$(ssh -i "$HOME/.ssh/nexo_deploy" \
-            -p "$NEXO_SSH_PORT" \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o ConnectTimeout=10 \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$VPS_USER@$NEXO_SSH_HOST" wireguard-public-key)"
-          test "$observed_public_key" = "$WIREGUARD_SERVER_PUBLIC_KEY" || {
-            echo "La llave pública WireGuard del servidor no coincide con la variable production"
-            exit 1
-          }
-
-      - name: Sincronizar token del túnel
-        env:
-          VPS_USER: ${{ secrets.VPS_USER }}
-          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
-        run: |
-          if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
-            echo "No hay token de Tunnel configurado; se omite la sincronización."
-            exit 0
-          fi
-          printf '%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" |
-            ssh -i "$HOME/.ssh/nexo_deploy" \
-              -p "$NEXO_SSH_PORT" \
-              -o IdentitiesOnly=yes \
-              -o BatchMode=yes \
-              -o StrictHostKeyChecking=yes \
-              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-              "$VPS_USER@$NEXO_SSH_HOST" sync-tunnel
-
       - name: Limitar la llave SSH de despliegue
         env:
           VPS_USER: ${{ secrets.VPS_USER }}
@@ -485,18 +441,6 @@ jobs:
               -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
               "$VPS_USER@$NEXO_SSH_HOST" \
               'cd /opt/nexo-commerce && git pull --ff-only origin develop && ./deploy/nexo-ssh-command.sh bootstrap'
-
-      - name: Verificar que la llave solo ejecuta el wrapper
-        env:
-          VPS_USER: ${{ secrets.VPS_USER }}
-        run: |
-          ssh -i "$HOME/.ssh/nexo_deploy" \
-            -p "$NEXO_SSH_PORT" \
-            -o IdentitiesOnly=yes \
-            -o BatchMode=yes \
-            -o StrictHostKeyChecking=yes \
-            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
-            "$VPS_USER@$NEXO_SSH_HOST" health
 
       - name: Sincronizar clave MFA con la VPS
         env:
@@ -526,6 +470,50 @@ jobs:
               -o StrictHostKeyChecking=yes \
               -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
               "$VPS_USER@$NEXO_SSH_HOST" sync-mobile-jwt
+
+      - name: Sincronizar token del túnel
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          CLOUDFLARE_TUNNEL_TOKEN: ${{ secrets.CLOUDFLARE_TUNNEL_TOKEN }}
+        run: |
+          if [ -z "$CLOUDFLARE_TUNNEL_TOKEN" ]; then
+            echo "No hay token de Tunnel configurado; se omite la sincronización."
+            exit 0
+          fi
+          printf '%s\n' "$CLOUDFLARE_TUNNEL_TOKEN" |
+            ssh -i "$HOME/.ssh/nexo_deploy" \
+              -p "$NEXO_SSH_PORT" \
+              -o IdentitiesOnly=yes \
+              -o BatchMode=yes \
+              -o StrictHostKeyChecking=yes \
+              -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+              "$VPS_USER@$NEXO_SSH_HOST" sync-tunnel
+
+      - name: Confirmar conectividad SSH por WireGuard
+        env:
+          VPS_USER: ${{ secrets.VPS_USER }}
+          WIREGUARD_SERVER_PUBLIC_KEY: ${{ vars.WIREGUARD_SERVER_PUBLIC_KEY }}
+        run: |
+          ssh -i "$HOME/.ssh/nexo_deploy" \
+            -p "$NEXO_SSH_PORT" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$VPS_USER@$NEXO_SSH_HOST" health
+          observed_public_key="$(ssh -i "$HOME/.ssh/nexo_deploy" \
+            -p "$NEXO_SSH_PORT" \
+            -o IdentitiesOnly=yes \
+            -o BatchMode=yes \
+            -o StrictHostKeyChecking=yes \
+            -o ConnectTimeout=10 \
+            -o UserKnownHostsFile="$HOME/.ssh/known_hosts" \
+            "$VPS_USER@$NEXO_SSH_HOST" wireguard-public-key)"
+          test "$observed_public_key" = "$WIREGUARD_SERVER_PUBLIC_KEY" || {
+            echo "La llave pública WireGuard del servidor no coincide con la variable production"
+            exit 1
+          }
 
       - name: Actualizar aplicación en la VPS
         env:
