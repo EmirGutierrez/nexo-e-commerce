@@ -58,6 +58,7 @@ deploy_app() {
   git -C "$REPO_DIR" pull --ff-only origin develop
   install -d -m 700 "$WRAPPER_DIR"
   install -m 700 "$REPO_DIR/deploy/nexo-ssh-command.sh" "$WRAPPER_PATH"
+  python3 "$REPO_DIR/deploy/validate-monitoring-env.py" "$REPO_DIR/deploy/.env.production"
   set --
   if grep -Eq '^CLOUDFLARE_TUNNEL_TOKEN=[^[:space:]]+' "$REPO_DIR/deploy/.env.production"; then
     set -- "$@" --profile cloudflare-tunnel

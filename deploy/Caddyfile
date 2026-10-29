@@ -36,7 +36,7 @@
 	}
 	@monitoring_root path /monitoring
 	redir @monitoring_root /monitoring/ 308
-	handle_path /monitoring/* {
+	handle /monitoring/* {
 		reverse_proxy grafana:3000
 	}
 	handle {
