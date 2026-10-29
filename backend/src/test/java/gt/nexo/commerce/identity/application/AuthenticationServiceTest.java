@@ -3,6 +3,7 @@ package gt.nexo.commerce.identity.application;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.never;
@@ -160,5 +161,25 @@ class AuthenticationServiceTest {
         service.login(new LoginRequest(EMAIL, PASSWORD, "123456"), request, mock(HttpServletResponse.class));
 
         verify(session).setAttribute(MfaSessionVerification.VERIFIED_USER_ATTRIBUTE, accountId.toString());
+    }
+
+    @Test
+    void removesSecondFactorMarkerFromAWebSessionWithoutMfaVerification() {
+        UUID accountId = UUID.randomUUID();
+        AppUserEntity account = mock(AppUserEntity.class);
+        NexoUserPrincipal principal = mock(NexoUserPrincipal.class);
+        Authentication authentication = mock(Authentication.class);
+        HttpServletRequest request = mock(HttpServletRequest.class);
+        HttpSession session = mock(HttpSession.class);
+        when(authentication.getPrincipal()).thenReturn(principal);
+        when(principal.getId()).thenReturn(accountId);
+        when(authenticationManager.authenticate(any())).thenReturn(authentication);
+        when(users.findById(accountId)).thenReturn(Optional.of(account));
+        when(request.getSession(false)).thenReturn(session);
+
+        service.login(new LoginRequest(EMAIL, PASSWORD), request, mock(HttpServletResponse.class));
+
+        verify(session).removeAttribute(MfaSessionVerification.VERIFIED_USER_ATTRIBUTE);
+        verify(session, never()).setAttribute(eq(MfaSessionVerification.VERIFIED_USER_ATTRIBUTE), any());
     }
 }

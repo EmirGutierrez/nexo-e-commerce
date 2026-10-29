@@ -1,6 +1,7 @@
 package gt.nexo.commerce.shared.security;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -58,9 +59,22 @@ class MfaEnrollmentEnforcementFilterTest {
                 new String[] {"GET", "/api/auth/mfa"},
                 new String[] {"POST", "/api/auth/mfa/enroll/start"},
                 new String[] {"POST", "/api/auth/mfa/enroll/complete"},
+                new String[] {"POST", "/api/auth/login"},
+                new String[] {"POST", "/api/mobile/auth/login"},
+                new String[] {"POST", "/api/auth/register"},
+                new String[] {"POST", "/api/auth/accept-invitation"},
                 new String[] {"POST", "/api/auth/logout"},
+                new String[] {"POST", "/api/mobile/auth/logout"},
+                new String[] {"POST", "/api/auth/password-reset/request"},
+                new String[] {"POST", "/api/auth/password-reset/complete"},
                 new String[] {"GET", "/api/auth/csrf"},
                 new String[] {"GET", "/api/catalog/products"},
+                new String[] {"GET", "/api/catalog/products/product-1"},
+                new String[] {"GET", "/api/catalog/payment-methods"},
+                new String[] {"GET", "/api/catalog/promotions"},
+                new String[] {"GET", "/api/catalog/orders/submissions/order-1"},
+                new String[] {"POST", "/api/catalog/orders/quote"},
+                new String[] {"POST", "/api/catalog/discounts/validate"},
                 new String[] {"POST", "/api/catalog/orders"})) {
             AtomicBoolean continued = new AtomicBoolean();
             MockHttpServletResponse response = new MockHttpServletResponse();
@@ -71,6 +85,42 @@ class MfaEnrollmentEnforcementFilterTest {
             assertTrue(continued.get(), route[0] + " " + route[1] + " should be allowed");
             assertEquals(200, response.getStatus());
         }
+    }
+
+    @Test
+    void allowsReauthenticationAndPublicStoreRoutesButBlocksOtherRequestsWhenMfaIsEnabled() throws Exception {
+        authenticateStaff();
+        when(mfaService.accessState(userId)).thenReturn(new MfaService.MfaAccessState(true, true, true));
+
+        for (String[] route : List.of(
+                new String[] {"GET", "/api/auth/csrf"},
+                new String[] {"POST", "/api/auth/login"},
+                new String[] {"POST", "/api/auth/logout"},
+                new String[] {"POST", "/api/mobile/auth/login"},
+                new String[] {"POST", "/api/mobile/auth/logout"},
+                new String[] {"GET", "/api/catalog/products"},
+                new String[] {"GET", "/api/catalog/products/product-1"},
+                new String[] {"GET", "/api/catalog/payment-methods"},
+                new String[] {"GET", "/api/catalog/promotions"},
+                new String[] {"GET", "/api/catalog/orders/submissions/order-1"},
+                new String[] {"POST", "/api/catalog/orders"},
+                new String[] {"POST", "/api/catalog/orders/quote"},
+                new String[] {"POST", "/api/catalog/discounts/validate"})) {
+            AtomicBoolean continued = new AtomicBoolean();
+            MockHttpServletResponse response = new MockHttpServletResponse();
+            filter.doFilter(request(route[0], route[1]), response,
+                    (incoming, outgoing) -> continued.set(true));
+            assertTrue(continued.get(), route[0] + " " + route[1] + " should be allowed");
+            assertEquals(200, response.getStatus());
+        }
+
+        MockHttpServletResponse blocked = new MockHttpServletResponse();
+        AtomicBoolean continued = new AtomicBoolean();
+        filter.doFilter(request("GET", "/api/business/products"), blocked,
+                (incoming, outgoing) -> continued.set(true));
+        assertEquals(401, blocked.getStatus());
+        assertTrue(!continued.get());
+        assertTrue(blocked.getContentAsString().contains("MFA_REAUTHENTICATION_REQUIRED"));
     }
 
     @Test
@@ -128,6 +178,18 @@ class MfaEnrollmentEnforcementFilterTest {
 
         assertTrue(continued.get());
         verify(mfaService, never()).accessState(userId);
+    }
+
+    @Test
+    void bindsSecondFactorVerificationToOneSessionAndAccount() {
+        assertFalse(MfaSessionVerification.isVerified(null, userId));
+        MfaSessionVerification.markVerified(null, userId);
+
+        var session = request("GET", "/api/auth/me").getSession(true);
+        MfaSessionVerification.markVerified(session, userId);
+
+        assertTrue(MfaSessionVerification.isVerified(session, userId));
+        assertFalse(MfaSessionVerification.isVerified(session, UUID.randomUUID()));
     }
 
     private void authenticateStaff() {

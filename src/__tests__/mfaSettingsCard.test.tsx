@@ -128,4 +128,42 @@ describe('MfaSettingsCard', () => {
     expect(await screen.findByText('Obligatoria · pendiente de activación')).toBeTruthy();
     expect(screen.getByRole('alert').textContent).toContain('solo podrás configurar MFA o cerrar sesión');
   });
+
+  it('keeps recovery codes visible and warns if refreshing the session fails after enrollment', async () => {
+    mfa.status.mockResolvedValueOnce(disabled).mockResolvedValueOnce(enabled);
+    app.refreshCurrentUser.mockRejectedValueOnce(new Error('Sesión no disponible.'));
+    render(<MfaSettingsCard />);
+
+    fireEvent.change(await screen.findByLabelText('Contraseña actual'), { target: { value: 'password' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Configurar verificación en dos pasos' }));
+    fireEvent.change(await screen.findByLabelText('Código de seis dígitos'), { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Activar verificación' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('MFA quedó activa, pero no se actualizó el estado de la sesión.');
+    expect(screen.getByText('AAAAA-BBBBB-CCCCC-DDDDD')).toBeTruthy();
+  });
+
+  it('warns if the session refresh fails after MFA is disabled', async () => {
+    mfa.status.mockResolvedValueOnce(enabled).mockResolvedValueOnce(disabled);
+    app.refreshCurrentUser.mockRejectedValueOnce(new Error('Sesión no disponible.'));
+    render(<MfaSettingsCard />);
+
+    const passwords = await screen.findAllByLabelText('Contraseña actual');
+    const codes = screen.getAllByLabelText('Código de autenticación o recuperación');
+    fireEvent.change(passwords[1], { target: { value: 'password' } });
+    fireEvent.change(codes[1], { target: { value: '123456' } });
+    fireEvent.click(screen.getByRole('button', { name: 'Desactivar verificación' }));
+
+    expect((await screen.findByRole('alert')).textContent).toContain('MFA se desactivó, pero no se actualizó el estado de la sesión.');
+    expect(await screen.findByText('No está activa')).toBeTruthy();
+  });
+
+  it('labels optional MFA as active without implying it is mandatory', async () => {
+    mfa.status.mockResolvedValue({ ...enabled, required: false });
+    render(<MfaSettingsCard />);
+
+    const activeState = await screen.findByText(/Activa/);
+    expect(activeState.textContent).toContain('10 códigos de recuperación disponibles');
+    expect(activeState.textContent).not.toContain('obligatoria');
+  });
 });

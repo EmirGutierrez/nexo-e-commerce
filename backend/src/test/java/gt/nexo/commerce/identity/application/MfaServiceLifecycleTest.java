@@ -64,6 +64,34 @@ class MfaServiceLifecycleTest {
     }
 
     @Test
+    void distinguishesPendingEnrollmentFromAnAccountThatHasNotStartedEnrollment() {
+        stubAccessState(true, true, false);
+        when(jdbc.queryForObject(contains("COUNT(*)"), eq(Integer.class), any(Object[].class))).thenReturn(0);
+        stubEnrollmentPending(true, true);
+
+        assertTrue(service.status(USER_ID).enrollmentPending());
+
+        stubEnrollmentPending(false, false);
+        assertFalse(service.status(USER_ID).enrollmentPending());
+    }
+
+    @Test
+    void treatsAnUnknownAccountAsInactiveAndRequiresMfaByDefault() {
+        doAnswer(invocation -> {
+            ResultSet result = mock(ResultSet.class);
+            when(result.next()).thenReturn(false);
+            ResultSetExtractor<?> extractor = invocation.getArgument(1);
+            return extractor.extractData(result);
+        }).when(jdbc).query(contains("AS account_active"), any(ResultSetExtractor.class), any(Object[].class));
+
+        MfaService.MfaAccessState state = service.accessState(USER_ID);
+
+        assertFalse(state.accountActive());
+        assertTrue(state.required());
+        assertFalse(state.enabled());
+    }
+
+    @Test
     void requiresMfaForStaffRoles() {
         stubAccessState(true, true, false);
         assertTrue(service.isRequired(USER_ID));
@@ -326,6 +354,16 @@ class MfaServiceLifecycleTest {
             ResultSetExtractor<?> extractor = invocation.getArgument(1);
             return extractor.extractData(result);
         }).when(jdbc).query(contains("FOR UPDATE"), any(ResultSetExtractor.class), any(Object[].class));
+    }
+
+    private void stubEnrollmentPending(boolean found, boolean pending) {
+        doAnswer(invocation -> {
+            ResultSet result = mock(ResultSet.class);
+            when(result.next()).thenReturn(found);
+            when(result.getBoolean(1)).thenReturn(pending);
+            ResultSetExtractor<?> extractor = invocation.getArgument(1);
+            return extractor.extractData(result);
+        }).when(jdbc).query(contains("SELECT enabled_at IS NULL"), any(ResultSetExtractor.class), any(Object[].class));
     }
 
     private void stubMfaRecord(byte[] ciphertext, Timestamp enabledAt, long lastUsedStep, boolean found) {
