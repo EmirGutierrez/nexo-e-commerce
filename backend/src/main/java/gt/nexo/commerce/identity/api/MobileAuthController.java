@@ -36,7 +36,7 @@ public class MobileAuthController {
     }
 
     @PostMapping("/login")
-    @Operation(summary = "Inicia una sesión móvil y devuelve un token opaco de duración limitada.")
+    @Operation(summary = "Inicia una sesión móvil y devuelve un JWT firmado de duración limitada.")
     public MobileLoginResponse login(@Valid @RequestBody LoginRequest request) {
         return authenticationService.login(request);
     }

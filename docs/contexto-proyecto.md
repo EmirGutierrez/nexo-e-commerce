@@ -14,9 +14,9 @@ El producto evolucionó desde una interfaz frontend organizada por dominios haci
 flowchart LR
     Browser["Navegador"] -->|Páginas y /api/*| Next["Next.js App Router<br/>UI + BFF"]
     Next -->|REST, cookies de sesión y CSRF| Spring["Spring Boot<br/>monolito modular"]
-    Mobile["Cliente móvil compatible"] -->|REST + Bearer token| Spring
+    Mobile["Cliente móvil compatible"] -->|REST + JWT Bearer| Spring
     Spring -->|JPA / JDBC| PG[("PostgreSQL")]
-Flyway["Flyway<br/>migraciones V1–V24"] --> PG
+    Flyway["Flyway<br/>migraciones V1–V25"] --> PG
     Browser -->|carrito y vistos recientes| Local["localStorage del navegador"]
 ```
 
@@ -41,7 +41,7 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 ### Datos y migraciones
 
 - PostgreSQL es la fuente compartida para usuarios, roles, catálogo, inventario, pedidos, ventas y demás registros del negocio.
-- Las migraciones viven en `backend/src/main/resources/db/migration`. El backend ejecuta las pendientes al arrancar. V19 incorpora el permiso `inventory:delete` para administradores y superadministradores. V20 crea el catálogo persistente de ubicaciones; V24 guarda hashes y vencimientos de enlaces de recuperación de contraseña.
+- Las migraciones viven en `backend/src/main/resources/db/migration`. El repositorio contiene las versiones V1 a V25; el backend ejecuta las pendientes al arrancar. V19 incorpora el permiso `inventory:delete` para administradores y superadministradores. V20 crea el catálogo persistente de ubicaciones y recupera los valores existentes. V24 guarda hashes y vencimientos de enlaces de recuperación de contraseña; V25 invalida las sesiones móviles antiguas para que vuelvan a iniciar sesión con JWT.
 - Las imágenes de producto pueden almacenarse en PostgreSQL; el servicio limita las imágenes cargadas como datos embebidos a 140 KB.
 - El equipo puede usar una base PostgreSQL compartida en Neon con el perfil Spring `team`. La configuración privada va en `backend/.env.team`, excluido por Git. Este documento no incluye la URL del servidor ni credenciales.
 - `backend/README.md` explica la inicialización local y compartida, los perfiles y las variables requeridas. Coordina los arranques contra la base compartida: iniciar Spring puede aplicar migraciones pendientes.
@@ -77,11 +77,11 @@ Los controladores exponen la API; los servicios de aplicación aplican reglas de
 
 - Spring es la autoridad para identidad, sesión y permisos administrativos.
 - La sesión web se persiste con Spring Session JDBC. La cookie se configura como `HttpOnly` y `SameSite=Lax`; `Secure` depende del perfil y el entorno.
-- Las escrituras web requieren token CSRF. El BFF de Next.js reenvía el token y la cookie a Spring.
+- Las escrituras web con sesión cookie requieren token CSRF. El BFF de Next.js reenvía el token y la cookie a Spring. Las rutas móviles y sus recursos de negocio evitan CSRF únicamente después de validar el JWT Bearer.
 - El catálogo público usa una lista explícita de campos y no expone costo ni ubicación interna. Los envíos de pedido y cotización tienen límites temporales por IP.
 - Next genera una CSP con nonce por respuesta HTML; Caddy añade CSP restrictiva a la API y los encabezados HSTS, `Referrer-Policy`, `Permissions-Policy`, `X-Frame-Options` y `X-Content-Type-Options`.
 - Caddy y el BFF limitan solicitudes a 2 MB; Spring aplica límites por IP a los endpoints públicos costosos. Las sesiones web tienen 30 minutos de inactividad y 8 horas de vida máxima.
-- Las rutas móviles usan tokens Bearer opacos; el backend conserva el hash del token y carga los permisos vigentes al autenticar la solicitud.
+- Las rutas móviles usan JWT Bearer firmados con HS256. La clave de 32 bytes se configura fuera del repositorio; el backend verifica firma, emisor, audiencia, fechas y claims. PostgreSQL conserva solo el hash del JWT para permitir revocación inmediata, y Spring carga los permisos vigentes en cada solicitud.
 - En producción, usa HTTPS entre navegador, Next.js y Spring; mantén el backend en una red privada y OpenAPI desactivado salvo que se necesite expresamente.
 - No guardes contraseñas, tokens, URL con credenciales ni archivos `.env` en Git. Los archivos `.env.*` están ignorados.
 

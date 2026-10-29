@@ -22,7 +22,7 @@ import org.springframework.context.annotation.Configuration;
         name = "bearerAuth",
         type = SecuritySchemeType.HTTP,
         scheme = "bearer",
-        bearerFormat = "Opaque access token",
-        description = "Token móvil de vida limitada, revocable en el servidor.")
+        bearerFormat = "JWT",
+        description = "JWT móvil de vida limitada, firmado por el backend y revocable en el servidor.")
 public class OpenApiConfiguration {
 }

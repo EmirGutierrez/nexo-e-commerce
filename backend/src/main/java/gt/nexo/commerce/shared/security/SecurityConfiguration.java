@@ -1,6 +1,8 @@
 package gt.nexo.commerce.shared.security;
 
 import gt.nexo.commerce.shared.errors.ApiError;
+import gt.nexo.commerce.identity.application.MobileTokenAuthenticationDetails;
+import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 import java.time.Instant;
@@ -19,12 +21,13 @@ import org.springframework.security.config.annotation.method.configuration.Enabl
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.core.AuthenticationException;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.DelegatingPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.AuthenticationEntryPoint;
-import org.springframework.security.web.authentication.logout.LogoutFilter;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.access.intercept.AuthorizationFilter;
 import org.springframework.security.web.access.AccessDeniedHandler;
@@ -34,6 +37,7 @@ import org.springframework.security.web.authentication.session.SessionAuthentica
 import org.springframework.security.web.csrf.CsrfAuthenticationStrategy;
 import org.springframework.security.web.csrf.CsrfTokenRepository;
 import org.springframework.security.web.csrf.HttpSessionCsrfTokenRepository;
+import org.springframework.security.web.csrf.CsrfFilter;
 import org.springframework.security.web.context.HttpSessionSecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextRepository;
 import org.springframework.security.web.context.SecurityContextHolderFilter;
@@ -118,11 +122,7 @@ public class SecurityConfiguration {
         RequestMatcher publicPasswordRecovery = request -> "POST".equals(request.getMethod())
                 && ("/api/auth/password-reset/request".equals(request.getServletPath())
                 || "/api/auth/password-reset/complete".equals(request.getServletPath()));
-        RequestMatcher mobileBearerRequest = request -> {
-            String authorization = request.getHeader("Authorization");
-            return request.getServletPath().startsWith("/api/mobile/")
-                    && authorization != null && authorization.regionMatches(true, 0, "Bearer ", 0, 7);
-        };
+        RequestMatcher mobileBearerRequest = SecurityConfiguration::isAuthenticatedMobileRequest;
 
         return http
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
@@ -147,11 +147,26 @@ public class SecurityConfiguration {
                 .logout(AbstractHttpConfigurer::disable)
                 .httpBasic(AbstractHttpConfigurer::disable)
                 .formLogin(AbstractHttpConfigurer::disable)
-                .addFilterAfter(new MobileBearerTokenFilter(mobileSessionService), LogoutFilter.class)
+                .addFilterBefore(new MobileBearerTokenFilter(mobileSessionService, authenticationEntryPoint), CsrfFilter.class)
                 .addFilterAfter(new AuthenticatedSessionLifetimeFilter(objectMapper, absoluteSessionLifetime), SecurityContextHolderFilter.class)
                 .addFilterBefore(new AnonymousRequestRateLimitFilter(objectMapper), AuthorizationFilter.class)
                 .addFilterBefore(new MfaEnrollmentEnforcementFilter(objectMapper, mfaService), AuthorizationFilter.class)
                 .build();
+    }
+
+    private static boolean isAuthenticatedMobileRequest(HttpServletRequest request) {
+        String authorization = request.getHeader("Authorization");
+        if (authorization == null || !authorization.regionMatches(true, 0, "Bearer ", 0, 7)) return false;
+
+        String path = request.getServletPath();
+        boolean mobileResource = List.of("/api/mobile", "/api/business", "/api/users", "/api/roles").stream()
+                .anyMatch(prefix -> path.equals(prefix) || path.startsWith(prefix + "/"));
+        if (!mobileResource) return false;
+
+        Authentication authentication = SecurityContextHolder.getContext().getAuthentication();
+        return authentication != null
+                && authentication.isAuthenticated()
+                && authentication.getDetails() instanceof MobileTokenAuthenticationDetails;
     }
 
     @Bean
