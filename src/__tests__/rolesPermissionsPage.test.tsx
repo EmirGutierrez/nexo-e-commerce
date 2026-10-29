@@ -32,6 +32,25 @@ afterEach(() => {
 });
 
 describe('módulos asignados por rol', () => {
+  it('mantiene la matriz bloqueada hasta completar la carga inicial y conserva el borrador', async () => {
+    let resolveRoles!: (value: typeof roles) => void;
+    vi.spyOn(roleService, 'list').mockImplementation(() => new Promise((resolve) => { resolveRoles = resolve; }));
+    render(<RolesPermissionsPage />);
+
+    const selectAll = screen.getByRole('checkbox', { name: 'Seleccionar todos los permisos de Ingresos y egresos' }) as HTMLInputElement;
+    const saveButton = screen.getByRole('button', { name: 'Guardar permisos' }) as HTMLButtonElement;
+    expect(selectAll.disabled).toBe(true);
+    expect(saveButton.disabled).toBe(true);
+
+    resolveRoles(roles);
+    await screen.findByRole('heading', { name: 'Administrador' });
+    await waitFor(() => expect(selectAll.disabled).toBe(false));
+
+    fireEvent.click(selectAll);
+    await waitFor(() => expect(saveButton.disabled).toBe(false));
+    expect(screen.getByText(/Cambios sin guardar:/)).toBeTruthy();
+  });
+
   it('muestra los módulos que devuelve el backend para cada rol', async () => {
     render(<RolesPermissionsPage />);
 
