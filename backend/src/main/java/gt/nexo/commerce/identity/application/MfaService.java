@@ -54,12 +54,42 @@ public class MfaService {
 
     @Transactional(readOnly = true)
     public MfaStatusResponse status(UUID userId) {
-        Optional<Boolean> enabled = jdbc.query(
-                "SELECT enabled_at IS NOT NULL FROM app_user_mfa WHERE user_id = ?",
-                rs -> rs.next() ? Optional.of(rs.getBoolean(1)) : Optional.empty(), userId);
+        MfaAccessState access = accessState(userId);
         int remaining = jdbc.queryForObject(
                 "SELECT COUNT(*) FROM app_user_mfa_recovery_code WHERE user_id = ?", Integer.class, userId);
-        return new MfaStatusResponse(enabled.orElse(false), enabled.isPresent() && !enabled.get(), remaining);
+        return new MfaStatusResponse(access.required(), access.enabled(),
+                access.enabled() ? false : enrollmentPending(userId), remaining);
+    }
+
+    /** MFA is mandatory for every staff account; customer accounts remain optional. */
+    @Transactional(readOnly = true)
+    public boolean isRequired(UUID userId) {
+        return accessState(userId).required();
+    }
+
+    @Transactional(readOnly = true)
+    public MfaAccessState accessState(UUID userId) {
+        return jdbc.query("""
+                SELECT u.status = 'ACTIVE' AS account_active,
+                       r.code <> 'customer' AS mfa_required,
+                       m.enabled_at IS NOT NULL AS mfa_enabled
+                FROM app_user u
+                JOIN roles r ON r.code = u.role_code
+                LEFT JOIN app_user_mfa m ON m.user_id = u.id
+                WHERE u.id = ?
+                """, rs -> rs.next()
+                        ? new MfaAccessState(rs.getBoolean("account_active"), rs.getBoolean("mfa_required"), rs.getBoolean("mfa_enabled"))
+                        : new MfaAccessState(false, true, false), userId);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isMobileTokenVerified(UUID userId, String tokenHash) {
+        return jdbc.query("""
+                SELECT m.enabled_at IS NULL OR t.created_at >= m.enabled_at
+                FROM mobile_access_token t
+                LEFT JOIN app_user_mfa m ON m.user_id = t.user_id
+                WHERE t.user_id = ? AND t.token_hash = ?
+                """, rs -> rs.next() && rs.getBoolean(1), userId, tokenHash);
     }
 
     @Transactional
@@ -115,9 +145,9 @@ public class MfaService {
     }
 
     @Transactional
-    public void verifyLogin(UUID userId, String code) {
+    public boolean verifyLogin(UUID userId, String code) {
         Optional<MfaRecord> optionalRecord = lockRecord(userId);
-        if (optionalRecord.isEmpty() || optionalRecord.get().enabledAt() == null) return;
+        if (optionalRecord.isEmpty() || optionalRecord.get().enabledAt() == null) return false;
         MfaRecord record = optionalRecord.get();
         if (code == null || code.isBlank()) throw MfaChallengeException.required();
 
@@ -130,7 +160,7 @@ public class MfaService {
             for (RecoveryCode recovery : recoveryCodes) {
                 if (MessageDigest.isEqual(candidateHash, HexFormat.of().parseHex(recovery.hash()))) {
                     jdbc.update("DELETE FROM app_user_mfa_recovery_code WHERE id = ?", recovery.id());
-                    return;
+                    return true;
                 }
             }
         }
@@ -139,6 +169,7 @@ public class MfaService {
                 Instant.now().getEpochSecond(), record.lastUsedStep());
         if (matchedStep < 0) throw MfaChallengeException.invalid();
         jdbc.update("UPDATE app_user_mfa SET last_used_step = ?, updated_at = NOW() WHERE user_id = ?", matchedStep, userId);
+        return true;
     }
 
     @Transactional
@@ -362,6 +393,20 @@ public class MfaService {
         @Override
         public String toString() {
             return "MfaRecord[ciphertext=<redacted>, enabledAt=" + enabledAt + ", lastUsedStep=" + lastUsedStep + "]";
+        }
+    }
+
+    private boolean enrollmentPending(UUID userId) {
+        return jdbc.query("""
+                SELECT enabled_at IS NULL
+                FROM app_user_mfa
+                WHERE user_id = ?
+                """, rs -> rs.next() && rs.getBoolean(1), userId);
+    }
+
+    public record MfaAccessState(boolean accountActive, boolean required, boolean enabled) {
+        public boolean enrollmentRequired() {
+            return !accountActive || required && !enabled;
         }
     }
     private record RecoveryCode(UUID id, String hash) { }

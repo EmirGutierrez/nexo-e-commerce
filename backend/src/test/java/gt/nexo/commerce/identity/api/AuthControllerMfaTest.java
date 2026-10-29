@@ -17,9 +17,11 @@ import gt.nexo.commerce.identity.application.MfaService;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
 import gt.nexo.commerce.identity.application.TeamInvitationService;
 import gt.nexo.commerce.identity.application.UserAccountService;
+import gt.nexo.commerce.shared.security.MfaSessionVerification;
 import java.util.List;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
+import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.security.core.Authentication;
 import org.springframework.security.web.authentication.logout.SecurityContextLogoutHandler;
 
@@ -46,11 +48,15 @@ class AuthControllerMfaTest {
         when(mfa.beginEnrollment(USER_ID, EMAIL, "password")).thenReturn(enrollment);
         when(mfa.completeEnrollment(USER_ID, "123456")).thenReturn(recoveryCodes);
         when(mfa.rotateRecoveryCodes(USER_ID, "password", "654321")).thenReturn(recoveryCodes);
+        MockHttpServletRequest servletRequest = new MockHttpServletRequest();
+        servletRequest.getSession(true);
 
         assertEquals(status, controller.mfaStatus(authentication));
         assertEquals(enrollment, controller.beginMfaEnrollment(authentication, new MfaEnrollmentStartRequest("password")));
         assertEquals(new MfaRecoveryCodesResponse(recoveryCodes),
-                controller.completeMfaEnrollment(authentication, new MfaCodeRequest("123456")));
+                controller.completeMfaEnrollment(authentication, new MfaCodeRequest("123456"), servletRequest));
+        assertEquals(USER_ID.toString(), servletRequest.getSession(false)
+                .getAttribute(MfaSessionVerification.VERIFIED_USER_ATTRIBUTE));
         assertEquals(new MfaRecoveryCodesResponse(recoveryCodes), controller.rotateMfaRecoveryCodes(authentication,
                 new MfaDisableRequest("password", "654321")));
         controller.disableMfa(authentication, new MfaDisableRequest("password", "123456"));

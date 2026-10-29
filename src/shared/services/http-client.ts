@@ -18,6 +18,9 @@ export class ApiError extends Error {
   }
 }
 
+export const MFA_REAUTHENTICATION_REQUIRED_EVENT = 'nexo:mfa-reauthentication-required';
+export const MFA_ENROLLMENT_REQUIRED_EVENT = 'nexo:mfa-enrollment-required';
+
 let csrfToken: string | null = null;
 
 const TAB_SESSION_STORAGE_KEY = 'nexo.auth.tab-session.v1';
@@ -176,6 +179,12 @@ async function readResponse<T>(response: Response): Promise<T> {
     const body = payload as { message?: unknown; code?: unknown } | null;
     const message = typeof body?.message === 'string' ? body.message : `La solicitud falló (${response.status}).`;
     const code = typeof body?.code === 'string' ? body.code : undefined;
+    if (code === 'MFA_REAUTHENTICATION_REQUIRED' && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(MFA_REAUTHENTICATION_REQUIRED_EVENT));
+    }
+    if (code === 'MFA_ENROLLMENT_REQUIRED' && typeof window !== 'undefined') {
+      window.dispatchEvent(new Event(MFA_ENROLLMENT_REQUIRED_EVENT));
+    }
     throw new ApiError(message, response.status, code);
   }
 

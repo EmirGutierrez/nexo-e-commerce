@@ -7,7 +7,7 @@ import { ApiError } from '../shared/services/http-client';
 
 const app = vi.hoisted(() => ({
   login: vi.fn(),
-  user: null as null | { id: string; role: string; permissions?: string[] },
+  user: null as null | { id: string; role: string; permissions?: string[]; mfaSetupRequired?: boolean },
   userType: null as null | 'admin' | 'customer',
   role: null as null | string,
   authLoading: false,
@@ -65,6 +65,24 @@ describe('acceso público y administrativo', () => {
     render(<Access />);
     expect(screen.getByRole('status').textContent).toContain('Comprobando acceso');
     await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/admin/sales'));
+  });
+
+  it('envía una sesión ya restaurada que necesita MFA a su configuración obligatoria', async () => {
+    app.user = { id: 'staff-1', role: 'sales', mfaSetupRequired: true };
+    app.userType = 'admin';
+    app.role = 'sales';
+    render(<Access />);
+
+    await waitFor(() => expect(router.replace).toHaveBeenCalledWith('/admin/profile?mfa=required'));
+  });
+
+  it('envía al perfil después de iniciar sesión cuando MFA es obligatorio', async () => {
+    app.login.mockResolvedValueOnce({ kind: 'admin', user: { role: 'sales', permissions: ['sales:view'], mfaSetupRequired: true } });
+    render(<AdminLogin />);
+    fillLogin();
+    submitLogin();
+
+    await waitFor(() => expect(router.push).toHaveBeenCalledWith('/admin/profile?mfa=required'));
   });
 
   it('conserva un reto MFA, permite ingresar el código y accede con éxito', async () => {

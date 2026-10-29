@@ -43,6 +43,7 @@ import org.springframework.web.cors.CorsConfigurationSource;
 import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
 import tools.jackson.databind.ObjectMapper;
 import gt.nexo.commerce.identity.application.MobileSessionService;
+import gt.nexo.commerce.identity.application.MfaService;
 import org.springframework.security.web.util.matcher.RequestMatcher;
 
 @Configuration(proxyBeanMethods = false)
@@ -107,6 +108,7 @@ public class SecurityConfiguration {
             CsrfTokenRepository csrfTokenRepository,
             SecurityContextRepository securityContextRepository,
             MobileSessionService mobileSessionService,
+            MfaService mfaService,
             @Value("${nexo.web.session.absolute-timeout:8h}") Duration absoluteSessionLifetime,
             AuthenticationEntryPoint authenticationEntryPoint,
             AccessDeniedHandler accessDeniedHandler,
@@ -148,6 +150,7 @@ public class SecurityConfiguration {
                 .addFilterAfter(new MobileBearerTokenFilter(mobileSessionService), LogoutFilter.class)
                 .addFilterAfter(new AuthenticatedSessionLifetimeFilter(objectMapper, absoluteSessionLifetime), SecurityContextHolderFilter.class)
                 .addFilterBefore(new AnonymousRequestRateLimitFilter(objectMapper), AuthorizationFilter.class)
+                .addFilterBefore(new MfaEnrollmentEnforcementFilter(objectMapper, mfaService), AuthorizationFilter.class)
                 .build();
     }
 

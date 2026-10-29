@@ -19,6 +19,7 @@ import gt.nexo.commerce.identity.application.CustomerRegistrationService;
 import gt.nexo.commerce.identity.application.NexoUserPrincipal;
 import gt.nexo.commerce.identity.application.UserAccountService;
 import gt.nexo.commerce.identity.application.MfaService;
+import gt.nexo.commerce.shared.security.MfaSessionVerification;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.security.SecurityRequirement;
 import jakarta.servlet.http.HttpServletRequest;
@@ -122,9 +123,12 @@ public class AuthController {
     @SecurityRequirement(name = "sessionCookie")
     @Operation(summary = "Confirma la configuración MFA y devuelve códigos de recuperación de un solo uso.")
     public MfaRecoveryCodesResponse completeMfaEnrollment(Authentication authentication,
-                                                            @Valid @RequestBody MfaCodeRequest request) {
+                                                            @Valid @RequestBody MfaCodeRequest request,
+                                                            HttpServletRequest servletRequest) {
         NexoUserPrincipal principal = (NexoUserPrincipal) authentication.getPrincipal();
-        return new MfaRecoveryCodesResponse(mfaService.completeEnrollment(principal.getId(), request.code()));
+        var recoveryCodes = mfaService.completeEnrollment(principal.getId(), request.code());
+        MfaSessionVerification.markVerified(servletRequest.getSession(false), principal.getId());
+        return new MfaRecoveryCodesResponse(recoveryCodes);
     }
 
     @PostMapping("/mfa/recovery-codes/rotate")
