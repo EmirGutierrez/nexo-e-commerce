@@ -1497,6 +1497,15 @@ select:disabled {
 .mfa-enrollment-key strong,.mfa-recovery-panel > strong { color:var(--ink); font-size:11px; }
 .mfa-enrollment-key code,.mfa-otpauth-details code { overflow-wrap:anywhere; color:var(--navy); font:700 13px ui-monospace,SFMono-Regular,Consolas,monospace; letter-spacing:.08em; }
 .mfa-enrollment-key small { color:var(--muted); font-size:10px; line-height:1.5; }
+.mfa-qr-panel { display:grid; grid-template-columns:auto minmax(0,1fr); align-items:center; gap:16px; max-width:640px; padding:15px; border:1px solid var(--border); border-radius:10px; background:#fbfcfe; }
+.mfa-qr-panel > svg { display:block; width:min(216px, 100%); height:auto; padding:8px; border-radius:8px; background:#fff; }
+.mfa-qr-panel > div { display:grid; gap:7px; }
+.mfa-qr-panel strong { color:var(--ink); font-size:12px; }
+.mfa-qr-panel p,.mfa-qr-panel small { margin:0; color:var(--muted); font-size:10px; line-height:1.55; }
+.mfa-qr-panel small { color:#a95656; }
+.mfa-manual-key { display:grid; gap:9px; color:var(--muted); font-size:10px; }
+.mfa-manual-key summary { width:max-content; max-width:100%; cursor:pointer; color:var(--navy); font-weight:700; }
+.mfa-status-unavailable { display:grid; justify-items:start; gap:10px; }
 .mfa-otpauth-details { display:grid; gap:8px; color:var(--muted); font-size:10px; }
 .mfa-otpauth-details summary { cursor:pointer; color:var(--navy); font-weight:700; }
 .mfa-otpauth-details code { display:block; padding:10px; border-radius:8px; background:#f3f6fa; font-size:9px; letter-spacing:normal; }
@@ -1507,7 +1516,7 @@ select:disabled {
 .mfa-settings-message,.mfa-settings-error { margin:0; font-size:10px; line-height:1.5; }
 .mfa-settings-message { color:#47724c; }.mfa-settings-error { color:#a95656; }
 .mfa-login-code { margin-top:15px; }
-@media(max-width:700px) { .mfa-settings-card { padding:18px; }.mfa-recovery-panel ul { grid-template-columns:1fr; } }
+@media(max-width:700px) { .mfa-settings-card { padding:18px; }.mfa-recovery-panel ul { grid-template-columns:1fr; }.mfa-qr-panel { grid-template-columns:1fr; justify-items:start; }.mfa-qr-panel > svg { width:min(216px, 100%); } }
 @media(max-width:900px) { .customer-order-detail-grid { grid-template-columns:1fr; }.customer-order-summary-column { grid-template-columns:repeat(2,minmax(0,1fr)); } }
 @media(max-width:700px) {
   .customer-order-detail { padding-top:30px; }
