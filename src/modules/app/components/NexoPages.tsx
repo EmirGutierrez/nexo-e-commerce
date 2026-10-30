@@ -86,7 +86,7 @@ export function Landing() {
     <main className="landing-main">
       <section className="landing-copy">
         <div className="eyebrow"><Sparkles size={15} /> Catálogo y pedidos en un solo lugar</div>
-        <h1>Compra mejor.<br /><em>Vive en NEXO.</em></h1>
+        <h1>Compra mejor.<br /><em>Vive en NEXO COMMERCE.</em></h1>
         <p>Explora productos, consulta su disponibilidad y revisa el total en quetzales antes de confirmar tu pedido.</p>
         <div className="landing-actions">
           <Link href="/store" className="button button-primary">Explorar tienda <ArrowRight size={17} /></Link>
